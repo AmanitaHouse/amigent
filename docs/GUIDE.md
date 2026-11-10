@@ -197,7 +197,15 @@ starts the old one again.
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions; after a crash the guru in words and what happened before |
 | `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
 | `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code |
-| `amiga_emulator` | for an Amiga in WinUAE 6.1: pause, registers, memory, a whole-machine save before installing |
+| `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack; change a priority, send Ctrl-C to F |
+| `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
+| `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
+| `amiga_gurus` | guru codes in words, the last one and those MCP logged |
+| `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
+| `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |
+| `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga |
+| `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
+| `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
@@ -251,6 +259,17 @@ Amiga's entry in `amigas.json`, and WinUAE started with
 even when the Amiga hangs, and saves or restores the whole machine. Then
 `amiga_install_begin` also saves a state file, an undo of everything but the
 disk changes.
+
+Debugging a program: `amiga_create_project` writes `main.c` and a vbcc build
+script, `amiga_build` compiles it on the Amiga, `amiga_run` runs it with its
+kprintf and Enforcer output. Addresses in that output get names: a hit at
+`PC: 0A12B4C0` says `myprog hunk 0 +$3D4`. `amiga_trace("set", address)` puts a
+tracepoint there: when the program passes, its registers and the top of its
+stack are kept and it runs on. `amiga_state` before and after a run lists what
+it left: memory, open libraries, tasks, ports. `amiga_tasks` shows how much
+stack each task uses, with a warning near the end. `amiga_screen_diff`
+compares the screen with a saved picture, for tests of how a program looks.
+`amiga_everywhere` runs one command on all known Amigas and compares.
 
 ## Remote desktop
 
@@ -391,9 +410,14 @@ settings and menu entries; see
 | `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/` |
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
 | `AMIGENT_GDB` | | `host:port` of WinUAE's GDB server, when not set as `"gdb"` in `amigas.json` |
+| `AMIGENT_WINUAE` | | WinUAE's program, when not set as `"winuae"` in `amigas.json` |
 
-On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
-`TLSONLY` from the command line or, started from Workbench, from the tool types
+An Amiga's entry in `amigas.json` can also hold `"gdb"`, `"winuae"`,
+`"winuae_config"` (its `.uae` file, for `amiga_emulator("launch")`) and
+`"devpack"` (the folder with vbcc and the NDK, for `amiga_build`).
+
+On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET`,
+`TLSONLY` and `ALLOWPOKE` (writing memory) from the command line or, started from Workbench, from the tool types
 of its icon. It answers ARexx on the port `AMIGENT` (`STATUS`, `CLIENTS`,
 `VERSION`, `PAUSE`, `RESUME`, `ACTIVATEWINDOW`, `TYPE`, `KEY`, `BUSY`, `HELP`, `QUIT`;
 see [the protocol](PROTOCOL.md#arexx)), and `amigent-status` shows the same in a small

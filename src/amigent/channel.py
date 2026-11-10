@@ -26,7 +26,7 @@ CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
-LOADED, PEEK = 38, 39  # protocol 6: libraries, devices, programs' hunks; reading memory
+LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -603,6 +603,33 @@ class AmigaChannel(VolumeFlush):
             raise AmigaError(f"between 1 and {PEEK_MAX} bytes at a time")
         return self._one(Request(PEEK, f"{address & 0xFFFFFFFF:08x}", 0, 0, (size >> 16) & 0xFFFF,
                                  size & 0xFFFF, read=_read_blob))
+
+    def tasks(self) -> list[str]:
+        """TASKS lines: T address name command type pri state stack_size stack_used sigwait sigrecvd."""
+        self._need6("listing tasks")
+        return self._text(TASKS)
+
+    def task_control(self, address: int, op: int, value: int) -> None:
+        """op 1: priority value; op 2: break signals value (1 C, 2 D, 4 E, 8 F)."""
+        self._need6("changing a task")
+        self._one(Request(TASKCTL, f"{address & 0xFFFFFFFF:08x}", op, value & 0xFFFF))
+
+    def poke(self, address: int, data: bytes) -> None:
+        """Write memory; amigentd refuses unless started with ALLOWPOKE."""
+        self._need6("writing memory")
+        if not 0 < len(data) <= PEEK_MAX:
+            raise AmigaError(f"between 1 and {PEEK_MAX} bytes at a time")
+        self._one(Request(POKE, f"{address & 0xFFFFFFFF:08x}", 0, 0, len(data) >> 16,
+                          len(data) & 0xFFFF, data))
+
+    def trace(self, op: int, address: int = 0) -> list[str]:
+        """op 1 set a tracepoint, 2 list them (text), 3 clear all."""
+        self._need6("tracepoints")
+        path = f"{address & 0xFFFFFFFF:08x}" if op == 1 else ""
+        if op == 2:
+            return self._one(Request(TRACE, path, op, read=_read_text))
+        self._one(Request(TRACE, path, op))
+        return []
 
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""

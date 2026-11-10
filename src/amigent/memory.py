@@ -279,6 +279,14 @@ def resolve(text: str, namer: Namer) -> int:
     """'$0A12B4C0', '0x...', '12345', 'dos.library' (its base) or 'dos.library/Write'
     (where Write's code starts, from the jump table)."""
     t = text.strip()
+    m = re.fullmatch(r"(.+?) hunk (\d+) \+\$?([0-9a-fA-F]+)", t)
+    if m:  # as amiga_where and amiga_loaded write it
+        who, number, off = m.group(1).lower(), int(m.group(2)), int(m.group(3), 16)
+        for h in namer.loaded.hunks:
+            if h.number == number and who in ((h.command or "").lower(), h.task.lower(),
+                                              (h.command or "").lower().rsplit("/", 1)[-1].rsplit(":", 1)[-1]):
+                return h.start + off
+        raise ValueError(f"no running program {m.group(1)} with hunk {number}")
     if "/" in t:
         lib_name, fn = t.split("/", 1)
         lib = _find_lib(namer.loaded, lib_name)
@@ -308,3 +316,120 @@ def _find_lib(loaded: Loaded, name: str) -> Library:
         if lib.name.lower() in (n, n + ".library"):
             return lib
     raise ValueError(f"{name} is not loaded")
+
+
+@dataclass
+class TaskInfo:
+    address: int
+    name: str
+    command: str
+    kind: str
+    pri: int
+    state: str
+    stack_size: int
+    stack_used: int
+    sig_wait: int
+    sig_recvd: int
+
+    @property
+    def label(self) -> str:
+        return self.command or self.name
+
+
+def parse_tasks(lines: list[str]) -> list[TaskInfo]:
+    out = []
+    for line in lines:
+        p = line.split("\t")
+        if p[0] != "T" or len(p) < 11:
+            continue
+        try:
+            out.append(TaskInfo(int(p[1], 16), p[2], p[3], p[4], int(p[5]), p[6], int(p[7]),
+                                int(p[8]), int(p[9], 16), int(p[10], 16)))
+        except ValueError:
+            continue
+    return out
+
+
+def task_table(tasks: list[TaskInfo], name: str = "") -> str:
+    want = name.lower()
+    rows = []
+    for t in sorted(tasks, key=lambda t: (-t.pri, t.label.lower())):
+        if want and want not in t.label.lower() and want not in t.name.lower():
+            continue
+        full = t.stack_used * 100 // t.stack_size if t.stack_size else 0
+        warn = "  stack nearly full!" if full >= 85 else ""
+        rows.append(f"{t.address:08X}  {t.pri:>4}  {t.state:5}  {t.kind:7}  stack now {t.stack_used:>6}/"
+                    f"{t.stack_size:<6} ({full:>2} %)  {t.label}"
+                    + (f"  [{t.name}]" if t.command and t.name != t.command else "") + warn)
+    return "\n".join(rows) or "no such task"
+
+
+def find_task(tasks: list[TaskInfo], which: str) -> TaskInfo:
+    """By address ($.. or hex) or by name or command, which must be unique."""
+    w = which.strip()
+    try:
+        at = int(w.lstrip("$"), 16) if w.startswith(("$", "0x")) or re.fullmatch(r"[0-9a-fA-F]{8}", w) else None
+    except ValueError:
+        at = None
+    if at is not None:
+        for t in tasks:
+            if t.address == at:
+                return t
+        raise ValueError(f"no task at ${at:08X}")
+    hits = [t for t in tasks if w.lower() in (t.name.lower(), t.command.lower())
+            or t.command.lower().endswith(("/" + w.lower(), ":" + w.lower()))]
+    if not hits:
+        hits = [t for t in tasks if w.lower() in t.label.lower()]
+    if len(hits) != 1:
+        raise ValueError(f"{len(hits)} tasks match {which!r}: " + ", ".join(
+            f"{t.label} (${t.address:08X})" for t in hits[:8]) if hits else f"no task matches {which!r}")
+    return hits[0]
+
+
+TRACE_REGS = [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)] + ["sr", "pc"]
+
+
+def describe_traces(lines: list[str], namer: Namer | None = None) -> str:
+    out = []
+    for line in lines:
+        p = line.split("\t")
+        if len(p) < 3:
+            continue
+        at = int(p[1], 16)
+        where = namer.name(at, search_functions=False) if namer else ""
+        head = f"{p[0]:3} ${at:08X}" + (f" ({where})" if where else "") + f"  task ${int(p[2], 16):08X}"
+        if p[0] != "HIT" or len(p) < 4 + 18:
+            out.append(head + ("  waiting for the program to get there" if p[0] == "SET" else ""))
+            continue
+        regs = [int(x, 16) for x in p[4:22]]
+        stack = [int(x, 16) for x in p[22:30]]
+        out.append(head + f"  hit #{p[3]}")
+        out.append("  " + "  ".join(f"{n.upper()}={v:08X}" for n, v in zip(TRACE_REGS[:8], regs[:8])))
+        out.append("  " + "  ".join(f"{n.upper()}={v:08X}" for n, v in zip(TRACE_REGS[8:16], regs[8:16])))
+        out.append(f"  SR={regs[16] & 0xFFFF:04X}  stack: " + " ".join(f"{v:08X}" for v in stack))
+        if namer and stack:
+            back = namer.name(stack[0], search_functions=False)
+            if back:
+                out.append(f"  top of stack ${stack[0]:08X}: {back} (often the return address)")
+    return "\n".join(out) or "no tracepoints"
+
+
+# Addresses worth a name in debug output: Enforcer/MuForce "PC: 0A12B4C0", a
+# register dump's "PC=...", CacheCop's "by $0A12B4C0", a guru's "Task: ...".
+_HIT = re.compile(r"(?:\bPC[:=]\s*\$?|\bby \$|\bat \$)([0-9A-Fa-f]{8})\b")
+
+
+def annotate(text: str, namer: Namer) -> str:
+    """Debug output with '; name' after addresses of code that LOADED knows."""
+    cache: dict[int, str] = {}
+    out = []
+    for line in text.splitlines():
+        names = []
+        for m in _HIT.finditer(line):
+            at = int(m.group(1), 16)
+            if at not in cache:
+                cache[at] = namer.name(at)
+            if cache[at]:
+                names.append(cache[at])
+        out.append(line + (f"   ; {', '.join(dict.fromkeys(names))}" if names else ""))
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")

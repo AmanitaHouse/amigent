@@ -270,3 +270,120 @@ def test_no_emulator_set_says_how(monkeypatch):
 def test_windows_paths_for_winuae():
     assert server._host_path("/mnt/c/Users/x/state.uss") == "C:\\Users\\x\\state.uss"
     assert server._host_path("D:\\a.uss") == "D:\\a.uss"
+
+
+# ---- tasks, tracepoints, debug names
+
+
+TASK_LINES = [
+    "T\t0800933a\tinput.device\t\ttask\t20\twait\t4096\t198\t40000000\t00000000",
+    "T\t08dbe8c0\tBackground CLI\tRAM:trace-test\tprocess\t-5\twait\t4096\t3900\t00001000\t0",
+]
+
+
+def test_tasks_parse_find_and_warn():
+    tasks = memory.parse_tasks(TASK_LINES)
+    assert [t.label for t in tasks] == ["input.device", "RAM:trace-test"]
+    table = memory.task_table(tasks)
+    assert table.splitlines()[0].startswith("0800933A    20") and "stack nearly full!" in table
+    assert memory.find_task(tasks, "trace-test").address == 0x08DBE8C0
+    assert memory.find_task(tasks, "$0800933A").name == "input.device"
+    with pytest.raises(ValueError):
+        memory.find_task(tasks, "nothing")
+
+
+def test_trace_hits_are_shown_with_names():
+    regs = [f"{i:08x}" for i in range(16)] + ["00000000", "0a300010"]
+    stack = ["0a300020"] + ["0"] * 7
+    line = "\t".join(["HIT", "0a300010", "08dbe8c0", "1"] + regs + stack)
+    namer = memory.Namer(memory.parse(LOADED_LINES))
+    text = memory.describe_traces([line, "SET\t0a300030\t08dbe8c0"], namer)
+    assert "HIT $0A300010 (Work:C/dmatest hunk 0 +$C)" in text and "D1=00000001" in text
+    assert "top of stack $0A300020: Work:C/dmatest hunk 0 +$1C" in text
+    assert "waiting for the program to get there" in text
+
+
+def test_hunk_notation_resolves():
+    namer = memory.Namer(memory.parse(LOADED_LINES))
+    assert memory.resolve("Work:C/dmatest hunk 1 +$10", namer) == 0x0A400014
+    assert memory.resolve("dmatest hunk 0 +$3D4", namer) == 0x0A3003D8
+
+
+def test_debug_output_gets_names():
+    namer = memory.Namer(memory.parse(LOADED_LINES))
+    text = memory.annotate("WORD-WRITE to 00000000\nPC: 0A300010 USP: 0A000000\nnothing here\n", namer)
+    assert text.splitlines()[1].endswith("; Work:C/dmatest hunk 0 +$C")
+    assert text.splitlines()[2] == "nothing here"
+
+
+# ---- gurus, states, screens, chips, projects, fleets
+
+
+def test_guru_logs_are_explained():
+    extra = alerts.gurudat("00000004 Illegal instruction\n81000005 Corrupt memory list\n")
+    found = alerts.history("12-Nov-26 10:00 Guru 81000005.0C001234 task Foo\nno code here\n", extra)
+    assert len(found) == 1 and "memory list is corrupt" in found[0] and "MCP: Corrupt" in found[0]
+
+
+def test_states_compare_memory_libraries_and_tasks():
+    from amigent import states
+    loaded = memory.parse(LOADED_LINES)
+    before = states.take({"chip_free": "1000000", "fast_free": "5000000", "ports": "REXX"}, loaded,
+                         memory.parse_tasks(TASK_LINES[:1]))
+    loaded.libraries[1].open_count += 1
+    after = states.take({"chip_free": "990000", "fast_free": "5000000", "ports": "REXX|FOO"}, loaded,
+                        memory.parse_tasks(TASK_LINES))
+    text = states.compare(before, after)
+    assert "Chip RAM free: -9.8 KB" in text and "library dos.library: open count 30 -> 31" in text
+    assert "new task: RAM:trace-test" in text and "new port: FOO" in text
+    assert "nothing changed" in states.compare(before, before)
+
+
+def test_screen_diff_finds_the_changed_box():
+    from PIL import Image, ImageDraw
+    from amigent import screendiff
+    a = Image.new("RGB", (320, 200), (170, 170, 170))
+    b = a.copy()
+    ImageDraw.Draw(b).rectangle((40, 40, 79, 59), fill=(0, 0, 0))
+    report, picture = screendiff.compare(a, b)
+    assert report["changed_pixels"] == 40 * 20 and report["regions"][0]["x"] == 32
+    assert picture.size == (320, 200)
+    assert screendiff.compare(a, a)[0]["changed_pixels"] == 0
+
+
+def test_chipset_decoding():
+    from amigent import chipset
+    regs = bytearray(0x200)
+    regs[0x002:0x004] = (0x8201).to_bytes(2, "big")          # DMA on, audio 0
+    regs[0x0A0:0x0A4] = (0x00012340).to_bytes(4, "big")      # AUD0LC
+    regs[0x0A4:0x0A6] = (500).to_bytes(2, "big")
+    regs[0x0A6:0x0A8] = (428).to_bytes(2, "big")
+    regs[0x0A8:0x0AA] = (64).to_bytes(2, "big")
+    paula = chipset.paula(bytes(regs))
+    assert "channel 0: playing  sample at $012340, 1000 bytes, period 428 (8287 Hz), volume 64/64" in paula
+    assert "channel 1: off" in paula and "audio 0" in chipset.dma(bytes(regs))
+    cop = bytes.fromhex("01800fff" "2c01fffe" "fffffffe")
+    text = chipset.copper(cop, 0x1000)
+    assert "MOVE  $0FFF -> $DFF180" in text and "WAIT  line 44" in text and "(end)" in text
+
+
+def test_project_files():
+    from amigent import project
+    made = project.files("hello", "window", "68020", "Work:DevPack")
+    assert set(made) == {"main.c", "build", "ReadMe"}
+    assert "OpenWindowTags" in made["main.c"] and "-cpu=<CPU>" in made["build"]
+    assert ".DEF DEVPACK Work:DevPack" in made["build"]
+    with pytest.raises(ValueError):
+        project.files("bad name")
+
+
+def test_fleet_comparison():
+    from amigent import fleet
+    text = fleet.compare_runs([
+        {"name": "A500", "ok": True, "rc": 0, "output": "exec 40.10\n"},
+        {"name": "A1200", "ok": True, "rc": 0, "output": "exec 47.13\n"},
+        {"name": "A4000", "ok": True, "rc": 0, "output": "exec 47.13\n"},
+        {"name": "CD32", "ok": False, "error": "timed out"}])
+    assert text.startswith("3 different results on 4 Amigas")
+    assert "A1200, A4000: rc 0" in text and "CD32: error timed out" in text
+    assert fleet.compare_runs([{"name": "x", "ok": True, "rc": 0, "output": "1"}]).startswith("all 1")

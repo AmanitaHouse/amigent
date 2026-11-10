@@ -123,3 +123,32 @@ def describe(code: int | str, where: int | str | None = None) -> str:
     if where:
         text += f"; caused by the task or at the address {where:08X}"
     return text
+
+
+def gurudat(text: str) -> dict[int, str]:
+    """MCP's S:MCP.gurudat: 'XXXXXXXX description' per line."""
+    out = {}
+    for line in text.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and len(parts[0]) == 8:
+            try:
+                out[int(parts[0], 16)] = parts[1].strip()
+            except ValueError:
+                pass
+    return out
+
+
+def history(text: str, extra: dict[int, str] | None = None) -> list[str]:
+    """Each line of a guru log that holds a guru code, with the code in words."""
+    import re
+
+    out = []
+    for line in text.splitlines():
+        m = re.search(r"\b([0-9A-Fa-f]{8})(?:\.([0-9A-Fa-f]{8}))?\b", line)
+        if not m:
+            continue
+        code = int(m.group(1), 16)
+        words = describe(code, m.group(2))
+        known = (extra or {}).get(code) or (extra or {}).get(code & 0x7FFFFFFF)
+        out.append(f"{line.strip()}  ->  {words}" + (f" (MCP: {known})" if known else ""))
+    return out

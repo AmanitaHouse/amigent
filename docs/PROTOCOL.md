@@ -454,6 +454,10 @@ else.
 | 37 | NOTE | | x = text length | text | nothing, see [monitor](#monitor) |
 | 38 | LOADED | | | | text, see [loaded](#loaded) (protocol 6) |
 | 39 | PEEK | | x = address length, w/h = size high/low | address as hex text | `u32 size`, the bytes (protocol 6) |
+| 40 | TASKS | | | | text, see [tasks](#tasks) (protocol 6) |
+| 41 | TASKCTL | 1 priority, 2 signal | x = address length, y = priority or signals | task address as hex text | (protocol 6) |
+| 42 | POKE | | x = address length, w/h = size high/low | address as hex text, the bytes | (protocol 6, only with `ALLOWPOKE`) |
+| 43 | TRACE | 1 set, 2 list, 3 clear | x = address length | address as hex text (for 1) | text for 2, see [trace](#trace) (protocol 6) |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -534,7 +538,8 @@ separated by tabs.
 
 - From protocol 6 (amigentd 1.4.0) SYSINFO also has `last_alert_where`,
   exec's second alert number (the task or the address), next to `last_alert`;
-  `loaded`, `1` when LOADED and PEEK are understood; and `self`, where this
+  `loaded`, `1` when LOADED, PEEK, TASKS, TASKCTL and TRACE are understood;
+  `poke`, `1` when amigentd runs with `ALLOWPOKE`; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
@@ -557,6 +562,38 @@ of the code, without the size and link longs. `M` lines are the resident
 modules, from ROM and from disk (`rt_MatchTag` to `rt_EndSkip`). With them a
 client names an address: a program's hunk and offset, a library function
 through its jump table (read with PEEK), or a resident module.
+
+### tasks
+
+TASKS has a line per task, under Forbid, the running one first:
+
+    T  address  name  command  task|process  priority  run|ready|wait  stack_size  stack_now  sig_wait  sig_recvd
+
+`command` is the program a Shell process runs; `stack_now` is how much of
+its stack a waiting task uses at that moment. TASKCTL changes one, after
+making sure the address is a task: arg 1 sets the priority to `y` (as a signed
+byte), arg 2 signals it with `y` as Ctrl-C (1), D (2), E (4), F (8), added up.
+
+POKE writes the bytes into RAM exec manages (never ROM, chips or boards), with
+interrupts off, and clears the caches. amigentd refuses it unless it was
+started with `ALLOWPOKE` (or that tool type).
+
+### trace
+
+A tracepoint puts `TRAP #15` over the instruction at the address, which must
+be in the code (a hunk) of a running process other than amigentd, and makes
+amigentd's trap handler (`amiga/trapstub.s`, copied into memory of its own,
+one per task) that process's `tc_TrapCode`; the earlier one is kept and gets
+every other trap. When the process gets there, the handler keeps D0-D7, A0-A6,
+its stack pointer, SR and PC and the top 8 longs of the stack, puts the
+instruction back, clears the caches and lets the process go on from that
+instruction: the program never stops, and each tracepoint fires once. At most
+8. TRACE 2 lists them:
+
+    SET|HIT|OFF  address  task  [hit_number  d0 ... d7  a0 ... a7  sr  pc  stack0 ... stack7]
+
+all in hex but the number. When amigentd quits, armed tracepoints are taken
+out; the handler stays (a task keeps its `tc_TrapCode`) and passes traps on.
 
 ### job helper
 

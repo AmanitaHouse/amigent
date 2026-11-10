@@ -197,6 +197,7 @@ def main() -> None:
     parser.add_argument("--add", nargs=2, metavar=("NAME", "ADDRESS"))
     parser.add_argument("--remove", metavar="NAME")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--run", metavar="COMMAND", help="run on every Amiga and compare")
     parser.add_argument("--port", type=int, default=int(os.environ.get("AMIGENT_FLEET_PORT", "6820")))
     parser.add_argument("--no-window", action="store_true")
     args = parser.parse_args()
@@ -212,6 +213,9 @@ def main() -> None:
     if args.remove:
         if not machines.forget(args.remove):
             print(f"no Amiga called {args.remove}")
+        return
+    if args.run:
+        print(compare_runs(run_everywhere(args.run, amigas)))
         return
     if args.list or not amigas:
         for a in amigas:
@@ -232,3 +236,46 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def compare_runs(results: list[dict]) -> str:
+    """The same command on several Amigas: which agree, which differ, and how."""
+    groups: dict[tuple, list[str]] = {}
+    for r in results:
+        key = (r.get("rc"), r.get("output", "").strip()) if r.get("ok") else ("error", r.get("error", ""))
+        groups.setdefault(key, []).append(r.get("name", "?"))
+    lines = []
+    if len(groups) == 1:
+        lines.append(f"all {len(results)} Amigas agree")
+    else:
+        lines.append(f"{len(groups)} different results on {len(results)} Amigas")
+    for (rc, output), names in groups.items():
+        head = ", ".join(names) + (f": error {output}" if rc == "error" else f": rc {rc}")
+        lines.append(head)
+        if rc != "error":
+            lines += ["    " + x for x in output.splitlines()[-20:]]
+    return "\n".join(lines)
+
+
+def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: float = RUN_TIMEOUT) -> list[dict]:
+    """One AmigaDOS line on every known Amiga at once, each on a channel of its own."""
+    amigas = amigas if amigas is not None else machines.load()
+
+    def one(entry: dict) -> dict:
+        commands = Commands(entry["host"])
+        try:
+            result = commands.exec(command, timeout=timeout)
+            return {"name": entry["name"], "ok": True, "rc": result.rc,
+                    "output": result.output[-OUTPUT_LIMIT:]}
+        except (OSError, AmigaError, AmigentdError, EOFError) as e:
+            return {"name": entry["name"], "ok": False, "error": str(e) or type(e).__name__}
+        finally:
+            try:
+                commands.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    if not amigas:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(len(amigas)) as pool:
+        return list(pool.map(one, amigas))

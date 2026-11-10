@@ -37,6 +37,31 @@ Versions follow [semver](https://semver.org). The number lives in
 - A job of several lines runs as a script of its own, so all of its output
   is caught, not only the last line's.
 
+### Debugging programs
+
+- `amiga_trace` sets tracepoints in a running program: when it gets to the
+  address, amigentd keeps its registers and the top of its stack, puts the
+  instruction back and the program runs on. A TRAP #15 with a trap handler of
+  amigentd's own for that task; at most 8, each fires once.
+- `amiga_tasks` lists every task with priority, state and the stack it uses
+  now, warning near full; `amiga_task` changes a priority or sends Ctrl-C to F.
+- `amiga_memory_write` patches RAM, refused unless amigentd runs with
+  `ALLOWPOKE`.
+- `amiga_debug_log` names the code at addresses in Enforcer, MuForce and
+  CacheCop hits: program and hunk, or library function.
+- `amiga_gurus` explains guru codes, the last one and those in MCP's
+  S:GuruHistory, with MCP's own texts where it has them.
+- `amiga_state` saves memory, open counts, tasks and ports and later says what
+  changed: what a program left behind.
+- `amiga_screen_diff` compares the screen with a saved picture: share of
+  changed pixels, boxes of the changed areas, a picture of them.
+- `amiga_create_project` writes a C program and a vbcc build script onto the
+  Amiga, `amiga_build` compiles it there.
+- `amiga_everywhere` (and `amigent-fleet --run`) runs one command on every
+  known Amiga and compares the results.
+- `amigent-doctor` checks protocol 6, the disassembler and an emulator's GDB
+  server too.
+
 ### Emulators
 
 - `amiga_emulator` talks to WinUAE's GDB server (WinUAE 6.1): status, pause,
@@ -44,6 +69,10 @@ Versions follow [semver](https://semver.org). The number lives in
   the Amiga hangs, a postmortem, and saving or restoring the whole machine.
   Set `"gdb": "host:port"` in the Amiga's entry in `amigas.json`.
 - With it set, `amiga_install_begin` saves the whole machine as well.
+- `amiga_emulator` also starts WinUAE with a configuration and its GDB server
+  (and quits only the one it started), puts a disk into DF0:, and shows the
+  custom chips as the emulator keeps them: Paula's four channels with sample,
+  length, rate and volume, the copper list decoded, sprites and DMA.
 
 ### README
 

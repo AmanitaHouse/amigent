@@ -105,7 +105,7 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
     CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
-    CMD_LOADED, CMD_PEEK  /* protocol 6 */
+    CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE  /* protocol 6 */
 };
 
 const char version[] = "$VER: amigentd 1.4.0 (10.11.2026)";
@@ -127,7 +127,7 @@ static APTR old_window;  /* pr_WindowPtr as the Shell or Workbench gave it */
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
-static BOOL setup_mode, quit, authed, from_wb, quiet, tls_only;
+static BOOL setup_mode, quit, authed, from_wb, quiet, tls_only, allow_poke;
 static ULONG client_id, owner;  /* CLIENT ids: this connection's, and whose picture ref is */
 
 /* With a key file, every connection has to send the key first. */
@@ -3543,7 +3543,8 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
-    t_pair(&t, "loaded", 1);  /* protocol 6: LOADED and PEEK */
+    t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
+    t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     if (self_path[0]) {  /* where this amigentd lives, for "amigentd FOLLOW" in jobs */
         t_str(&t, (const UBYTE *)"self=", FALSE);
         t_str(&t, (const UBYTE *)self_path, FALSE);
@@ -5917,6 +5918,392 @@ static BOOL c_peek(struct link *l, UWORD len, ULONG n)
     return c_text(l, &t);
 }
 
+/* The hex address in a request's name; FALSE when the link broke. */
+static BOOL c_address(struct link *l, UWORD len, ULONG *at, BOOL *alive)
+{
+    char *hex = c_name(l, len, alive), *p;
+
+    *at = 0;
+    if (!hex)
+        return FALSE;
+    for (p = hex; *p; p++)
+        *at = *at << 4 | (*p <= '9' ? *p - '0' : (*p | 0x20) - 'a' + 10);
+    FreeVec(hex);
+    return TRUE;
+}
+
+/* ---- tasks: what runs, at which priority, with how much stack ---------- */
+
+/* T  address  name  command  type  pri  state  stack_size  stack_used  sig_wait  sig_recvd */
+static void t_task(struct text *t, struct Task *task, const char *state)
+{
+    const UBYTE *cmd = NULL;
+    ULONG size = (ULONG)task->tc_SPUpper - (ULONG)task->tc_SPLower;
+    ULONG used = task == SysBase->ThisTask ? 0 : (ULONG)task->tc_SPUpper - (ULONG)task->tc_SPReg;
+
+    if (task->tc_Node.ln_Type == NT_PROCESS && ((struct Process *)task)->pr_CLI) {
+        struct CommandLineInterface *cli = BADDR(((struct Process *)task)->pr_CLI);
+        cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+    }
+    t_chr(t, 'T');
+    t_tab(t);
+    t_hex(t, (ULONG)task);
+    t_tab(t);
+    t_str(t, (const UBYTE *)(task->tc_Node.ln_Name ? task->tc_Node.ln_Name : "?"), FALSE);
+    t_tab(t);
+    if (cmd && cmd[0]) {
+        LONG k;
+        for (k = 1; k <= cmd[0]; k++)
+            t_chr(t, cmd[k] == '\t' || cmd[k] < ' ' ? ' ' : cmd[k]);
+    }
+    t_tab(t);
+    t_str(t, (const UBYTE *)(task->tc_Node.ln_Type == NT_PROCESS ? "process" : "task"), FALSE);
+    t_tab(t);
+    t_num(t, task->tc_Node.ln_Pri);
+    t_tab(t);
+    t_str(t, (const UBYTE *)state, FALSE);
+    t_tab(t);
+    t_num(t, size);
+    t_tab(t);
+    t_num(t, used > size ? 0 : used);
+    t_tab(t);
+    t_hex(t, task->tc_SigWait);
+    t_tab(t);
+    t_hex(t, task->tc_SigRecvd);
+    t_chr(t, '\n');
+}
+
+static BOOL c_tasks(struct link *l)
+{
+    struct text t = {0};
+    struct Node *n;
+
+    Forbid();
+    t_task(&t, SysBase->ThisTask, "run");
+    for (n = SysBase->TaskReady.lh_Head; n->ln_Succ; n = n->ln_Succ)
+        t_task(&t, (struct Task *)n, "ready");
+    for (n = SysBase->TaskWait.lh_Head; n->ln_Succ; n = n->ln_Succ)
+        t_task(&t, (struct Task *)n, "wait");
+    Permit();
+    return c_text(l, &t);
+}
+
+/* A task by address, only if it is one; call under Forbid. */
+static struct Task *real_task(ULONG at)
+{
+    struct Node *n;
+
+    if ((ULONG)SysBase->ThisTask == at)
+        return SysBase->ThisTask;
+    for (n = SysBase->TaskReady.lh_Head; n->ln_Succ; n = n->ln_Succ)
+        if ((ULONG)n == at)
+            return (struct Task *)n;
+    for (n = SysBase->TaskWait.lh_Head; n->ln_Succ; n = n->ln_Succ)
+        if ((ULONG)n == at)
+            return (struct Task *)n;
+    return NULL;
+}
+
+/* arg 1: priority y (-128..127); arg 2: break signals y (1 C, 2 D, 4 E, 8 F) */
+static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
+{
+    struct Task *task;
+    BOOL alive;
+    ULONG at;
+
+    if (!c_address(l, len, &at, &alive))
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    Forbid();
+    task = real_task(at);
+    if (task && op == 1)
+        SetTaskPri(task, (BYTE)(WORD)y);
+    else if (task && op == 2)
+        Signal(task, (ULONG)(y & 15) << 12);  /* SIGBREAKB_CTRL_C is 12 */
+    Permit();
+    if (!task)
+        return c_fail(l, 1, "no task at that address");
+    return op == 1 || op == 2 ? c_ok(l) : c_fail(l, 1, "unknown task operation");
+}
+
+/* ---- poke: only when amigentd was started with ALLOWPOKE --------------- */
+
+static void flush_caches(void);
+
+static BOOL c_poke(struct link *l, UWORD len, ULONG n)
+{
+    BOOL alive;
+    ULONG at;
+    UBYTE *data;
+
+    if (!c_address(l, len, &at, &alive))
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    if (!(data = AllocVec(n ? n : 1, MEMF_ANY)))
+        return l_skip(l, n, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
+    if (!l_recv(l, data, n, IO_SECONDS)) {
+        FreeVec(data);
+        return FALSE;
+    }
+    if (!allow_poke) {
+        FreeVec(data);
+        return c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
+    }
+    if (!peek_allowed(at, n) || at >= 0xF80000UL) {
+        FreeVec(data);
+        return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    }
+    mon_say('C', "write memory", NULL);
+    Disable();
+    CopyMem(data, (APTR)at, n);
+    Enable();
+    CacheClearU();
+    FreeVec(data);
+    return c_ok(l);
+}
+
+/* ---- trace: tracepoints in a running program ----------------------------
+ * A tracepoint puts TRAP #15 over one instruction of a program's code and
+ * makes our trap handler (amiga/trapstub.s) that task's tc_TrapCode. When the
+ * program gets there, the handler keeps the registers and a bit of the stack,
+ * puts the instruction back and lets the program go on as if nothing
+ * happened: it fires once, and the program never stops. */
+
+static const UBYTE trap_code[68] = {
+    0x0c, 0x97, 0x00, 0x00, 0x00, 0x2f, 0x66, 0x2a, 0x48, 0xe7, 0xff, 0xfe,
+    0x4e, 0x68, 0x2f, 0x08, 0x48, 0x6f, 0x00, 0x04, 0x2e, 0x3a, 0x00, 0x22,
+    0x67, 0x12, 0x28, 0x47, 0x4e, 0x94, 0x4a, 0x80, 0x67, 0x0a, 0x50, 0x8f,
+    0x4c, 0xdf, 0x7f, 0xff, 0x58, 0x8f, 0x4e, 0x73, 0x50, 0x8f, 0x4c, 0xdf,
+    0x7f, 0xff, 0x2f, 0x3a, 0x00, 0x08, 0x4e, 0x75, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x41, 0x4d, 0x54, 0x52};
+#define TRAP_HOOK 56
+#define TRAP_OLD 60
+#define TRACES 8
+
+struct trace {
+    UWORD *at;
+    UWORD orig;
+    UBYTE armed, hit;
+    struct Task *task;
+    UBYTE *stub;
+    ULONG regs[18];  /* d0-d7, a0-a7 (the user stack), SR, PC */
+    ULONG stack[8];
+    ULONG when;      /* the how manyth hit this was */
+};
+
+static struct trace traces[TRACES];
+static ULONG trace_count;
+static UBYTE cpu_cache;  /* 0 none, 1 68020/030, 2 68040/060 */
+
+/* Clear the caches from supervisor mode, where CacheClearU() is no help. */
+void sv_flush030(void) = "\tdc.w\t$4e7a,$0002\n\tdc.w\t$0040,$0808\n\tdc.w\t$4e7b,$0002";
+void sv_flush040(void) = "\tdc.w\t$f4f8";
+
+static void flush_caches(void)
+{
+    CacheClearU();
+}
+
+/* Called by the stub in supervisor mode: regs is d0-d7, a0-a6, the trap
+ * number, then SR (word) and PC (long) of the exception frame. */
+static LONG trace_hit(ULONG *regs, ULONG usp)
+{
+    UBYTE *frame = (UBYTE *)(regs + 16);
+    ULONG pc = *(ULONG *)(frame + 2) - 2;
+    LONG i, k;
+
+    for (i = 0; i < TRACES; i++) {
+        struct trace *tr = &traces[i];
+
+        if (!tr->armed || (ULONG)tr->at != pc)
+            continue;
+        for (k = 0; k < 15; k++)
+            tr->regs[k] = regs[k];
+        tr->regs[15] = usp;
+        tr->regs[16] = *(UWORD *)frame;
+        tr->regs[17] = pc;
+        for (k = 0; k < 8; k++)
+            tr->stack[k] = ((ULONG *)usp)[k];
+        *tr->at = tr->orig;
+        if (cpu_cache == 2)
+            sv_flush040();
+        else if (cpu_cache == 1)
+            sv_flush030();
+        *(ULONG *)(frame + 2) = pc;
+        tr->when = ++trace_count;  /* no timer here: supervisor mode */
+        tr->armed = 0;
+        tr->hit = 1;
+        return 1;
+    }
+    return 0;  /* some other TRAP #15: the task's earlier trap code gets it */
+}
+
+/* The process whose code holds at, or NULL; call under Forbid. */
+static struct Task *code_owner(ULONG at)
+{
+    struct List *lists[2];
+    struct Node *n;
+    LONG i;
+
+    lists[0] = &SysBase->TaskReady;
+    lists[1] = &SysBase->TaskWait;
+    for (i = 0; i < 2; i++)
+        for (n = lists[i]->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+            struct Process *pr = (struct Process *)n;
+            BPTR seg = 0;
+            LONG hunk;
+
+            if (n->ln_Type != NT_PROCESS)
+                continue;
+            if (pr->pr_CLI)
+                seg = ((struct CommandLineInterface *)BADDR(pr->pr_CLI))->cli_Module;
+            if (!seg && pr->pr_SegList) {
+                BPTR *array = BADDR(pr->pr_SegList);
+                if (array && TypeOfMem(array) && array[0] >= 3 && array[0] < 16)
+                    seg = array[3];
+            }
+            for (hunk = 0; seg && hunk < 64; hunk++) {
+                ULONG *p = BADDR(seg);
+
+                if (((ULONG)p & 3) || !TypeOfMem(p - 1) || p[-1] < 8 || p[-1] > 0x1000000UL)
+                    break;
+                if (at >= (ULONG)(p + 1) && at + 2 <= (ULONG)(p - 1) + p[-1])
+                    return (struct Task *)pr;
+                seg = *p;
+            }
+        }
+    return NULL;
+}
+
+static void trace_disarm(struct trace *tr)
+{
+    Disable();
+    if (tr->armed) {
+        *tr->at = tr->orig;
+        tr->armed = 0;
+    }
+    Enable();
+    CacheClearU();
+}
+
+/* Before amigentd goes: no TRAP #15 stays behind; the stubs stay, their hook
+ * cleared, since a task keeps its tc_TrapCode. */
+static void traces_off(void)
+{
+    LONG i;
+
+    for (i = 0; i < TRACES; i++) {
+        trace_disarm(&traces[i]);
+        if (traces[i].stub)
+            *(ULONG *)(traces[i].stub + TRAP_HOOK) = 0;
+    }
+    CacheClearU();
+}
+
+static void t_trace(struct text *t, LONG i)
+{
+    struct trace *tr = &traces[i];
+    LONG k;
+
+    t_str(t, (const UBYTE *)(tr->hit ? "HIT" : tr->armed ? "SET" : "OFF"), FALSE);
+    t_tab(t);
+    t_hex(t, (ULONG)tr->at);
+    t_tab(t);
+    t_hex(t, (ULONG)tr->task);
+    if (tr->hit) {
+        t_tab(t);
+        t_num(t, tr->when);
+        for (k = 0; k < 18; k++) {
+            t_tab(t);
+            t_hex(t, tr->regs[k]);
+        }
+        for (k = 0; k < 8; k++) {
+            t_tab(t);
+            t_hex(t, tr->stack[k]);
+        }
+    }
+    t_chr(t, '\n');
+}
+
+/* arg 1: set at the address; 2: list; 3: clear all */
+static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
+{
+    struct text t = {0};
+    struct trace *tr = NULL;
+    struct Task *task;
+    BOOL alive;
+    ULONG at = 0;
+    LONG i;
+
+    if (len && !c_address(l, len, &at, &alive))
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    if (op == 2) {
+        for (i = 0; i < TRACES; i++)
+            if (traces[i].at)
+                t_trace(&t, i);
+        return c_text(l, &t);
+    }
+    if (op == 3) {
+        for (i = 0; i < TRACES; i++) {
+            trace_disarm(&traces[i]);
+            traces[i].at = NULL;
+            traces[i].hit = 0;
+        }
+        return c_ok(l);
+    }
+    if (op != 1)
+        return c_fail(l, 1, "unknown trace operation");
+    if (at & 1)
+        return c_fail(l, 1, "code starts at an even address");
+    for (i = 0; i < TRACES && !tr; i++)
+        if (!traces[i].armed && !(traces[i].hit && traces[i].at))
+            tr = &traces[i];
+    if (!tr)
+        return c_fail(l, 1, "all 8 tracepoints are in use; clear them first");
+    Forbid();
+    task = code_owner(at);
+    Permit();
+    if (!task)
+        return c_fail(l, 1, "not in the code of a running program (see LOADED)");
+    if (task == FindTask(NULL) || task == server)
+        return c_fail(l, 1, "not in amigentd itself");
+    if (!tr->stub || tr->task != task) {  /* one stub per task, it keeps the task's old trap code */
+        LONG j;
+        UBYTE *stub = NULL;
+        for (j = 0; j < TRACES; j++)
+            if (traces[j].stub && traces[j].task == task)
+                stub = traces[j].stub;
+        if (!stub) {
+            if (!(stub = AllocMem(sizeof(trap_code), MEMF_PUBLIC)))
+                return c_fault(l, ERROR_NO_FREE_STORE);
+            CopyMem((APTR)trap_code, stub, sizeof(trap_code));
+            *(ULONG *)(stub + TRAP_HOOK) = (ULONG)trace_hit;
+            CacheClearU();
+        }
+        tr->stub = stub;
+    }
+    Forbid();
+    if (!real_task((ULONG)task)) {
+        Permit();
+        return c_fail(l, 1, "the program ended meanwhile");
+    }
+    if (task->tc_TrapCode != (APTR)tr->stub) {
+        *(ULONG *)(tr->stub + TRAP_OLD) = (ULONG)task->tc_TrapCode;
+        task->tc_TrapCode = (APTR)tr->stub;
+    }
+    *(ULONG *)(tr->stub + TRAP_HOOK) = (ULONG)trace_hit;
+    tr->task = task;
+    tr->at = (UWORD *)at;
+    tr->hit = 0;
+    Disable();
+    tr->orig = *tr->at;
+    *tr->at = 0x4E4F;  /* TRAP #15 */
+    tr->armed = 1;
+    Enable();
+    Permit();
+    CacheClearU();
+    mon_say('C', "tracepoint set", NULL);
+    return c_ok(l);
+}
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -5975,6 +6362,16 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_LOADED:
         mon_say('C', "loaded libraries and programs", NULL);
         return c_loaded(l);
+    case CMD_TASKS:
+        mon_say('C', "tasks", NULL);
+        return c_tasks(l);
+    case CMD_TASKCTL:
+        mon_say('C', c[1] == 1 ? "task priority" : "signal a task", NULL);
+        return c_taskctl(l, c[1], x, y);
+    case CMD_POKE:  /* address as hex in the name, then w:h bytes */
+        return c_poke(l, x, (ULONG)w << 16 | h);
+    case CMD_TRACE:
+        return c_trace(l, c[1], x);
     case CMD_PEEK:  /* address as hex in the name, length in w:h */
         mon_say('C', "read memory", NULL);
         return c_peek(l, x, (ULONG)w << 16 | h);
@@ -7231,6 +7628,8 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
                 no_text = TRUE;
             if (FindToolType(tt, "NODEBUG"))
                 no_debug = TRUE;
+            if (FindToolType(tt, "ALLOWPOKE"))
+                allow_poke = TRUE;
             if ((v = FindToolType(tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
@@ -7263,18 +7662,30 @@ static int follow(const char *from, const char *to)
     strcpy(rc + strlen(rc) - 3, "rc");  /* x.out -> x.rc */
     strcpy(done, to);
     strcpy(done + strlen(done) - 3, "done");
-    /* A pipe answers a read only when that much is there or the writer is done;
-     * the Shell hands output on in blocks, so small reads keep it moving. */
-    while ((n = Read(in, buf, 256)) > 0)
-        for (tries = 0; tries < 250; tries++) {  /* the PC may be reading it: 5 s */
-            if ((out = Open(to, MODE_READWRITE))) {
-                Seek(out, 0, OFFSET_END);
-                Write(out, buf, n);
-                Close(out);
-                break;
+    /* A pipe answers a read only when that much is there or the writer is done,
+     * so a byte at a time (that costs little next to the job), and each line
+     * goes out as soon as it is complete. */
+    n = 0;
+    for (;;) {
+        LONG got = Read(in, buf + n, 1);
+
+        if (got > 0)
+            n++;
+        if (n && (got <= 0 || buf[n - 1] == '\n' || n == 4096)) {
+            for (tries = 0; tries < 250; tries++) {  /* the PC may be reading it: 5 s */
+                if ((out = Open(to, MODE_READWRITE))) {
+                    Seek(out, 0, OFFSET_END);
+                    Write(out, buf, n);
+                    Close(out);
+                    break;
+                }
+                Delay(1);
             }
-            Delay(1);
+            n = 0;
         }
+        if (got <= 0)
+            break;
+    }
     Close(in);
     for (tries = 0; tries < 1500; tries++) {  /* the script writes rc right after: 30 s */
         BPTR lock = Lock(rc, SHARED_LOCK);
@@ -7293,7 +7704,7 @@ static int follow(const char *from, const char *to)
 
 int main(int argc, char **argv)
 {
-    LONG args[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    LONG args[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -7304,8 +7715,8 @@ int main(int argc, char **argv)
         from_wb = TRUE;
         tool_types((struct WBStartup *)argv, &port);
     } else {
-        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K",
-                       args, NULL);
+        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K,"
+                       "ALLOWPOKE/S", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
@@ -7324,11 +7735,14 @@ int main(int argc, char **argv)
         tls_only = args[4] != 0;
         no_text = args[5] != 0;
         no_debug = args[6] != 0;
+        allow_poke = args[9] != 0;
         FreeArgs(rda);
     }
 
     server = FindTask(NULL);
     find_self(argc, argv);
+    cpu_cache = SysBase->AttnFlags & (AFF_68040 | AFF_68060) ? 2 :
+                SysBase->AttnFlags & (AFF_68020 | AFF_68030) ? 1 : 0;
     SetTaskPri(server, 2);
     /* No "insert volume" requesters: nobody may be at the Amiga to answer one,
      * and it would hold up the command, a file transfer or the whole daemon.
@@ -7439,6 +7853,7 @@ out:
         Wait(1UL << chan_gone);
     }
     hooks_stop();  /* no channel looks at the text any more */
+    traces_off();
     z_free(frame_z);
     if (LayersBase)
         CloseLibrary(LayersBase);

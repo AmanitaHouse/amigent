@@ -173,6 +173,50 @@ class Run:
         assert last and any("job" in e["did"] for e in last), last
         return f"{len(last)} last calls kept on the PC, e.g. {last[-1]['did']!r}"
 
+    def tasks(self):
+        listed = self.s.amiga_tasks("amigentd")
+        assert "amigentd" in listed and "stack" in listed, listed
+        said = self.s.amiga_job("Wait 20", wait=1)
+        number = int(said.split()[1])
+        time.sleep(1)
+        changed = self.s.amiga_task("Wait", priority=-2)
+        assert "-> -2" in changed, changed
+        self.s.amiga_break(job=number)
+        return f"{listed.count(chr(10)) + 1} amigentd tasks; priority of a job changed, then stopped"
+
+    def trace(self):
+        if not self.args.trace:
+            return "skip: give --trace with amiga/trace-test built for the Amiga"
+        import re
+        said = self.s.amiga_job(self.args.trace, wait=3)
+        number = int(said.split()[1])
+        time.sleep(1)
+        at = re.search(r"tick at (?:0x)?([0-9a-fA-F]+)", self.s.amiga_job_output(number)).group(1)
+        self.s.amiga_trace("set", "$" + at)
+        time.sleep(2.5)
+        hits = self.s.amiga_trace()
+        self.s.amiga_trace("clear")
+        assert "HIT" in hits and "D0=" in hits, hits
+        self.s.amiga_break(job=number)
+        return "tracepoint fired, registers caught, the program ran on"
+
+    def state(self):
+        self.s.amiga_state("save", "regress")
+        said = self.s.amiga_state("compare", "regress")
+        assert said.startswith("since the save"), said
+        return said.splitlines()[0]
+
+    def gurus(self):
+        said = self.s.amiga_gurus()
+        assert "alert" in said, said
+        return said.splitlines()[0]
+
+    def screen_diff(self):
+        self.s.amiga_screen_diff("save", "regress", 0, 0, 320, 64)
+        report = __import__("json").loads(self.s.amiga_screen_diff("compare", "regress", 0, 0, 320, 64)[0])
+        assert report["size"] == [320, 64], report
+        return f"{report['changed_percent']} % changed in a 320x64 region"
+
     def emulator(self):
         try:
             emu = self.s._emulator()
@@ -529,7 +573,7 @@ class Run:
 
 
 ORDER = ["status", "version", "exec", "missing_volume", "job", "live_output", "loaded", "memory",
-         "journal", "emulator", "files", "screen", "open_shell",
+         "journal", "tasks", "trace", "state", "gurus", "screen_diff", "emulator", "files", "screen", "open_shell",
          "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
          "install_undo", "debug", "clipboard", "notes", "aminet", "pause", "takeover", "pointer",
          "close_shell"]
@@ -545,6 +589,7 @@ def main() -> int:
     p.add_argument("--pointer", default="")
     p.add_argument("--kprintf", default="")
     p.add_argument("--aminet", default="")
+    p.add_argument("--trace", default="")
     args = p.parse_args()
     run = Run(setup(args), args)
     print(f"Amigent regression against {args.host}:{args.port}, {time.strftime('%Y-%m-%d %H:%M')}")

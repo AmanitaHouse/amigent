@@ -51,6 +51,9 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
   amiga_break(job=n).
 - To find out what really runs (a driver, a library version), amiga_loaded;
   for a crash address, amiga_where, and amiga_memory(show="code") for the code.
+- Testing a program: amiga_create_project, amiga_build, amiga_run; amiga_trace
+  for where it gets to, amiga_state before and after for leaks, amiga_screen_diff
+  for what its screen looks like.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,
@@ -235,7 +238,8 @@ diary = journal.Journal()  # under secret.FOLDER, looked up when used
 UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "amiga_screen_text",
                "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
                "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
-               "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text"}
+               "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text",
+               "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log"}
 
 
 def _amiga_name() -> str:
@@ -696,6 +700,246 @@ def amiga_memory(address: str, size: int = 256, show: str = "hex", a6: str = "")
     return head + "\n" + memory.hexdump(data, at)
 
 
+def _tasks() -> list:
+    return memory.parse_tasks(_with_ctl(ctl.tasks))
+
+
+@mcp.tool()
+def amiga_tasks(name: str = "") -> str:
+    """All tasks and processes: address, priority, ready or waiting, stack used of
+    its size (with a warning near full), and the program. name filters.
+    Needs amigentd 1.4.0."""
+    return memory.task_table(_tasks(), name)
+
+
+@mcp.tool()
+def amiga_task(task: str, priority: int | None = None, signal: str = "") -> str:
+    """Change a task: priority (-128..127, 0 is normal; above 5 can starve the
+    system) or signal it with Ctrl-C, D, E or F (e.g. 'C', or 'CD'). task is a
+    name, a program as amiga_tasks shows it, or an address. Needs amigentd 1.4.0."""
+    tasks = _tasks()
+    try:
+        t = memory.find_task(tasks, task)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    done = []
+    if priority is not None:
+        if not -128 <= priority <= 127:
+            raise AmigaError("priority goes from -128 to 127")
+        _with_ctl(lambda: ctl.task_control(t.address, 1, priority))
+        done.append(f"priority {t.pri} -> {priority}")
+    if signal:
+        bits = 0
+        for ch in signal.upper():
+            if ch not in "CDEF":
+                raise AmigaError("signal: letters C, D, E, F")
+            bits |= 1 << "CDEF".index(ch)
+        _with_ctl(lambda: ctl.task_control(t.address, 2, bits))
+        done.append("sent Ctrl-" + "+".join(sorted(set(signal.upper()))))
+    if not done:
+        return memory.task_table([t])
+    return f"{t.label} (${t.address:08X}): " + ", ".join(done)
+
+
+@mcp.tool()
+def amiga_memory_write(address: str, hex_bytes: str) -> str:
+    """Write bytes into the Amiga's RAM (not ROM, not chips), e.g. to patch a test
+    program. Off unless amigentd runs with ALLOWPOKE (command line or tool type):
+    a wrong byte can crash the Amiga. hex_bytes like '4e71 4e71'. Needs amigentd 1.4.0."""
+    data = bytes.fromhex(hex_bytes.replace(" ", "").replace("$", ""))
+    namer = _namer()
+    try:
+        at = memory.resolve(address, namer)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    before = _with_ctl(lambda: ctl.peek(at, len(data)))
+    _with_ctl(lambda: ctl.poke(at, data))
+    return f"wrote {len(data)} bytes at ${at:08X}; before: {before.hex()}"
+
+
+@mcp.tool()
+def amiga_trace(action: str = "list", address: str = "") -> str:
+    """Tracepoints in a running program: where it gets to, and its registers then.
+
+    action set: put one at address (in a running program's code, e.g. from
+    amiga_loaded or 'myprog hunk 0 +$120' resolved with amiga_where); when the
+    program passes there, amigentd keeps D0-A7, SR and the top of the stack, puts
+    the instruction back and the program runs on without stopping. Fires once.
+    action list shows them with what they caught; clear removes all. At most 8.
+    Meant for programs you are testing. Needs amigentd 1.4.0.
+    """
+    if action == "set":
+        namer = _namer()
+        try:
+            at = memory.resolve(address, namer)
+        except ValueError as e:
+            raise AmigaError(str(e)) from None
+        _with_ctl(lambda: ctl.trace(1, at))
+        where = namer.name(at, search_functions=False)
+        return f"tracepoint at ${at:08X}" + (f" ({where})" if where else "") + "; amiga_trace() shows when it fired"
+    if action == "clear":
+        _with_ctl(lambda: ctl.trace(3))
+        return "tracepoints cleared"
+    if action == "list":
+        lines = _with_ctl(lambda: ctl.trace(2))
+        try:
+            namer = _namer()
+        except AmigaError:
+            namer = None
+        return memory.describe_traces(lines, namer)
+    raise AmigaError("action: set, list or clear")
+
+
+@mcp.tool()
+def amiga_state(action: str = "save", name: str = "before") -> str:
+    """Find leaks: save the Amiga's state, run and quit a program, then compare.
+
+    save keeps free memory and the largest blocks, the open count of every
+    library and device (with amigentd 1.4.0), the tasks and the public ports;
+    compare says what changed since: memory not given back, a library left
+    open, a task or port that stayed.
+    """
+    from . import states
+    store = states.Store(secret.FOLDER / "states")
+    info = _with_ctl(ctl.sysinfo)
+    try:
+        loaded, tasks = _loaded(), _tasks()
+    except AmigaError:
+        loaded = tasks = None  # before 1.4.0: memory, tasks and ports from SYSINFO only
+    now = states.take(info, loaded, tasks)
+    if action == "save":
+        path = store.save(_amiga_name(), name, now)
+        mem = now["memory"]
+        return (f"saved as {name!r}: {mem.get('chip_free', 0) // 1024} KB Chip and "
+                f"{mem.get('fast_free', 0) // 1024} KB Fast free, {len(now['tasks'])} tasks "
+                f"({path}); amiga_state('compare', {name!r}) afterwards")
+    if action == "compare":
+        before = store.load(_amiga_name(), name)
+        if not before:
+            raise AmigaError(f"nothing saved as {name!r}; amiga_state('save', {name!r}) first")
+        return states.compare(before, now)
+    raise AmigaError("action: save or compare")
+
+
+@mcp.tool()
+def amiga_screen_diff(action: str = "compare", name: str = "baseline", x: int = 0, y: int = 0,
+                      width: int = 0, height: int = 0, threshold: int = 24) -> list:
+    """Visual regression test: save a picture of the screen (or a region), later
+    compare the screen with it. compare answers the share of changed pixels, the
+    boxes of the changed areas and a picture of them (changed pixels magenta,
+    boxes yellow). threshold: how different a pixel must be (0-255)."""
+    from io import BytesIO
+    from PIL import Image
+    from . import screendiff
+    folder = secret.FOLDER / "screens" / journal._safe(_amiga_name())
+    path = folder / f"{journal._safe(name)}.png"
+    # the 256 colour picture: tiles come from the cache, so a comparison costs little
+    image = _with_screen(lambda: screen.capture(x, y, width or None, height or None)).convert("RGB")
+    if action == "save":
+        folder.mkdir(parents=True, exist_ok=True)
+        image.save(path)
+        return [f"saved {image.size[0]}x{image.size[1]} as {name!r} ({path})"]
+    if action != "compare":
+        raise AmigaError("action: save or compare")
+    if not path.exists():
+        raise AmigaError(f"nothing saved as {name!r}; amiga_screen_diff('save', {name!r}) first")
+    report, picture = screendiff.compare(Image.open(path), image, threshold)
+    buf = BytesIO()
+    small, _ = pictures.fit(picture)
+    small.save(buf, "PNG")
+    return [json.dumps(report), McpImage(data=buf.getvalue(), format="png")]
+
+
+def _devpack(given: str) -> str:
+    if given:
+        return given
+    entry = (machines.find(HOST) or {}) if HOST else {}
+    if entry.get("devpack"):
+        return entry["devpack"]
+    for guess in ("SYS:DevPack", "Work:DevPack", "Stuff:DevPack"):
+        if _with_ctl(lambda: ctl.exec(f'List >NIL: "{guess}/vbcc/bin/vc"')).rc == 0:
+            return guess
+    return "SYS:DevPack"
+
+
+@mcp.tool()
+def amiga_create_project(name: str, folder: str = "", kind: str = "shell", cpu: str = "68000",
+                         devpack: str = "") -> str:
+    """Start a new C program on the Amiga: main.c (kind shell or window), a build
+    script for vbcc and a ReadMe, in folder/name (default: Amigent's folder,
+    projects/). Then amiga_build, then amiga_run. devpack is the folder with
+    vbcc/ and SDK/NDK 3.9/ (found by itself in SYS:, Work: or Stuff:, or set as
+    "devpack" in amigas.json)."""
+    from . import project
+    try:
+        made = project.files(name, kind, cpu, _devpack(devpack), time.strftime("%-d.%-m.%Y"))
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    target = _join(folder or _join(_home(), "projects"), name)
+    _with_ctl(lambda: files.makedirs(ctl, target))
+    for file, text in made.items():
+        _with_ctl(lambda: ctl.write_file(_join(target, file), text.encode("iso-8859-1")))
+    return (f"created {target}: {', '.join(made)}; amiga_build({target!r}) compiles it, "
+            f"amiga_run({_join(target, name)!r}) runs it")
+
+
+@mcp.tool()
+def amiga_build(folder: str, cpu: str = "", devpack: str = "") -> str:
+    """Compile a project on the Amiga by running its build script (as a job), and
+    report the compiler's messages and whether it worked."""
+    args = (f" CPU {cpu}" if cpu else "") + (f' DEVPACK "{devpack}"' if devpack else "")
+    out = amiga_job(f'CD "{folder}"\nExecute build{args}', wait=900)
+    ok = "built " in out and "build failed" not in out
+    return ("built\n" if ok else "build failed\n") + out
+
+
+@mcp.tool()
+def amiga_everywhere(command: str, timeout: float = 120) -> str:
+    """Run one AmigaDOS command on every Amiga Amigent knows (amigas.json), at once,
+    and compare: which agree, which differ, with each one's output. For checks
+    across machines, such as a version or a test on the A500 and the A1200."""
+    from . import fleet
+    amigas = machines.load()
+    if len(amigas) < 1:
+        raise AmigaError("no Amigas known; amigent-fleet --add NAME ADDRESS")
+    return fleet.compare_runs(fleet.run_everywhere(command, amigas, timeout))
+
+
+GURU_LOGS = ("S:GuruHistory", "S:Guru.log", "ENVARC:GuruHistory")
+
+
+@mcp.tool()
+def amiga_gurus(code: str = "") -> str:
+    """Guru meditations in words: the code given, the last one exec kept, and the
+    gurus logged by tools such as MCP (S:GuruHistory), explained."""
+    from . import alerts
+    if code:
+        c, _, where = code.strip().lstrip("#").partition(".")
+        return f"{code}: {alerts.describe(c, where or None)}"
+    extra = {}
+    try:
+        extra = alerts.gurudat(_with_ctl(lambda: ctl.read_file("S:MCP.gurudat")).decode("iso-8859-1"))
+    except AmigaError:
+        pass
+    out = []
+    info = _with_ctl(ctl.sysinfo)
+    if info.get("last_alert"):
+        c, w = info["last_alert"], info.get("last_alert_where", "")
+        out.append(f"last alert exec kept: {c.upper()}{'.' + w.upper() if w else ''} -> "
+                   f"{alerts.describe(c, w or None)}")
+    else:
+        out.append("exec kept no alert from before the last reset")
+    for path in GURU_LOGS:
+        try:
+            text = _with_ctl(lambda: ctl.read_file(path)).decode("iso-8859-1")
+        except AmigaError:
+            continue
+        found = alerts.history(text, extra)
+        out.append(f"{path}: " + (f"{len(found)} guru(s)" if found else "no gurus logged"))
+        out += [f"  {x}" for x in found[-20:]]
+    return "\n".join(out)
+
+
 _gdb: dict = {}
 
 
@@ -719,8 +963,51 @@ def _checkpoint_folder() -> "Path":
     return Path(secret.FOLDER) / "checkpoints" / journal._safe(_amiga_name())
 
 
+def _winuae() -> str:
+    entry = (machines.find(HOST) or {}) if HOST else {}
+    exe = entry.get("winuae") or os.environ.get("AMIGENT_WINUAE")
+    if exe:
+        return exe
+    for guess in ("/mnt/c/Program Files/WinUAE/winuae64.exe", "C:\\Program Files\\WinUAE\\winuae64.exe",
+                  "/Applications/WinUAE.app/Contents/MacOS/WinUAE"):
+        if os.path.exists(guess):
+            return guess
+    raise AmigaError('no WinUAE found; set "winuae" (the program) in amigas.json or AMIGENT_WINUAE')
+
+
+def _launch_emulator(config: str, disk: str = "") -> str:
+    import subprocess
+    old = _gdb.get("proc")
+    if old and old.poll() is None:
+        raise AmigaError(f"the emulator Amigent started runs already (pid {old.pid}); quit it first")
+    where = (machines.find(HOST) or {}).get("gdb") if HOST else None
+    where = where or os.environ.get("AMIGENT_GDB") or "127.0.0.1:2345"
+    port = gdb.parse_address(where)[1]
+    config = config or ((machines.find(HOST) or {}).get("winuae_config") if HOST else "") or ""
+    if not config:
+        raise AmigaError('which configuration? config= a .uae file, or "winuae_config" in amigas.json')
+    args = [_winuae(), "-f", _host_path(config), "-s", "use_gui=no", "-s",
+            "debugging_features=gdbserver", "-s", f"gdb_port={port}", "-s", "cpu_threaded=false"]
+    if disk:
+        args += ["-s", f"floppy0={_host_path(disk)}"]
+    proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    _gdb.update(proc=proc, config=config)
+    host = gdb.parse_address(where)[0]
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise AmigaError(f"WinUAE ended at once (exit {proc.returncode}); WinUAE 6.1 or newer "
+                             "has the GDB server, and a new beta wants its first start by hand")
+        if others.listening(host, port, 0.5):
+            return f"WinUAE started (pid {proc.pid}), GDB server on {where}"
+        time.sleep(1)
+    return f"WinUAE started (pid {proc.pid}), but no GDB server on {where} after 60 s"
+
+
 @mcp.tool()
-def amiga_emulator(action: str = "status", file: str = "", address: str = "", size: int = 256) -> str:
+def amiga_emulator(action: str = "status", file: str = "", address: str = "", size: int = 256,
+                   config: str = "", disk: str = "", show: str = "all") -> str:
     """The emulated Amiga from outside, through WinUAE's GDB server (WinUAE 6.1+).
 
     action: status (running or stopped, and why), pause, resume, registers (with
@@ -728,8 +1015,32 @@ def amiga_emulator(action: str = "status", file: str = "", address: str = "", si
     the Amiga hangs), save or restore (the whole machine as a state file; file
     is a path on this PC, by default in Amigent's checkpoints folder), or
     postmortem (registers, the code at the PC and the stack, for a hang or a
-    guru). Needs "gdb" in the Amiga's amigas.json entry.
+    guru), chipset (show: all, paula, copper, sprites, dma or registers; the
+    custom chips as the emulator keeps them). launch starts WinUAE with config
+    (a .uae file) and its GDB server, disk puts an .adf into DF0:; quit ends
+    the WinUAE Amigent started, never another one; insert_disk restarts it
+    with disk in DF0:. Needs "gdb" in the Amiga's amigas.json entry.
     """
+    if action == "launch":
+        return _launch_emulator(config, disk)
+    if action in ("quit", "insert_disk"):
+        proc = _gdb.get("proc")
+        if not proc or proc.poll() is not None:
+            raise AmigaError("no WinUAE started by Amigent runs; an emulator started otherwise "
+                             "is left alone")
+        if _gdb.get("conn"):
+            _gdb["conn"].close()
+            _gdb.pop("where", None)
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except Exception:  # noqa: BLE001
+            proc.kill()
+        if action == "quit":
+            return f"WinUAE (pid {proc.pid}) ended"
+        if not disk:
+            raise AmigaError("insert_disk needs disk= an .adf on this PC")
+        return _launch_emulator(_gdb.get("config", ""), disk)
     emu = _emulator()
     try:
         if action == "status":
@@ -762,6 +1073,20 @@ def amiga_emulator(action: str = "status", file: str = "", address: str = "", si
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
             said = emu.checkpoint(action, _host_path(path))
             return f"{action}d {path}: {said}"
+        if action == "chipset":
+            from . import chipset
+            regs = emu.read(0xDFF000, 0x200)
+            parts = {"dma": chipset.dma(regs), "paula": chipset.paula(regs),
+                     "sprites": chipset.sprites(regs), "registers": chipset.registers(regs)}
+            if show in ("all", "copper"):
+                start = chipset.long(regs, 0x080)
+                parts["copper"] = f"copper list 1 at ${start:06X}:\n" + chipset.copper(
+                    emu.read(start, max(16, min(size, 4096))), start)
+            if show == "all":
+                return "\n\n".join(parts[k] for k in ("dma", "paula", "copper", "sprites"))
+            if show not in parts:
+                raise AmigaError("show: all, paula, copper, sprites, dma or registers")
+            return parts[show]
         if action == "postmortem":
             was = emu.running
             if was:
@@ -782,7 +1107,8 @@ def amiga_emulator(action: str = "status", file: str = "", address: str = "", si
     except OSError as e:
         emu.close()
         raise AmigaError(f"the emulator's GDB server stopped answering: {e}") from None
-    raise AmigaError("action: status, pause, resume, registers, memory, save, restore or postmortem")
+    raise AmigaError("action: status, pause, resume, registers, memory, save, restore, postmortem, "
+                     "chipset, launch, quit or insert_disk")
 
 
 def _host_path(path: str) -> str:
@@ -1718,6 +2044,9 @@ debug_seen = 0  # RawPutChar count at the last look
 def amiga_debug_log(everything: bool = False) -> str:
     """Debug output on the Amiga since the last call: kprintf, Enforcer and MuForce hits.
 
+    With amigentd 1.4.0 the addresses of code in hits (PC: ..., by $...) get the
+    program and hunk or the library function they belong to.
+
     amigentd catches what goes through exec's RawPutChar (as Sashimi does);
     the serial port still gets it as well. everything=True shows the whole
     ring (64 KB) instead of what is new.
@@ -1729,6 +2058,11 @@ def amiga_debug_log(everything: bool = False) -> str:
         raise AmigaError("debug output needs amigentd 1.3.0; run amigent-setup --update") from None
     debug_seen = total
     text = data.decode("iso-8859-1").replace("\r\n", "\n").replace("\r", "\n")
+    if text and memory._HIT.search(text):
+        try:  # amigentd 1.4.0: name the code behind Enforcer, MuForce and CacheCop addresses
+            text = memory.annotate(text, _namer())
+        except AmigaError:
+            pass
     return text if text else "no new debug output"
 
 

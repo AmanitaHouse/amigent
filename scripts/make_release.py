@@ -147,33 +147,26 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-- Scripts on the Amiga can bring a window to the front and type into it
-  through the ARexx port: ACTIVATEWINDOW, TYPE and KEY.
-- A drive that isn't there makes a command fail at once instead of opening
-  an "insert volume" requester that waits for someone at the Amiga.
-- Games and programs on 256-colour graphics card screens come through in
-  their real colours in the remote desktop and in screenshots.
-- After a lost connection the AI agent learns whether the Amiga started
-  again and which guru code it kept.
-- An open menu or a popup left open on the desktop, which holds back every
-  new window, is noticed; the AI agent closes the popup before it starts a
-  program.
-- The AI agent reads the text on the screen instead of taking a picture
-  where text is enough, and waits on the Amiga for a window or a text.
-- Data travel packed when the Amiga packs faster than its network carries,
-  such as a PiStorm behind a plipbox: several times as fast.
-- amigent-monitor, a window on the Amiga, shows line by line what the AI
-  agent does, with the traffic of the link; it fits an A500 screen too and
-  can be sized.
-- The AI agent moves and sizes windows by mouse movement, as a hand would,
-  so drag bars, size gadgets and programs that follow the mouse react.
-- Other AI agent bridges on the same Amiga are noticed and
-  reported before the first click; nothing of theirs is touched.
-- Installations can be taken back; Aminet archives install from the PC,
-  disk images (.adf, .adz) included.
-- kprintf and Enforcer output reach the AI agent (start amigentd with
-  NOTEXT or NODEBUG to leave the recording out).
-
+- After a crash the AI agent puts the guru in words and knows what it did
+  and what ran just before the Amiga went away.
+- It sees what really runs: libraries, devices and drivers in memory with
+  their versions, programs with their hunks, resident modules, every task
+  with priority and stack. It changes a priority or sends Ctrl-C to a task.
+- It reads memory (RAM and Kickstart ROM only, never the custom chips) as
+  hex, text or 68k code with library function names, and names any address:
+  program and hunk, library function, ROM module. Enforcer and MuForce hits
+  get those names too.
+- Tracepoints: when a program you test gets to an address, its registers and
+  the top of its stack are kept, and it runs on without stopping. Writing
+  memory works only when amigentd runs with ALLOWPOKE.
+- Several background jobs at once, with numbers and return codes; their
+  output can be read while they run.
+- Before and after a program: memory, open libraries, tasks and ports
+  compared, so leaks show. Screens compared with a saved picture.
+- New C programs set up and built on the Amiga with vbcc.
+- From the PC, an Amiga in WinUAE 6.1 can be debugged from outside through
+  the emulator's GDB server, saved whole before an installation, and its
+  custom chips read (Paula, copper, sprites).
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
 
@@ -198,7 +191,7 @@ INSTALLATION
    puts Amigent into the Start menu (Windows) or Applications (macOS).
 
 A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
-SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY. amigentd answers ARexx on the
+SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY, ALLOWPOKE. amigentd answers ARexx on the
 port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
 TYPE, KEY, BUSY, HELP, QUIT).
 

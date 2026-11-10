@@ -520,12 +520,20 @@ _self_path: dict = {}
 
 
 def _amigentd_path() -> str:
-    """Where amigentd lives on the Amiga (SYSINFO self=, 1.4.0), for its FOLLOW helper."""
+    """Where amigentd lives on the Amiga (SYSINFO self=, 1.4.0), for its FOLLOW helper;
+    '' when it can't help, also when the Amiga has no PIPE: (a bare Workbench disk)."""
     if "path" not in _self_path:
         try:
-            _self_path["path"] = _with_ctl(ctl.sysinfo).get("self", "")
+            me = _with_ctl(ctl.sysinfo).get("self", "")
         except AmigaError:
             return ""
+        if me:
+            try:
+                _with_ctl(lambda: ctl.stat("PIPE:"))
+            except AmigaError as e:
+                if "not mounted" in str(e) or "isn't there" in str(e):
+                    me = ""  # no queue-handler: jobs as before 1.4.0
+        _self_path["path"] = me
     return _self_path["path"]
 
 
@@ -572,10 +580,17 @@ def amiga_job(command: str, wait: float = 600) -> str:
     last_started = command
     deadline = time.monotonic() + wait
     pause = 0.5  # short jobs are common: look soon, then back off to 5 s
+    seen_rc = 0.0
     while time.monotonic() < deadline:
         # marker and output in one go: a finished job costs one round trip, not two
-        rc, output = _with_ctl(lambda: perform(ctl, [Request.read_file(done),
-                                                     Request.read_file(out)]))
+        rc, output, early = _with_ctl(lambda: perform(ctl, [
+            Request.read_file(done), Request.read_file(out), Request.read_file(_job_file(number, "rc"))]))
+        if isinstance(rc, AmigaError) and not isinstance(early, AmigaError):
+            # the command ended; FOLLOW renames rc to done after its last piece. If it
+            # never does (it could not start), the rc file says enough after a moment.
+            seen_rc = seen_rc or time.monotonic()
+            if time.monotonic() - seen_rc > 5:
+                rc = early
         if not isinstance(rc, AmigaError):
             if isinstance(output, AmigaError):
                 raise output
@@ -598,11 +613,13 @@ def amiga_jobs(clear_finished: bool = False) -> str:
     reqs = []
     for n in numbers:
         reqs += [Request.read_file(_job_file(n, "cmd")), Request.read_file(_job_file(n, "done")),
-                 Request.stat(_job_file(n, "out"))]
+                 Request.stat(_job_file(n, "out")), Request.read_file(_job_file(n, "rc"))]
     answers = _with_ctl(lambda: perform(ctl, reqs))
     lines, finished = [], []
     for i, n in enumerate(numbers):
-        cmd, done, out = answers[3 * i:3 * i + 3]
+        cmd, done, out, rc = answers[4 * i:4 * i + 4]
+        if isinstance(done, AmigaError) and not isinstance(rc, AmigaError):
+            done = rc  # the command ended; only the copy of its output may still be on its way
         state = "running" if isinstance(done, AmigaError) else f"rc {done.decode().strip() or '?'}"
         size = out.get("size", 0) if isinstance(out, dict) else 0
         command = cmd.decode("iso-8859-1") if isinstance(cmd, bytes) else "?"
@@ -628,11 +645,14 @@ def amiga_job_output(job: int, last: int = 4000) -> str:
                 "with amigentd 1.4.0 on the Amiga it can be read while it runs]")
     if last and len(data) > last:
         data = b"..." + data[-last:]
-    try:
-        rc = _with_ctl(lambda: ctl.read_file(_job_file(job, "done"))).decode().strip()
-        state = f"[job {job} ended with rc {rc}]"
-    except AmigaError:
-        state = f"[job {job} still running]"
+    state = f"[job {job} still running]"
+    for kind in ("done", "rc"):
+        try:
+            rc = _with_ctl(lambda: ctl.read_file(_job_file(job, kind))).decode().strip()
+            state = f"[job {job} ended with rc {rc}]"
+            break
+        except AmigaError:
+            pass
     return data.decode("iso-8859-1") + ("" if data.endswith(b"\n") or not data else "\n") + state
 
 

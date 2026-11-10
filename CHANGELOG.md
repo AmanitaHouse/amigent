@@ -36,13 +36,16 @@ Versions follow [semver](https://semver.org). The number lives in
   `amigentd FOLLOW` copies it from a pipe into its file piece by piece.
 - A job of several lines runs as a script of its own, so all of its output
   is caught, not only the last line's.
+- Without `PIPE:` (a bare Workbench disk has no queue-handler) jobs run as
+  before; a job whose output helper could not start still ends.
 
 ### Debugging programs
 
 - `amiga_trace` sets tracepoints in a running program: when it gets to the
   address, amigentd keeps its registers and the top of its stack, puts the
   instruction back and the program runs on. A TRAP #15 with a trap handler of
-  amigentd's own for that task; at most 8, each fires once.
+  amigentd's own for that task; at most 8, each fires once, one per address.
+  Tested on a 68040 (PiStorm) and a 68000.
 - `amiga_tasks` lists every task with priority, state and the stack it uses
   now, warning near full; `amiga_task` changes a priority or sends Ctrl-C to F.
 - `amiga_memory_write` patches RAM, refused unless amigentd runs with

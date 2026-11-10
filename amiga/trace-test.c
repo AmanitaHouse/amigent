@@ -1,12 +1,11 @@
-/* A test program for tracepoints: calls tick() once a second for 30 seconds
- * and says where tick() is. Build: build-amigentd SOURCE trace-test.c TO trace-test */
-#include <proto/exec.h>
-#include <proto/dos.h>
+/* A test program for tracepoints: calls tick() for a while and says where tick() is.
+ * Needs no NDK: vc +aos68k -cpu=68000 -O1 -o trace-test trace-test.c */
 #include <stdio.h>
 
-LONG ticks;
 
-LONG tick(LONG n)
+long ticks;
+
+long tick(long n)
 {
     ticks += n;
     return ticks;
@@ -14,13 +13,15 @@ LONG tick(LONG n)
 
 int main(void)
 {
-    LONG i;
+    long i;
+    volatile long k;
 
     printf("tick at %p\n", (void *)tick);
     fflush(stdout);
-    for (i = 1; i <= 30; i++) {
+    for (i = 1; i <= 60; i++) {
         tick(i);
-        Delay(50);
+        for (k = 0; k < 100000; k++)  /* a while on a 68000; no clock() needed */
+            ;
     }
     printf("ticks %ld\n", ticks);
     return 0;

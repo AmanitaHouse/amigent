@@ -6177,7 +6177,8 @@ static void trace_disarm(struct trace *tr)
 {
     Disable();
     if (tr->armed) {
-        *tr->at = tr->orig;
+        if (*tr->at == 0x4E4F)  /* only our TRAP goes; the code may be gone or reused */
+            *tr->at = tr->orig;
         tr->armed = 0;
     }
     Enable();
@@ -6253,6 +6254,9 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
         return c_fail(l, 1, "unknown trace operation");
     if (at & 1)
         return c_fail(l, 1, "code starts at an even address");
+    for (i = 0; i < TRACES; i++)  /* a second one would take our TRAP for the instruction */
+        if (traces[i].armed && (ULONG)traces[i].at == at)
+            return c_fail(l, 1, "a tracepoint waits there already");
     for (i = 0; i < TRACES && !tr; i++)
         if (!traces[i].armed && !(traces[i].hit && traces[i].at))
             tr = &traces[i];
@@ -6295,6 +6299,11 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
     tr->hit = 0;
     Disable();
     tr->orig = *tr->at;
+    if (tr->orig == 0x4E4F) {  /* a TRAP #15 there already: not ours to take */
+        Enable();
+        Permit();
+        return c_fail(l, 1, "there is a TRAP #15 there already");
+    }
     *tr->at = 0x4E4F;  /* TRAP #15 */
     tr->armed = 1;
     Enable();

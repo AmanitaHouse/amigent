@@ -7263,7 +7263,9 @@ static int follow(const char *from, const char *to)
     strcpy(rc + strlen(rc) - 3, "rc");  /* x.out -> x.rc */
     strcpy(done, to);
     strcpy(done + strlen(done) - 3, "done");
-    while ((n = Read(in, buf, 4096)) > 0)
+    /* A pipe answers a read only when that much is there or the writer is done;
+     * the Shell hands output on in blocks, so small reads keep it moving. */
+    while ((n = Read(in, buf, 256)) > 0)
         for (tries = 0; tries < 250; tries++) {  /* the PC may be reading it: 5 s */
             if ((out = Open(to, MODE_READWRITE))) {
                 Seek(out, 0, OFFSET_END);

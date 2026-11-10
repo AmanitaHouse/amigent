@@ -109,16 +109,77 @@ class Run:
     def job(self):
         out = self.s.amiga_job("Echo job-done", wait=60)
         assert "job-done" in out, out
+        bad = self.s.amiga_job("Search NOSUCHVOLUME: x", wait=60)
+        assert "ended with rc" in bad, bad
         started = time.monotonic()
-        self.s.amiga_job("Wait 30", wait=1)
-        said = self.s.amiga_break("Wait")
+        said = self.s.amiga_job("List SYS:C ALL >NIL:\nWait 30", wait=1)
+        number = int(said.split()[1])
+        said = self.s.amiga_break(job=number)
         assert "sent Ctrl-C" in said, said
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            if "done" in self.s.amiga_exec(f"Type RAM:amigent-job.done"):
-                return f"job and break, Wait ended after {time.monotonic() - started:.1f} s"
+            if "ended with rc" in self.s.amiga_job_output(number):
+                listed = self.s.amiga_jobs(clear_finished=True)
+                assert f"{number:4}" in listed, listed
+                return (f"numbered jobs, return codes, break of job {number} after "
+                        f"{time.monotonic() - started:.1f} s, list and clean up")
             time.sleep(1)
-        raise AssertionError("Wait did not end after Ctrl-C")
+        raise AssertionError("the job did not end after Ctrl-C")
+
+    def live_output(self):
+        if not self.s._amigentd_path():
+            return "skip: amigentd before 1.4.0 holds a job's output until it ends"
+        # the Shell hands output on in blocks of a few KB: List SYS:C fills some
+        said = self.s.amiga_job("List SYS:C\nWait 5\nEcho omega", wait=1)
+        number = int(said.split()[1])
+        time.sleep(2.5)
+        early = self.s.amiga_job_output(number, 0)
+        assert "rwed" in early and "omega" not in early and "still running" in early, early[-300:]
+        time.sleep(6)
+        late = self.s.amiga_job_output(number)
+        assert "omega" in late and "ended" in late, late[-300:]
+        return "output of a running job read while it ran"
+
+    def loaded(self):
+        libs = self.s.amiga_loaded("libraries", "exec")
+        assert "exec.library" in libs, libs
+        progs = self.s.amiga_loaded("programs", "amigentd")
+        assert "amigentd" in progs and "hunks" in progs, progs
+        res = self.s.amiga_loaded("residents")
+        devs = self.s.amiga_loaded("devices")
+        return (f"{libs.split()[2]} exec, {devs.count(chr(10)) + 1} devices, "
+                f"{res.count(chr(10)) + 1} residents, amigentd with {progs.split('hunks')[0].split()[-1]} hunks")
+
+    def memory(self):
+        where = self.s.amiga_where("dos.library/Write")
+        assert "dos.library Write +$0" in where, where
+        code = self.s.amiga_memory("exec.library/Forbid", 16, "code")
+        assert len(code.splitlines()) > 1, code
+        rom = self.s.amiga_memory("$00F80000", 32)
+        assert rom.startswith("$00F80000"), rom
+        try:
+            self.s.amiga_memory("$00DFF000", 16)
+        except Exception as e:  # noqa: BLE001
+            assert "only RAM" in str(e), e
+        else:
+            raise AssertionError("custom chips were read")
+        mine = self.s.amiga_loaded("programs", "amigentd").split("first at ")[1].split()[0]
+        named = self.s.amiga_where("$" + mine)
+        assert "amigentd hunk 0" in named, named
+        return f"{where}; ROM and code read, custom chips refused"
+
+    def journal(self):
+        last = self.s.diary.recent(self.s._amiga_name(), most=5)
+        assert last and any("job" in e["did"] for e in last), last
+        return f"{len(last)} last calls kept on the PC, e.g. {last[-1]['did']!r}"
+
+    def emulator(self):
+        try:
+            emu = self.s._emulator()
+        except Exception:  # noqa: BLE001
+            return "skip: no \"gdb\" set for this Amiga (WinUAE 6.1)"
+        regs = emu.registers()
+        return f"PC {regs['pc']:08X} through the emulator's GDB server"
 
     def files(self):
         self.s.amiga_mkdir(DIR)
@@ -467,7 +528,8 @@ class Run:
         return last
 
 
-ORDER = ["status", "version", "exec", "missing_volume", "job", "files", "screen", "open_shell",
+ORDER = ["status", "version", "exec", "missing_volume", "job", "live_output", "loaded", "memory",
+         "journal", "emulator", "files", "screen", "open_shell",
          "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
          "install_undo", "debug", "clipboard", "notes", "aminet", "pause", "takeover", "pointer",
          "close_shell"]

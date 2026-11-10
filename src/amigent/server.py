@@ -532,6 +532,11 @@ def amiga_job(command: str, wait: float = 600) -> str:
     """
     number = _next_job()
     out, done, cli = (_job_file(number, k) for k in ("out", "done", "cli"))
+    lines = [x for x in command.strip().splitlines() if x.strip()]
+    extra = []
+    if len(lines) > 1:  # a redirection only takes one line: several go as a script of their own
+        extra = [Request.write(_job_file(number, "lines"), ("\n".join(lines) + "\n").encode("iso-8859-1", "replace"))]
+        command = f"Execute {_job_file(number, 'lines')}"
     me = _amigentd_path()
     if me:  # 1.4.0: output through a pipe, readable while the job runs
         pipe = f"PIPE:amigent-job-{number}"
@@ -547,8 +552,8 @@ def amiga_job(command: str, wait: float = 600) -> str:
             f"{command} >>{out}\n"
             f'Echo >{done} "$RC"\n'
         )
-    answers = _with_ctl(lambda: perform(ctl, [
-        Request.write(_job_file(number, "cmd"), command.encode("iso-8859-1", "replace")),
+    answers = _with_ctl(lambda: perform(ctl, extra + [
+        Request.write(_job_file(number, "cmd"), "; ".join(lines).encode("iso-8859-1", "replace")),
         Request.write(out, b""),
         Request.write(_job_file(number, "script"), script.encode("iso-8859-1")),
         Request.exec(f"Run >{cli} Execute {_job_file(number, 'script')}")]))

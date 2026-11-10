@@ -154,6 +154,9 @@ working as before; the new features need both.
     "Open the remote desktop."
     "Install the newest HippoPlayer from Aminet, so I can take it back if it doesn't work."
     "Build my program, run it on the Amiga and show me its debug output."
+    "The Amiga froze. What was it?"
+    "Which AHI driver is really loaded?"
+    "Find out whether my program leaks memory."
 
 ## Made for slow machines and slow wires
 

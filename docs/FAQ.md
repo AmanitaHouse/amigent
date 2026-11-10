@@ -28,11 +28,11 @@ they happen. It never takes the input focus, so the agent's typing still goes wh
 it should. Beside the log it shows the data rates of the last minute, totals and how
 much the agent did.
 
-**Does Amigent get along with other AI bridges, such as amimcp?**
+**Does Amigent get along with other AI bridges?**
 They use other ports, so both can be installed. What they share is the one mouse and
 keyboard: if two agents drive the Amiga at the same time, clicks land elsewhere and
-typing mixes. `amiga_status` says when such a program runs (it knows amimcp's
-amiagent), and the agent is told once before it clicks or types. Amigent never
+typing mixes. `amiga_status` says when such a program runs, for the bridges it
+knows, and the agent is told once before it clicks or types. Amigent never
 stops or removes the other one.
 
 **Can I start amigentd from Workbench?**
@@ -132,6 +132,25 @@ whole 1920x1080 screen 2.4 times. A plain 68000 stays unpacked, it would
 only slow things down. Amigent measures both sides and decides by itself;
 `amiga_link` shows the numbers, `AMIGENT_COMPRESS=off` (or `fast`, `best`)
 decides it by hand.
+
+**The Amiga crashed. What was it?**
+Ask the agent once the Amiga is back. `amiga_status` puts the guru code in words
+(`8100000C` is "exec.library: the memory list is insane"), and lists the agent's
+last steps before it went away and the programs that ran then. With amigentd
+1.4.0, `amiga_where` names an address from a debugging tool, and
+`amiga_memory` shows the code there.
+
+**Which driver really runs?**
+`amiga_loaded` lists the libraries, devices and resources in memory with their
+versions and open counts, the running programs and the resident modules: what
+is loaded, not what is on disk. "Which AHI driver is loaded?" is enough.
+
+**Can the agent debug in an emulator?**
+WinUAE 6.1 has a GDB server. Put `"gdb": "127.0.0.1:2345"` into the Amiga's
+entry in `amigas.json` and start WinUAE with `-s debugging_features=gdbserver
+-s gdb_port=2345 -s cpu_threaded=false`. Then `amiga_emulator` reads registers
+and memory even when the Amiga hangs, and saves the whole machine before an
+installation.
 
 **Can an installation be taken back?**
 Ask the agent to make it undoable: `amiga_install_begin` records the system

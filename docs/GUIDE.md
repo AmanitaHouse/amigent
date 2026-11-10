@@ -174,6 +174,7 @@ starts the old one again.
 | tool | purpose |
 |---|---|
 | `amiga_exec`, `amiga_job`, `amiga_start` | run commands, long jobs and programs |
+| `amiga_jobs`, `amiga_job_output` | the background jobs with number and return code; what a job printed so far |
 | `amiga_list`, `amiga_read_text`, `amiga_write_text` | read directories and files |
 | `amiga_put`, `amiga_get` | copy files and directory trees in both directions |
 | `amiga_mkdir`, `amiga_move`, `amiga_delete` | manage files |
@@ -192,8 +193,11 @@ starts the old one again.
 | `amiga_type`, `amiga_key` | keyboard, through the Amiga's keymap |
 | `amiga_mouse_relative` | mouse movement for games that ignore the pointer position |
 | `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
-| `amiga_break` | Ctrl-C (or D, E, F) for a running command |
-| `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions |
+| `amiga_break` | Ctrl-C (or D, E, F) for a running command or a job by its number |
+| `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions; after a crash the guru in words and what happened before |
+| `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
+| `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code |
+| `amiga_emulator` | for an Amiga in WinUAE 6.1: pause, registers, memory, a whole-machine save before installing |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
@@ -220,6 +224,33 @@ or a 68080 behind a plipbox, say), replies, files and screen tiles travel
 packed. Amigent measures both and decides; `amiga_link("off")` or
 `AMIGENT_COMPRESS=off` switches it off, `fast` or `best` on. For large files, `python -m amigent.transfer` can resume an
 interrupted copy.
+
+Jobs: `amiga_job` gives every background job a number. Several can run at
+once; `amiga_jobs` lists them with their return codes, `amiga_job_output`
+reads what one printed so far (with amigentd 1.4.0 also while it runs; the
+Shell passes output on in blocks of a few KB) and `amiga_break(job=n)` stops it.
+
+After a crash: amigentd reports exec's last alert, and Amigent puts it in
+words: `8100000C` is "exec.library: the memory list is insane; dead end". The
+PC keeps the agent's last calls for each Amiga, so `amiga_status` also says
+what was done and which programs ran just before the Amiga went away.
+
+Memory and code: `amiga_loaded` shows what really runs, such as the AHI
+driver in memory rather than the files on disk. `amiga_where` names an
+address, for example a guru's or one from a debugging tool: program, hunk and
+offset; library function through the library's jump table; or ROM module.
+`amiga_memory` reads up to 64 KB of RAM or Kickstart ROM, never custom chips
+or boards, as hex, text or 68k disassembly with the names of library calls
+(`jsr -132(a6)` becomes `exec Forbid`). An address can be given as
+`dos.library/Write`.
+
+Emulators: WinUAE 6.1 has a GDB server. With `"gdb": "127.0.0.1:2345"` in the
+Amiga's entry in `amigas.json`, and WinUAE started with
+`-s debugging_features=gdbserver -s gdb_port=2345 -s cpu_threaded=false`,
+`amiga_emulator` pauses and resumes the emulated CPU, reads registers and memory
+even when the Amiga hangs, and saves or restores the whole machine. Then
+`amiga_install_begin` also saves a state file, an undo of everything but the
+disk changes.
 
 ## Remote desktop
 
@@ -359,6 +390,7 @@ settings and menu entries; see
 | `AMIGENT_FLEET_PORT` | `6820` | port of the overview, on 127.0.0.1 only |
 | `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/` |
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
+| `AMIGENT_GDB` | | `host:port` of WinUAE's GDB server, when not set as `"gdb"` in `amigas.json` |
 
 On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
 `TLSONLY` from the command line or, started from Workbench, from the tool types

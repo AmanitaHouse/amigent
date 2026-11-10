@@ -5,6 +5,50 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ## 1.4.0 (unreleased)
 
+### After a crash
+
+- `amiga_status` puts the guru in words: part of the system, kind of error,
+  dead end or not, and the task or address (`last_alert_where`, protocol 6).
+- The PC keeps the agent's last calls for each Amiga. After a restart or a
+  guru, `amiga_status` lists the last ones before the Amiga went away and the
+  programs that ran then but don't now.
+
+### What runs, memory and code
+
+- amigentd 1.4.0 speaks protocol 6: LOADED lists libraries, devices and
+  resources with version, open count and base, the hunks of running programs
+  and the resident modules; PEEK reads up to 64 KB of RAM exec manages or of
+  the Kickstart ROM, never custom chips, CIAs or boards.
+- `amiga_loaded` shows what is in memory, such as the AHI driver that really
+  runs. `amiga_where` names an address: program, hunk and offset; library
+  function through its jump table; resident module or ROM.
+- `amiga_memory` reads memory as hex, text or 68k code; calls through a
+  library base come with their names (`jsr -132(a6)` is `exec Forbid`), from
+  tables of 76 libraries, devices and resources. Addresses can be given as
+  `dos.library/Write`. Needs the capstone disassembler, now a dependency.
+
+### Jobs
+
+- `amiga_job` numbers its jobs, and several run at once. `amiga_jobs` lists
+  them with their return codes, `amiga_job_output` reads what one printed so
+  far, `amiga_break(job=n)` stops one. A return code other than 0 is said.
+- With amigentd 1.4.0 a job's output is readable while it runs:
+  `amigentd FOLLOW` copies it from a pipe into its file piece by piece.
+- A job of several lines runs as a script of its own, so all of its output
+  is caught, not only the last line's.
+
+### Emulators
+
+- `amiga_emulator` talks to WinUAE's GDB server (WinUAE 6.1): status, pause,
+  resume, registers with the PC named, memory read by the emulator even when
+  the Amiga hangs, a postmortem, and saving or restoring the whole machine.
+  Set `"gdb": "host:port"` in the Amiga's entry in `amigas.json`.
+- With it set, `amiga_install_begin` saves the whole machine as well.
+
+### README
+
+- Set up in three steps at the top, and a diagram of how the parts fit.
+
 ### Fixes
 
 - `amiga_status` also recognizes a second kind of AI development bridge on the

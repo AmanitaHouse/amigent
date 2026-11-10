@@ -167,7 +167,7 @@ NEW IN THIS VERSION
   can be sized.
 - The AI agent moves and sizes windows by mouse movement, as a hand would,
   so drag bars, size gadgets and programs that follow the mouse react.
-- Other AI agent bridges on the same Amiga, such as amimcp, are noticed and
+- Other AI agent bridges on the same Amiga are noticed and
   reported before the first click; nothing of theirs is touched.
 - Installations can be taken back; Aminet archives install from the PC,
   disk images (.adf, .adz) included.

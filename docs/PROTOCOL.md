@@ -74,7 +74,7 @@ with it: the hello waits behind the frame data already queued.
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
-the protocol version, currently `5`. Flags, added up: `1` when a key is required
+the protocol version, currently `6`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
 certificate is there, `4` when the plain port is closed to other machines
 (`TLSONLY`): a plain connection from another machine is closed right after the
@@ -452,6 +452,8 @@ else.
 | 35 | TREE | 1 = with CRC-32 | x = path length, w = most entries (0: 50000) | path | text |
 | 36 | DEBUGLOG | | w/h = count to start from, high/low | | `u32 count`, `u32 length`, bytes |
 | 37 | NOTE | | x = text length | text | nothing, see [monitor](#monitor) |
+| 38 | LOADED | | | | text, see [loaded](#loaded) (protocol 6) |
+| 39 | PEEK | | x = address length, w/h = size high/low | address as hex text | `u32 size`, the bytes (protocol 6) |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -529,6 +531,49 @@ separated by tabs.
 - WRITE with arg bit `2` takes a raw deflate stream (RFC 1951, any block
   type) of `w/h` bytes and writes what it unpacks to; bad data are refused
   with the text `bad compressed data`, the stream is taken in full anyway.
+
+- From protocol 6 (amigentd 1.4.0) SYSINFO also has `last_alert_where`,
+  exec's second alert number (the task or the address), next to `last_alert`;
+  `loaded`, `1` when LOADED and PEEK are understood; and `self`, where this
+  amigentd lives (`PROGDIR:` and its name), for the job helper below.
+- PEEK reads memory as it is, at most 64 KB: only where exec has a memory
+  header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
+  read never touches custom chips, CIAs, expansion boards or nothing at all.
+  Anything else gets status `1` and a text saying so. Packed after COMPRESS.
+
+### loaded
+
+LOADED lists what is in memory, under Forbid, one line per entry:
+
+    L|D|R  name  version  revision  open_count  base  neg_size  pos_size  id_string
+    H  task  command  hunk  start  size
+    M  name  version  start  end
+
+`L` libraries, `D` devices, `R` resources from exec's lists (a resource that
+is a bare node has zeros); base, start and end in 8 hex digits. `H` lines are
+the hunks of every process that runs a program: the Shell's `cli_Module`, or
+the seglist a Workbench start or `CreateNewProc()` gave it; the size is that
+of the code, without the size and link longs. `M` lines are the resident
+modules, from ROM and from disk (`rt_MatchTag` to `rt_EndSkip`). With them a
+client names an address: a program's hunk and offset, a library function
+through its jump table (read with PEEK), or a resident module.
+
+### job helper
+
+`amigentd FOLLOW pipe TO file` does not start the service: it copies what
+arrives in a `PIPE:` to a file, a piece at a time with the file closed in
+between, so another program can read the file while a job writes to the pipe
+(a Shell redirection keeps its file locked until the command ends). When the
+pipe ends it waits for `file` with `.rc` in place of `.out`, which the job
+script writes with the return code, and renames it to `.done`. The PC starts
+jobs as
+
+    Run >NIL: "<self>" FOLLOW PIPE:amigent-job-<n> TO RAM:amigent-job-<n>.out
+    <command> >PIPE:amigent-job-<n>
+    Echo >RAM:amigent-job-<n>.rc "$RC"
+
+The Shell passes output on in blocks of a few KB, so a job that prints little
+shows it when it ends.
 
 ### packed replies
 

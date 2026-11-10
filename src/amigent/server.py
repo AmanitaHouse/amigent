@@ -38,7 +38,7 @@ def inventory_folder() -> Path:
 
 INSTRUCTIONS = """Amigent operates a real Amiga.
 - After the Amiga was away, amiga_status first: it tells a restart or a guru,
-  and whether another agent (such as amimcp's amiagent) runs there too; then
+  and whether another agent's bridge runs there too; then
   ask the user before driving mouse and keys, so the two don't collide.
 - To find something out, read amiga_screen_text before taking a screenshot; take
   a picture (best of just the part you need) for layout, graphics and games, or
@@ -46,7 +46,11 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
   (changed=True) shows only what changed.
 - Wait with amiga_wait_window, amiga_wait_text or amiga_wait_change instead of
   screenshots in a loop; put known sequences into one amiga_do call.
-- Long commands go through amiga_job, never through amiga_exec.
+- Long commands go through amiga_job, never through amiga_exec; a job that
+  outlasts its wait has a number for amiga_jobs, amiga_job_output and
+  amiga_break(job=n).
+- To find out what really runs (a driver, a library version), amiga_loaded;
+  for a crash address, amiga_where, and amiga_memory(show="code") for the code.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,

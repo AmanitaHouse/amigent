@@ -127,10 +127,16 @@ window to send them) and one shared clipboard. No VNC server and no extra
 software on the Amiga beyond this archive, and it stays quick even on a
 7 MHz 68000 behind a plipbox.
 
-And if you like, an AI agent (Claude, Codex or any other MCP client) takes
-over the same way: it runs commands, copies files, installs software and
-clicks through programs, while you watch every click in that window and can
-take over at any moment.
+
+AN AI AGENT THAT WORKS ON YOUR AMIGA, THROUGH MCP
+
+An AI agent (Claude, Codex or any other MCP client) takes over the same
+way: it runs commands, copies files, installs software and clicks through
+programs, while you watch every click in that window and can take over at
+any moment. It reads the screen as text where a picture isn't needed, can
+take an installation back, explains a guru, sees which drivers really run,
+and helps you develop: it builds C programs on the Amiga, reads their debug
+output and sets tracepoints in them.
 
 This archive is the Amiga half: amigentd, the small service that does the
 work on the Amiga, amigent-status, a window that shows who is connected,

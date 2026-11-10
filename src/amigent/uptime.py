@@ -57,16 +57,32 @@ def notes(info: dict, before: dict | None, now: float) -> list[str]:
             said.append(f"amigentd started again {duration(daemon)} ago (updated or restarted); "
                         "the Amiga itself kept running")
     if info.get("last_alert"):
-        said.append(f"exec kept an alert from before the last reset: {info['last_alert'].upper()} "
-                    "(a guru meditation code; the first digit 8 means the Amiga could not go on)")
+        from .alerts import describe
+
+        code = info["last_alert"].upper()
+        where = info.get("last_alert_where", "")
+        shown = f"{code}.{where.upper()}" if where else code
+        said.append(f"exec kept an alert from before the last reset: guru {shown}, "
+                    f"{describe(code, where or None)}")
     return said
+
+
+def restarted(notes_said: list[str]) -> bool:
+    return any(n.startswith("the Amiga started again") for n in notes_said)
 
 
 class Seen:
     """The last SYSINFO uptimes per Amiga, kept in a small file between sessions."""
 
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, path: Path | None = None):
+        self._path = path  # None: secret.FOLDER/uptime.json, looked up at each use
+
+    @property
+    def path(self) -> Path:
+        if self._path is None:
+            from . import secret
+            return secret.FOLDER / "uptime.json"
+        return self._path
 
     def _all(self) -> dict:
         try:
@@ -74,7 +90,12 @@ class Seen:
         except (OSError, ValueError):
             return {}
 
-    def check(self, name: str, info: dict, now: float | None = None) -> list[str]:
+    def previous(self, name: str) -> dict:
+        """What the last look saw: at, uptime, daemon_uptime and the running tasks."""
+        return self._all().get(name) or {}
+
+    def check(self, name: str, info: dict, now: float | None = None,
+              tasks: str | None = None) -> list[str]:
         """Notes for this look, and remember it for the next one."""
         now = time.time() if now is None else now
         everything = self._all()
@@ -82,6 +103,8 @@ class Seen:
         if _int(info, "uptime") is not None:
             everything[name] = {"at": now, "uptime": _int(info, "uptime"),
                                 "daemon_uptime": _int(info, "daemon_uptime") or 0}
+            if tasks is not None:
+                everything[name]["tasks"] = tasks
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text(json.dumps(everything))

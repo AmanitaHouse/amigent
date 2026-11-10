@@ -15,6 +15,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/execbase.h>
+#include <exec/resident.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <dos/dosextens.h>
@@ -61,7 +62,7 @@ extern struct Library *CyberGfxBase;
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
-#define PROTOCOL_VERSION 5
+#define PROTOCOL_VERSION 6
 #define NAMES_MAX 4096  /* SYSINFO ports= and tasks= */
 #define DEFAULT_PORT 6801
 #define TILE 64
@@ -103,10 +104,11 @@ enum {
     CMD_CHANNEL = 20, CMD_EXEC, CMD_READ_FILE, CMD_WRITE_FILE, CMD_DIR, CMD_STAT, CMD_DELETE,
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
     CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
-    CMD_NOTE  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
+    CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
+    CMD_LOADED, CMD_PEEK  /* protocol 6 */
 };
 
-const char version[] = "$VER: amigentd 1.3.0 (06.11.2026)";
+const char version[] = "$VER: amigentd 1.4.0 (10.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
 
@@ -3486,6 +3488,9 @@ static BOOL c_sysinfo(struct link *l)
         t_str(&t, (const UBYTE *)"last_alert=", FALSE);
         t_hex(&t, SysBase->LastAlert[0]);
         t_chr(&t, '\n');
+        t_str(&t, (const UBYTE *)"last_alert_where=", FALSE);  /* protocol 6: task or address */
+        t_hex(&t, SysBase->LastAlert[1]);
+        t_chr(&t, '\n');
     }
     t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
     t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
@@ -3518,6 +3523,7 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
+    t_pair(&t, "loaded", 1);  /* protocol 6: LOADED and PEEK */
     t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
     t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
@@ -5706,6 +5712,181 @@ static BOOL c_debuglog(struct link *l, ULONG since)
     return ok;
 }
 
+/* ---- protocol 6: what is loaded, and reading memory -------------------- */
+
+/* One line per library, device or resource:
+ * L|D|R  name  version  revision  open count  base  neg size  pos size  id string */
+static void t_libs(struct text *t, char kind, struct List *list)
+{
+    struct Node *n;
+
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        struct Library *lib = (struct Library *)n;
+
+        t_chr(t, kind);
+        t_tab(t);
+        t_str(t, (const UBYTE *)(n->ln_Name ? n->ln_Name : "?"), FALSE);
+        t_tab(t);
+        if (kind == 'R' && n->ln_Type != NT_LIBRARY && n->ln_Type != NT_RESOURCE) {
+            /* some resources are a bare node, without library fields */
+            t_add(t, "0\t0\t0\t", 6);
+            t_hex(t, (ULONG)n);
+            t_add(t, "\t0\t0\t\n", 6);
+            continue;
+        }
+        t_num(t, lib->lib_Version);
+        t_tab(t);
+        t_num(t, lib->lib_Revision);
+        t_tab(t);
+        t_num(t, lib->lib_OpenCnt);
+        t_tab(t);
+        t_hex(t, (ULONG)lib);
+        t_tab(t);
+        t_num(t, lib->lib_NegSize);
+        t_tab(t);
+        t_num(t, lib->lib_PosSize);
+        t_tab(t);
+        if (lib->lib_IdString && (TypeOfMem(lib->lib_IdString) ||
+                                  (ULONG)lib->lib_IdString >= 0xF80000UL))
+            t_str(t, (const UBYTE *)lib->lib_IdString, FALSE);
+        t_chr(t, '\n');
+    }
+}
+
+/* H  process  command  hunk  start  size: the code of programs that run, so the
+ * PC can name an address (a guru's, a debugger's) as program, hunk and offset. */
+static void t_hunks(struct text *t, struct List *list)
+{
+    struct Node *n;
+
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        struct Process *pr = (struct Process *)n;
+        const UBYTE *cmd = NULL;
+        BPTR seg = 0;
+        LONG hunk;
+
+        if (n->ln_Type != NT_PROCESS)
+            continue;
+        if (pr->pr_CLI) {
+            struct CommandLineInterface *cli = BADDR(pr->pr_CLI);
+            seg = cli->cli_Module;
+            cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+        }
+        if (!seg && pr->pr_SegList) {  /* started from Workbench or by CreateNewProc() */
+            BPTR *array = BADDR(pr->pr_SegList);
+            if (array && array[0] >= 3)
+                seg = array[3];
+        }
+        for (hunk = 0; seg && hunk < 64; hunk++) {
+            ULONG *p = BADDR(seg);
+
+            t_chr(t, 'H');
+            t_tab(t);
+            t_str(t, (const UBYTE *)(n->ln_Name ? n->ln_Name : "?"), FALSE);
+            t_tab(t);
+            if (cmd && cmd[0]) {
+                LONG k;
+                for (k = 1; k <= cmd[0]; k++)
+                    t_chr(t, cmd[k] == '\t' || cmd[k] < ' ' ? ' ' : cmd[k]);
+            }
+            t_tab(t);
+            t_num(t, hunk);
+            t_tab(t);
+            t_hex(t, (ULONG)(p + 1));
+            t_tab(t);
+            t_num(t, p[-1] - 8);  /* the size long counts itself and the link */
+            t_chr(t, '\n');
+            seg = *p;
+        }
+    }
+}
+
+/* M  name  version  start  end: resident modules, from ROM and from disk */
+static void t_residents(struct text *t)
+{
+    ULONG *rm = (ULONG *)SysBase->ResModules;
+    LONG guard = 0;
+
+    while (rm && *rm && guard++ < 1024) {
+        struct Resident *r;
+
+        if (*rm & 0x80000000UL) {  /* a link to the next table */
+            rm = (ULONG *)(*rm & 0x7FFFFFFFUL);
+            continue;
+        }
+        r = (struct Resident *)*rm++;
+        t_chr(t, 'M');
+        t_tab(t);
+        t_str(t, (const UBYTE *)(r->rt_Name ? r->rt_Name : "?"), FALSE);
+        t_tab(t);
+        t_num(t, r->rt_Version);
+        t_tab(t);
+        t_hex(t, (ULONG)r);
+        t_tab(t);
+        t_hex(t, (ULONG)r->rt_EndSkip);
+        t_chr(t, '\n');
+    }
+}
+
+static BOOL c_loaded(struct link *l)
+{
+    struct text t = {0};
+
+    Forbid();
+    t_libs(&t, 'L', &SysBase->LibList);
+    t_libs(&t, 'D', &SysBase->DeviceList);
+    t_libs(&t, 'R', &SysBase->ResourceList);
+    t_hunks(&t, &SysBase->TaskReady);
+    t_hunks(&t, &SysBase->TaskWait);
+    t_residents(&t);
+    Permit();
+    return c_text(l, &t);
+}
+
+#define PEEK_MAX 65536
+
+/* Only RAM that exec manages, and the Kickstart ROM: custom chips, CIAs and
+ * expansion boards can change state or hang the bus when read. */
+static BOOL peek_allowed(ULONG at, ULONG n)
+{
+    ULONG end = at + n - 1;
+    struct MemHeader *mh;
+    BOOL ok = FALSE;
+
+    if (!n || n > PEEK_MAX || end < at)
+        return FALSE;
+    if (at >= 0xF80000UL && end <= 0xFFFFFFUL)
+        return TRUE;
+    Forbid();
+    for (mh = (struct MemHeader *)SysBase->MemList.lh_Head; mh->mh_Node.ln_Succ;
+         mh = (struct MemHeader *)mh->mh_Node.ln_Succ)
+        if (at >= (ULONG)mh->mh_Lower && end < (ULONG)mh->mh_Upper) {
+            ok = TRUE;
+            break;
+        }
+    Permit();
+    return ok;
+}
+
+/* The address comes as hex text in the name, the length in w:h. */
+static BOOL c_peek(struct link *l, UWORD len, ULONG n)
+{
+    struct text t = {0};
+    BOOL alive;
+    char *hex = c_name(l, len, &alive), *p;
+    ULONG at = 0;
+
+    if (!hex)
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    for (p = hex; *p; p++)
+        at = at << 4 | (*p <= '9' ? *p - '0' : (*p | 0x20) - 'a' + 10);
+    FreeVec(hex);
+    if (!peek_allowed(at, n))
+        return c_fail(l, 1, "only RAM exec manages and the Kickstart ROM, at most 64 KB");
+    t_add(&t, (const void *)at, n);
+    return c_text(l, &t);
+}
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -5761,6 +5942,12 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_DEBUGLOG:
         mon_say('C', "debug log", NULL);
         return c_debuglog(l, (ULONG)w << 16 | h);
+    case CMD_LOADED:
+        mon_say('C', "loaded libraries and programs", NULL);
+        return c_loaded(l);
+    case CMD_PEEK:  /* address as hex in the name, length in w:h */
+        mon_say('C', "read memory", NULL);
+        return c_peek(l, x, (ULONG)w << 16 | h);
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
             return FALSE;

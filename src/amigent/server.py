@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
-from . import secret, system, uptime, watch
+from . import gdb, journal, memory, secret, system, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
@@ -149,11 +149,15 @@ def _noted(fn):
     def run(*args, **kwargs):
         line = note_line(fn.__name__, kwargs, defaults)
         sent = _note(line)
+        ok = False
         try:
             result = fn(*args, **kwargs)
+            ok = True
         finally:
             if not sent:  # the tool may have brought the link up
                 _note(line)
+            if fn.__name__ not in UNJOURNALED:
+                diary.add(_amiga_name(), line, ok)
         if isinstance(result, str):
             result = _outdated_note() + result
         if fn.__name__ in INPUT_TOOLS:
@@ -221,7 +225,17 @@ def _with_screen(fn):
 _join = join_path
 
 
-seen = uptime.Seen(secret.FOLDER / "uptime.json")
+seen = uptime.Seen()  # under secret.FOLDER, looked up when used
+diary = journal.Journal()  # under secret.FOLDER, looked up when used
+# Looking around changes nothing on the Amiga; a postmortem wants what did.
+UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "amiga_screen_text",
+               "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
+               "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
+               "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text"}
+
+
+def _amiga_name() -> str:
+    return machines.name_of(HOST) or machines.address(HOST) or HOST or "amiga"
 
 
 @mcp.tool()
@@ -245,9 +259,13 @@ def amiga_status() -> str:
             report["warning"] = _others_seen["text"]
     if "uptime" in info:
         report["running_for"] = uptime.duration(int(info["uptime"]))
-    said = seen.check(machines.name_of(HOST) or machines.address(HOST) or "", info)
+    name = machines.name_of(HOST) or machines.address(HOST) or ""
+    before = seen.previous(name)
+    said = seen.check(name, info, tasks=tasks)
     if said:
         report["notes"] = said
+    if uptime.restarted(said) or info.get("last_alert"):
+        report["before_it_went_away"] = _postmortem(before, info, tasks)
     report["system"] = _system_facts()
     report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
     outdated = pc_outdated(getattr(getattr(ctl, "backend", None), "protocol", 0))
@@ -258,6 +276,25 @@ def amiga_status() -> str:
                                "debug_output": info.get("debug") == "1"}
         report["packing"] = pack.policy_for(HOST).describe()
     return json.dumps(report, indent=1)
+
+
+def _postmortem(before: dict, info: dict, tasks: str | None) -> dict:
+    """After a restart: what the agent did last, and what ran then that doesn't now."""
+    out = {}
+    try:
+        started = time.time() - int(info.get("uptime", 0))
+    except ValueError:
+        started = None
+    last = diary.recent(_amiga_name(), before=started)
+    if last:
+        out["last_actions"] = journal.describe(last)
+    then, now = others.names(before.get("tasks", "")), others.names(tasks or "")
+    gone = sorted(then - now)
+    if gone:
+        out["running_then_not_now"] = gone
+    if not out:
+        out["note"] = "nothing recorded from before; the journal starts with this version"
+    return out
 
 
 _system_seen: dict = {}
@@ -366,19 +403,26 @@ def amiga_start(command: str) -> str:
 
 
 @mcp.tool()
-def amiga_break(command: str = "", signal: str = "C") -> str:
+def amiga_break(command: str = "", signal: str = "C", job: int = 0) -> str:
     """Send Ctrl-C (or D, E, F) to a running command, like pressing it in its Shell.
 
-    command is the program's name as Status shows it, e.g. 'List' or 'Wait'.
-    Without it, the command last started by amiga_job or amiga_start is meant.
-    A plain amiga_exec cannot be broken this way: it blocks the daemon until
-    it returns, so long work belongs in amiga_job.
+    command is the program's name as Status shows it, e.g. 'List' or 'Wait';
+    job is a number from amiga_job. Without either, the command last started by
+    amiga_job or amiga_start is meant. A plain amiga_exec cannot be broken this
+    way: it blocks the daemon until it returns, so long work belongs in amiga_job.
     """
+    if signal.upper() not in ("C", "D", "E", "F"):
+        raise AmigaError("signal must be C, D, E or F")
+    if job:
+        said = _with_ctl(lambda: ctl.read_file(_job_file(job, "cli"))).decode("iso-8859-1")
+        m = re.search(r"\[CLI (\d+)\]", said)
+        if not m:
+            raise AmigaError(f"job {job}: no process number recorded ({said.strip() or 'empty'})")
+        _with_ctl(lambda: ctl.exec(f"Break {m.group(1)} {signal.upper()}"))
+        return f"sent Ctrl-{signal.upper()} to job {job} (process {m.group(1)})"
     name = command or last_started
     if not name:
         raise AmigaError("nothing started yet; give the command's name")
-    if signal.upper() not in ("C", "D", "E", "F"):
-        raise AmigaError("signal must be C, D, E or F")
     wanted = PurePosixPath(name.split()[0].split(":")[-1]).name.lower()
     status = _with_ctl(lambda: ctl.exec("Status")).output
     hits = []
@@ -427,23 +471,65 @@ def amiga_rexx_ports() -> str:
     return out
 
 
+JOB_BASE = "RAM:amigent-job-"
+_job_numbers: list[int] = []
+
+
+def _job_file(number: int, kind: str) -> str:
+    return f"{JOB_BASE}{number}.{kind}"
+
+
+def _known_jobs() -> list[int]:
+    """Job numbers that left files in RAM:, this session's or an earlier one's."""
+    try:
+        entries = _with_ctl(lambda: ctl.list_dir("RAM:"))
+    except AmigaError:
+        return []
+    found = set()
+    for e in entries:
+        m = re.fullmatch(r"amigent-job-(\d+)\.cmd", e.get("name", ""), re.I)
+        if m:
+            found.add(int(m.group(1)))
+    return sorted(found)
+
+
+def _next_job() -> int:
+    if not _job_numbers:
+        _job_numbers.append(max(_known_jobs() or [0]))
+    _job_numbers[0] += 1
+    return _job_numbers[0]
+
+
+def _job_result(number: int, rc_text: str, output: bytes) -> str:
+    text = output.decode("iso-8859-1")
+    rc = rc_text.strip()
+    if rc and rc != "0":
+        text += f"{'' if text.endswith(chr(10)) or not text else chr(10)}[job {number} ended with rc {rc}]"
+    return text
+
+
 @mcp.tool()
 def amiga_job(command: str, wait: float = 600) -> str:
     """Run a long command at low priority in the background and return its output.
 
-    The Amiga stays reachable meanwhile. If wait runs out, the job keeps going
-    and its output ends up in RAM:amigent-job.out.
+    The Amiga stays reachable meanwhile, and several jobs can run at once. If
+    wait runs out, the job keeps going: the answer gives its number, for
+    amiga_jobs (all of them), amiga_job_output (what it printed so far) and
+    amiga_break(job=n). A return code other than 0 is said at the end.
     """
+    number = _next_job()
+    out, done, cli = (_job_file(number, k) for k in ("out", "done", "cli"))
     script = (
         "FailAt 21\nChangeTaskPri -5\n"
-        f"{command} >RAM:amigent-job.out\n"
-        'Echo >RAM:amigent-job.done "done"\n'
+        f"{command} >>{out}\n"
+        f'Echo >{done} "$RC"\n'
     )
     answers = _with_ctl(lambda: perform(ctl, [
-        Request.exec("Delete >NIL: RAM:amigent-job.done RAM:amigent-job.out QUIET"),
-        Request.write("RAM:amigent-job.script", script.encode("iso-8859-1")),
-        Request.exec("Run >NIL: Execute RAM:amigent-job.script")]))
-    for answer in answers[1:]:
+        Request.write(_job_file(number, "cmd"), command.encode("iso-8859-1", "replace")),
+        Request.write(out, b""),
+        Request.write(_job_file(number, "script"), script.encode("iso-8859-1")),
+        Request.exec(f"Run >{cli} Execute {_job_file(number, 'script')}")]))
+    for answer in answers:
         if isinstance(answer, AmigaError):
             raise answer
     global last_started
@@ -452,15 +538,229 @@ def amiga_job(command: str, wait: float = 600) -> str:
     pause = 0.5  # short jobs are common: look soon, then back off to 5 s
     while time.monotonic() < deadline:
         # marker and output in one go: a finished job costs one round trip, not two
-        done, output = _with_ctl(lambda: perform(ctl, [Request.stat("RAM:amigent-job.done"),
-                                                       Request.read_file("RAM:amigent-job.out")]))
-        if not isinstance(done, AmigaError):
+        rc, output = _with_ctl(lambda: perform(ctl, [Request.read_file(done),
+                                                     Request.read_file(out)]))
+        if not isinstance(rc, AmigaError):
             if isinstance(output, AmigaError):
                 raise output
-            return output.decode("iso-8859-1")
+            return _job_result(number, rc.decode("iso-8859-1"), output)
         time.sleep(min(pause, max(deadline - time.monotonic(), 0)))
         pause = min(pause * 2, 5)
-    return "still running; output will be in RAM:amigent-job.out"
+    return (f"job {number} still running; amiga_job_output({number}) shows what it printed, "
+            f"amiga_break(job={number}) stops it")
+
+
+@mcp.tool()
+def amiga_jobs(clear_finished: bool = False) -> str:
+    """Background jobs started by amiga_job: number, running or rc, output size, command.
+
+    clear_finished removes the files of jobs that ended.
+    """
+    numbers = _known_jobs()
+    if not numbers:
+        return "no jobs"
+    reqs = []
+    for n in numbers:
+        reqs += [Request.read_file(_job_file(n, "cmd")), Request.read_file(_job_file(n, "done")),
+                 Request.stat(_job_file(n, "out"))]
+    answers = _with_ctl(lambda: perform(ctl, reqs))
+    lines, finished = [], []
+    for i, n in enumerate(numbers):
+        cmd, done, out = answers[3 * i:3 * i + 3]
+        state = "running" if isinstance(done, AmigaError) else f"rc {done.decode().strip() or '?'}"
+        size = out.get("size", 0) if isinstance(out, dict) else 0
+        command = cmd.decode("iso-8859-1") if isinstance(cmd, bytes) else "?"
+        lines.append(f"{n:4}  {state:9} {size:>8} bytes  {command}")
+        if state != "running":
+            finished.append(n)
+    if clear_finished and finished:
+        names = " ".join(f"{JOB_BASE}{n}.#?" for n in finished)
+        _with_ctl(lambda: ctl.exec(f"Delete >NIL: {names} QUIET"))
+        lines.append(f"cleared {len(finished)} finished job(s)")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def amiga_job_output(job: int, last: int = 4000) -> str:
+    """What a background job printed so far, the last bytes of it (0 for all)."""
+    data = _with_ctl(lambda: ctl.read_file(_job_file(job, "out")))
+    if last and len(data) > last:
+        data = b"..." + data[-last:]
+    try:
+        rc = _with_ctl(lambda: ctl.read_file(_job_file(job, "done"))).decode().strip()
+        state = f"[job {job} ended with rc {rc}]"
+    except AmigaError:
+        state = f"[job {job} still running]"
+    return data.decode("iso-8859-1") + ("" if data.endswith(b"\n") or not data else "\n") + state
+
+
+def _loaded() -> "memory.Loaded":
+    return memory.parse(_with_ctl(ctl.loaded))
+
+
+def _namer() -> "memory.Namer":
+    return memory.Namer(_loaded(), peek=lambda a, n: _with_ctl(lambda: ctl.peek(a, n)))
+
+
+@mcp.tool()
+def amiga_loaded(kind: str = "all", name: str = "") -> str:
+    """What is in memory now: libraries, devices, resources with version and open
+    count; running programs with their hunks; resident modules.
+
+    kind: all, libraries, devices, resources, programs or residents; name filters.
+    Tells which driver really runs (an AHI driver, a disk device), unlike the
+    files on disk. Needs amigentd 1.4.0.
+    """
+    if kind not in ("all", "libraries", "devices", "resources", "programs", "residents"):
+        raise AmigaError("kind: all, libraries, devices, resources, programs or residents")
+    return memory.listing(_loaded(), kind, name)
+
+
+@mcp.tool()
+def amiga_where(address: str) -> str:
+    """Name the code or data at an address: program and hunk, library function,
+    resident module or ROM. For a guru's address, a debugger's or CacheCop's PC.
+    Needs amigentd 1.4.0."""
+    namer = _namer()
+    try:
+        at = memory.resolve(address, namer)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    return f"${at:08X}: {namer.name(at) or 'not in a program, library or module amigentd knows'}"
+
+
+@mcp.tool()
+def amiga_memory(address: str, size: int = 256, show: str = "hex", a6: str = "") -> str:
+    """Read the Amiga's memory, without changing anything.
+
+    address: hex ($0A12B4C0, 0x...), a library ('dos.library' for its base) or a
+    function ('dos.library/Write' for its code). show: hex (dump with text),
+    code (68k disassembly with library function names; a6 names the library a6
+    holds, e.g. 'dos'), or text (the bytes as text up to a zero byte). Only RAM
+    that exec manages and the Kickstart ROM, at most 64 KB; custom chips, CIAs
+    and boards are refused, since reading them can change what they do.
+    Needs amigentd 1.4.0.
+    """
+    namer = _namer()
+    try:
+        at = memory.resolve(address, namer)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    data = _with_ctl(lambda: ctl.peek(at, size))
+    head = f"${at:08X}" + (f" ({namer.name(at, search_functions=False)})"
+                           if namer.name(at, search_functions=False) else "")
+    if show == "code":
+        cpu = str(_system_facts().get("cpu", "68040"))
+        cpu = cpu if cpu in ("68000", "68010", "68020", "68030", "68040", "68060") else "68040"
+        return head + "\n" + memory.disassemble(data, at, a6, namer, cpu)
+    if show == "text":
+        return head + "\n" + data.split(b"\0", 1)[0].decode("iso-8859-1")
+    return head + "\n" + memory.hexdump(data, at)
+
+
+_gdb: dict = {}
+
+
+def _emulator() -> "gdb.Gdb":
+    where = (machines.find(HOST) or {}).get("gdb") if HOST else None
+    where = where or os.environ.get("AMIGENT_GDB")
+    if not where:
+        raise AmigaError("no emulator debugger set: for an Amiga in WinUAE 6.1 on this PC put "
+                         '"gdb": "127.0.0.1:2345" into its entry in amigas.json (or AMIGENT_GDB), '
+                         "and start WinUAE with -s debugging_features=gdbserver -s gdb_port=2345 "
+                         "-s cpu_threaded=false")
+    if _gdb.get("where") != where:
+        if _gdb.get("conn"):
+            _gdb["conn"].close()
+        _gdb.update(where=where, conn=gdb.Gdb(where))
+    return _gdb["conn"]
+
+
+def _checkpoint_folder() -> "Path":
+    from pathlib import Path
+    return Path(secret.FOLDER) / "checkpoints" / journal._safe(_amiga_name())
+
+
+@mcp.tool()
+def amiga_emulator(action: str = "status", file: str = "", address: str = "", size: int = 256) -> str:
+    """The emulated Amiga from outside, through WinUAE's GDB server (WinUAE 6.1+).
+
+    action: status (running or stopped, and why), pause, resume, registers (with
+    the PC named), memory (address and size, read by the emulator, even when
+    the Amiga hangs), save or restore (the whole machine as a state file; file
+    is a path on this PC, by default in Amigent's checkpoints folder), or
+    postmortem (registers, the code at the PC and the stack, for a hang or a
+    guru). Needs "gdb" in the Amiga's amigas.json entry.
+    """
+    emu = _emulator()
+    try:
+        if action == "status":
+            caps = ""
+            try:
+                caps = emu.monitor("execution-status")
+            except gdb.GdbError:
+                pass
+            return ("running" if emu.running else f"stopped ({emu.why()})") + (f"\n{caps}" if caps else "")
+        if action == "pause":
+            return f"paused: {emu.pause()}"
+        if action == "resume":
+            emu.resume()
+            return "running"
+        if action == "registers":
+            regs = emu.registers()
+            try:
+                namer = _namer()
+            except Exception:  # noqa: BLE001 - a hung Amiga can't name anything
+                namer = None
+            return gdb.describe_registers(regs, namer)
+        if action == "memory":
+            from . import memory as mem
+            at = int(address.lstrip("$"), 16) if address else 0
+            return mem.hexdump(emu.read(at, max(1, min(size, 65536))), at)
+        if action in ("save", "restore"):
+            path = file or str(_checkpoint_folder() / "manual.uss")
+            if action == "save":
+                from pathlib import Path
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            said = emu.checkpoint(action, _host_path(path))
+            return f"{action}d {path}: {said}"
+        if action == "postmortem":
+            was = emu.running
+            if was:
+                emu.pause()
+            try:
+                regs = emu.registers()
+                code = emu.read(max(regs["pc"] - 16, 0), 64)
+                stack = emu.read(regs["a7"], 64)
+            finally:
+                if was:
+                    emu.resume()
+            from . import memory as mem
+            return "\n".join([gdb.describe_registers(regs), "code around the PC:",
+                              mem.disassemble(code, max(regs["pc"] - 16, 0)),
+                              "stack:", mem.hexdump(stack, regs["a7"])])
+    except gdb.GdbError as e:
+        raise AmigaError(str(e)) from None
+    except OSError as e:
+        emu.close()
+        raise AmigaError(f"the emulator's GDB server stopped answering: {e}") from None
+    raise AmigaError("action: status, pause, resume, registers, memory, save, restore or postmortem")
+
+
+def _host_path(path: str) -> str:
+    """WinUAE on Windows wants a Windows path; from WSL /mnt/c/... becomes C:\\..."""
+    import re as _re
+    m = _re.match(r"^/mnt/([a-z])/(.*)$", path)
+    if m:
+        return f"{m.group(1).upper()}:\\" + m.group(2).replace("/", "\\")
+    if path.startswith("/") and os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop"):
+        try:
+            import subprocess
+            return subprocess.run(["wslpath", "-w", path], capture_output=True, text=True,
+                                  timeout=5).stdout.strip() or path
+        except (OSError, subprocess.SubprocessError):
+            return path
+    return path
 
 
 @mcp.tool()
@@ -1608,8 +1908,24 @@ def amiga_install_begin(name: str, folders: str = "", system: bool = True) -> st
         raise AmigaError(f"copying the system aside failed (rc={result.rc}): {result.output[-500:]}")
     path = install.save(_amiga(), record)
     files_count = sum(len(v) for v in record.before.values())
+    whole = _install_checkpoint(name)
     return (f"ready: {files_count} entries in {len(record.paths)} folders recorded and copied to "
-            f"{record.store}; install now, then amiga_install_end({name!r}). Record: {path}")
+            f"{record.store}; install now, then amiga_install_end({name!r}). Record: {path}"
+            + (f"\n{whole}" if whole else ""))
+
+
+def _install_checkpoint(name: str) -> str:
+    """With an emulator debugger set, the whole machine as a state file as well."""
+    if not (((machines.find(HOST) or {}).get("gdb") if HOST else None) or os.environ.get("AMIGENT_GDB")):
+        return ""
+    target = _checkpoint_folder() / f"install-{name}.uss"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _emulator().checkpoint("save", _host_path(str(target)))
+    except (AmigaError, gdb.GdbError, OSError) as e:
+        return f"(no emulator checkpoint: {e})"
+    return (f"the whole emulated Amiga is saved as {target}; amiga_emulator('restore', "
+            f"file={str(target)!r}) puts everything back as it was, memory included")
 
 
 @mcp.tool()

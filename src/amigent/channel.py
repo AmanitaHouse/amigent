@@ -26,6 +26,8 @@ CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
+LOADED, PEEK = 38, 39  # protocol 6: libraries, devices, programs' hunks; reading memory
+PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
 PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
@@ -33,7 +35,8 @@ WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW, WAIT_KNOWN =
 PACK_WRITE_MIN = 512  # bytes; below this packing a WRITE is not worth the bother
 PAUSE = 19  # also on the screen connection: x = seconds, 0 ends it
 PAUSE_PROTOCOL = 4
-NEWEST_PROTOCOL = PACK_PROTOCOL  # the newest amigentd this Amigent knows
+LOADED_PROTOCOL = 6
+NEWEST_PROTOCOL = LOADED_PROTOCOL  # the newest amigentd this Amigent knows
 
 
 def pc_outdated(protocol: int) -> str:
@@ -578,6 +581,28 @@ class AmigaChannel(VolumeFlush):
         raw = text.encode(ENCODING, "replace")[:NOTE_MAX]
         self._sock.settimeout(self.timeout)
         self._send(struct.pack(">BBHHHH", NOTE, 0, len(raw), 0, 0, 0) + raw)
+
+    # protocol 6
+
+    def _need6(self, what: str) -> None:
+        if not self._sock:
+            self.connect()
+        if self.protocol < LOADED_PROTOCOL:
+            raise AmigaError(f"{what} needs amigentd 1.4.0 or newer (protocol {LOADED_PROTOCOL}); "
+                             "run amigent-setup --update")
+
+    def loaded(self) -> list[str]:
+        """LOADED lines: L/D/R libraries, devices, resources; H hunks; M resident modules."""
+        self._need6("listing what is loaded")
+        return self._text(LOADED)
+
+    def peek(self, address: int, size: int) -> bytes:
+        """Memory as it is: only RAM exec manages and the Kickstart ROM, at most 64 KB."""
+        self._need6("reading memory")
+        if not 0 < size <= PEEK_MAX:
+            raise AmigaError(f"between 1 and {PEEK_MAX} bytes at a time")
+        return self._one(Request(PEEK, f"{address & 0xFFFFFFFF:08x}", 0, 0, (size >> 16) & 0xFFFF,
+                                 size & 0xFFFF, read=_read_blob))
 
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""

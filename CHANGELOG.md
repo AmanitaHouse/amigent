@@ -3,6 +3,16 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.4.0 (unreleased)
+
+### Fixes
+
+- `amiga_status` also recognizes a second kind of AI development bridge on the
+  Amiga, by its message port, task, TCP port, files and S:User-Startup line,
+  and says so before the first click, as for the others.
+- For an emulator on this PC, the TCP check for other bridges is skipped:
+  there the port belongs to the PC, and only the Amiga's own names count.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

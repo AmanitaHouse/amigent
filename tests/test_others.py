@@ -12,7 +12,8 @@ class Ctl:
             pass
         r = R()
         if command.startswith("Search"):
-            r.rc = 0 if self.startup else 5
+            word = "amiagent" if self.startup is True else self.startup
+            r.rc = 0 if word and f" {word} " in command else 5
         else:
             r.rc = 0 if any(f'"{p}"' in command for p in self.present) else 20
         return r
@@ -40,3 +41,18 @@ def test_installed_but_not_running_is_reported_without_a_warning():
 def test_the_status_window_alone_counts_as_running():
     found = others.from_sysinfo({"ports": "", "tasks": "amimon-mui"})
     assert found and found[0].agent.name == "amimon" and found[0].running
+
+
+def test_the_devbench_bridge_is_found_running_and_installed():
+    found = others.from_sysinfo({"ports": "REXX|AMIGABRIDGE", "tasks": "amiga-bridge"})
+    assert [f.agent.name for f in found] == ["amiga-bridge"]
+    assert "amiga-bridge" in others.warning(found)
+    found = others.scan(Ctl(present=["DH0:AmigaBridge/amiga-bridge"], startup="amiga-bridge"), "",
+                        {"ports": "", "tasks": ""})
+    assert [f.agent.name for f in found] == ["amiga-bridge"]
+    assert not found[0].running and "started from S:User-Startup" in found[0].how
+
+
+def test_ports_on_this_pc_are_not_taken_for_an_emulated_amigas():
+    assert others.loopback("127.0.0.1") and others.loopback("localhost")
+    assert not others.loopback("192.0.2.7")

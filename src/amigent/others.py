@@ -13,6 +13,7 @@ what actually runs.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 from dataclasses import dataclass, field
 
@@ -34,6 +35,10 @@ KNOWN = (
           files=("C:amiagent", "C:amiagent.020", "SYS:WBStartup/amiagent"), startup="amiagent"),
     Agent("amimon", "amimcp's status window", tasks=("amimon", "amimon.020", "amimon-mui",
                                                       "amimon-mui.020")),
+    Agent("amiga-bridge", "the Amiga half of Amiga DevBench, a development bridge that also "
+          "injects keys and mouse events", ports=("AMIGABRIDGE",), tasks=("amiga-bridge",),
+          tcp=(2345,), files=("DH0:AmigaBridge/amiga-bridge", "SYS:AmigaBridge/amiga-bridge"),
+          startup="amiga-bridge"),
 )
 
 WARNING = ("{names} also runs on this Amiga. If another AI agent or person drives the Amiga "
@@ -77,13 +82,22 @@ def listening(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
+def loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(socket.gethostbyname(host)).is_loopback
+    except (OSError, ValueError):
+        return False
+
+
 def scan(ctl, host: str, info: dict) -> list[Found]:
     """Running ones from SYSINFO, plus the network and what is installed."""
     found = {f.agent.name: f for f in from_sysinfo(info)}
     for agent in KNOWN:
         f = found.get(agent.name) or Found(agent)
         for port in agent.tcp:
-            if host and listening(host, port):
+            # An emulator on this PC shares its ports with the PC's own programs (the WinUAE
+            # GDB server also listens on 2345), so there only the Amiga's names count.
+            if host and not loopback(host) and listening(host, port):
                 f.running = True
                 f.how.append(f"listens on TCP {port}")
         for path in agent.files:

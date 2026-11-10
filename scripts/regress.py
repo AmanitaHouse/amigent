@@ -186,7 +186,7 @@ class Run:
 
     def trace(self):
         if not self.args.trace:
-            return "skip: give --trace with amiga/trace-test built for the Amiga"
+            return "skip: give --trace with amiga/trace-test built for the Amiga (on a fast CPU with a loop count, e.g. \"RAM:trace-test 15000000\")"
         import re
         said = self.s.amiga_job(self.args.trace, wait=3)
         number = int(said.split()[1])

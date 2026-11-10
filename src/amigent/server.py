@@ -508,6 +508,19 @@ def _job_result(number: int, rc_text: str, output: bytes) -> str:
     return text
 
 
+_self_path: dict = {}
+
+
+def _amigentd_path() -> str:
+    """Where amigentd lives on the Amiga (SYSINFO self=, 1.4.0), for its FOLLOW helper."""
+    if "path" not in _self_path:
+        try:
+            _self_path["path"] = _with_ctl(ctl.sysinfo).get("self", "")
+        except AmigaError:
+            return ""
+    return _self_path["path"]
+
+
 @mcp.tool()
 def amiga_job(command: str, wait: float = 600) -> str:
     """Run a long command at low priority in the background and return its output.
@@ -519,11 +532,21 @@ def amiga_job(command: str, wait: float = 600) -> str:
     """
     number = _next_job()
     out, done, cli = (_job_file(number, k) for k in ("out", "done", "cli"))
-    script = (
-        "FailAt 21\nChangeTaskPri -5\n"
-        f"{command} >>{out}\n"
-        f'Echo >{done} "$RC"\n'
-    )
+    me = _amigentd_path()
+    if me:  # 1.4.0: output through a pipe, readable while the job runs
+        pipe = f"PIPE:amigent-job-{number}"
+        script = (
+            "FailAt 21\nChangeTaskPri -5\n"
+            f'Run >NIL: "{me}" FOLLOW {pipe} TO {out}\n'
+            f"{command} >{pipe}\n"
+            f'Echo >{_job_file(number, "rc")} "$RC"\n'
+        )
+    else:
+        script = (
+            "FailAt 21\nChangeTaskPri -5\n"
+            f"{command} >>{out}\n"
+            f'Echo >{done} "$RC"\n'
+        )
     answers = _with_ctl(lambda: perform(ctl, [
         Request.write(_job_file(number, "cmd"), command.encode("iso-8859-1", "replace")),
         Request.write(out, b""),
@@ -583,7 +606,13 @@ def amiga_jobs(clear_finished: bool = False) -> str:
 @mcp.tool()
 def amiga_job_output(job: int, last: int = 4000) -> str:
     """What a background job printed so far, the last bytes of it (0 for all)."""
-    data = _with_ctl(lambda: ctl.read_file(_job_file(job, "out")))
+    try:
+        data = _with_ctl(lambda: ctl.read_file(_job_file(job, "out")))
+    except AmigaError as e:
+        if "open for writing" not in str(e):  # DOS_HINTS[202]: the Shell holds the file
+            raise
+        return (f"[job {job} still running; its output is held by the Shell until it ends, "
+                "with amigentd 1.4.0 on the Amiga it can be read while it runs]")
     if last and len(data) > last:
         data = b"..." + data[-last:]
     try:

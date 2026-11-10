@@ -3461,6 +3461,26 @@ static void t_names(struct text *t, const char *key, struct List *a, struct List
     FreeVec(buf);
 }
 
+static char self_path[256];
+
+/* PROGDIR: and the program's name, as a path the Shell can run */
+static void find_self(int argc, char **argv)
+{
+    BPTR dir = GetProgramDir();
+    char name[108];
+    const char *file = NULL;
+
+    if (argc == 0) {
+        struct WBStartup *wb = (struct WBStartup *)argv;
+        if (wb && wb->sm_NumArgs > 0)
+            file = (const char *)wb->sm_ArgList[0].wa_Name;
+    } else if (GetProgramName(name, sizeof(name)))
+        file = (const char *)FilePart(name);
+    if (!dir || !file || !NameFromLock(dir, self_path, sizeof(self_path)) ||
+        !AddPart(self_path, file, sizeof(self_path)))
+        self_path[0] = 0;
+}
+
 static BOOL c_sysinfo(struct link *l)
 {
     struct Library *SocketBase = l->base;
@@ -3524,6 +3544,11 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED and PEEK */
+    if (self_path[0]) {  /* where this amigentd lives, for "amigentd FOLLOW" in jobs */
+        t_str(&t, (const UBYTE *)"self=", FALSE);
+        t_str(&t, (const UBYTE *)self_path, FALSE);
+        t_chr(&t, '\n');
+    }
     t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
     t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
@@ -5774,11 +5799,16 @@ static void t_hunks(struct text *t, struct List *list)
         }
         if (!seg && pr->pr_SegList) {  /* started from Workbench or by CreateNewProc() */
             BPTR *array = BADDR(pr->pr_SegList);
-            if (array && array[0] >= 3)
+            if (array && TypeOfMem(array) && array[0] >= 3 && array[0] < 16)
                 seg = array[3];
         }
         for (hunk = 0; seg && hunk < 64; hunk++) {
             ULONG *p = BADDR(seg);
+
+            /* a hunk is a size long, a link and the code; anything else is not a seglist */
+            if (((ULONG)p & 3) || !TypeOfMem(p - 1) || p[-1] < 8 || p[-1] > 0x1000000UL ||
+                !TypeOfMem((UBYTE *)p + p[-1] - 5))
+                break;
 
             t_chr(t, 'H');
             t_tab(t);
@@ -7211,9 +7241,57 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
     IconBase = NULL;
 }
 
+/* FOLLOW pipe TO file: copy what a job writes into its pipe to a file, a piece at a
+ * time with the file closed in between, so the PC can read it while the job runs
+ * (a Shell redirection holds its file exclusively until the command ends). At the
+ * end, file.rc (the job's return code, written by the job script) becomes
+ * file.done, so the PC never sees "done" before the last piece. */
+static int follow(const char *from, const char *to)
+{
+    UBYTE *buf = AllocVec(4096, MEMF_ANY);
+    char *rc = AllocVec(strlen(to) + 8, MEMF_ANY), *done = AllocVec(strlen(to) + 8, MEMF_ANY);
+    BPTR in = buf && rc && done ? Open(from, MODE_OLDFILE) : 0, out;
+    LONG n, tries;
+
+    if (!in) {
+        FreeVec(buf);
+        FreeVec(rc);
+        FreeVec(done);
+        return RETURN_FAIL;
+    }
+    strcpy(rc, to);
+    strcpy(rc + strlen(rc) - 3, "rc");  /* x.out -> x.rc */
+    strcpy(done, to);
+    strcpy(done + strlen(done) - 3, "done");
+    while ((n = Read(in, buf, 4096)) > 0)
+        for (tries = 0; tries < 250; tries++) {  /* the PC may be reading it: 5 s */
+            if ((out = Open(to, MODE_READWRITE))) {
+                Seek(out, 0, OFFSET_END);
+                Write(out, buf, n);
+                Close(out);
+                break;
+            }
+            Delay(1);
+        }
+    Close(in);
+    for (tries = 0; tries < 1500; tries++) {  /* the script writes rc right after: 30 s */
+        BPTR lock = Lock(rc, SHARED_LOCK);
+        if (lock) {
+            UnLock(lock);
+            Rename(rc, done);
+            break;
+        }
+        Delay(1);
+    }
+    FreeVec(buf);
+    FreeVec(rc);
+    FreeVec(done);
+    return RETURN_OK;
+}
+
 int main(int argc, char **argv)
 {
-    LONG args[7] = {0, 0, 0, 0, 0, 0, 0};
+    LONG args[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -7224,10 +7302,16 @@ int main(int argc, char **argv)
         from_wb = TRUE;
         tool_types((struct WBStartup *)argv, &port);
     } else {
-        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S", args, NULL);
+        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K",
+                       args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
+        }
+        if (args[7] && args[8]) {  /* a job's helper, not the daemon */
+            rc = follow((const char *)args[7], (const char *)args[8]);
+            FreeArgs(rda);
+            return rc;
         }
         if (args[0])
             port = *(LONG *)args[0];
@@ -7242,6 +7326,7 @@ int main(int argc, char **argv)
     }
 
     server = FindTask(NULL);
+    find_self(argc, argv);
     SetTaskPri(server, 2);
     /* No "insert volume" requesters: nobody may be at the Amiga to answer one,
      * and it would hold up the command, a file transfer or the whole daemon.

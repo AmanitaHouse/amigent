@@ -104,6 +104,10 @@ def listing(loaded: Loaded, kind: str = "all", name: str = "") -> str:
             first = hunks[0].start
             lines.append(f"program  {label:28} {len(hunks):>3} hunks {total:>8} bytes  "
                          f"first at {first:08X}  task {task}")
+            if want:  # one program asked for: every hunk, for 'name hunk N +$off'
+                for h in hunks:
+                    lines.append(f"           hunk {h.number:<3} {h.start:08X}-{h.start + h.size - 1:08X} "
+                                 f"{h.size:>8} bytes")
     if kind in ("all", "residents"):
         for r in loaded.residents:
             if want and want not in r.name.lower():
@@ -279,14 +283,19 @@ def resolve(text: str, namer: Namer) -> int:
     """'$0A12B4C0', '0x...', '12345', 'dos.library' (its base) or 'dos.library/Write'
     (where Write's code starts, from the jump table)."""
     t = text.strip()
-    m = re.fullmatch(r"(.+?) hunk (\d+) \+\$?([0-9a-fA-F]+)", t)
-    if m:  # as amiga_where and amiga_loaded write it
-        who, number, off = m.group(1).lower(), int(m.group(2)), int(m.group(3), 16)
+    # 'prog hunk 4 +$10' as amiga_where writes it; also 'prog:hunk4+0x10', 'prog hunk 4'
+    m = re.fullmatch(r"(.+?)(?:\s+|:)hunk\s*(\d+)\s*(?:\+\s*(\$|0x)?([0-9a-fA-F]+))?", t, re.I)
+    if m:
+        who, number = m.group(1).strip().lower(), int(m.group(2))
+        off = int(m.group(4), 16) if m.group(4) else 0
+        short = who.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
         for h in namer.loaded.hunks:
-            if h.number == number and who in ((h.command or "").lower(), h.task.lower(),
-                                              (h.command or "").lower().rsplit("/", 1)[-1].rsplit(":", 1)[-1]):
+            cmd = (h.command or "").lower()
+            names = (cmd, h.task.lower(), cmd.rsplit("/", 1)[-1].rsplit(":", 1)[-1])
+            if h.number == number and (who in names or short in names):
                 return h.start + off
-        raise ValueError(f"no running program {m.group(1)} with hunk {number}")
+        raise ValueError(f"no running program {m.group(1)} with hunk {number}; "
+                         "amiga_loaded('programs', name) lists its hunks")
     if "/" in t:
         lib_name, fn = t.split("/", 1)
         lib = _find_lib(namer.loaded, lib_name)
@@ -350,9 +359,25 @@ def parse_tasks(lines: list[str]) -> list[TaskInfo]:
     return out
 
 
+def program_name(path: str) -> str:
+    """'SYS:Utilities/ProTracker/ProTracker41' -> 'protracker41'."""
+    word = path.strip().strip('"').split()[0] if path.strip() else ""
+    return word.rsplit("/", 1)[-1].rsplit(":", 1)[-1].lower()
+
+
+# Programs that run many times by nature; two of them are no surprise.
+MANY = {"", "shell process", "background cli", "newshell", "run", "execute", "amigentd", "wait",
+        "amigentd channel", "input.device", "cli", "initial cli", "boot shell"}
+
+
 def task_table(tasks: list[TaskInfo], name: str = "") -> str:
     want = name.lower()
     rows = []
+    count: dict[str, int] = {}
+    for t in tasks:
+        if t.command:
+            key = program_name(t.command)
+            count[key] = count.get(key, 0) + 1
     for t in sorted(tasks, key=lambda t: (-t.pri, t.label.lower())):
         if want and want not in t.label.lower() and want not in t.name.lower():
             continue
@@ -360,7 +385,10 @@ def task_table(tasks: list[TaskInfo], name: str = "") -> str:
         warn = "  stack nearly full!" if full >= 85 else ""
         rows.append(f"{t.address:08X}  {t.pri:>4}  {t.state:5}  {t.kind:7}  stack now {t.stack_used:>6}/"
                     f"{t.stack_size:<6} ({full:>2} %)  {t.label}"
-                    + (f"  [{t.name}]" if t.command and t.name != t.command else "") + warn)
+                    + (f"  [{t.name}]" if t.command and t.name != t.command else "") + warn
+                    + (f"  runs {count[program_name(t.command)]} times!"
+                       if t.command and program_name(t.command) not in MANY
+                       and count.get(program_name(t.command), 0) > 1 else ""))
     return "\n".join(rows) or "no such task"
 
 
@@ -433,3 +461,60 @@ def annotate(text: str, namer: Namer) -> str:
                 names.append(cache[at])
         out.append(line + (f"   ; {', '.join(dict.fromkeys(names))}" if names else ""))
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+# Return addresses: a longword on a stack that points just behind a JSR or BSR.
+def called_before(before: bytes) -> bool:
+    """before: the 6 bytes ahead of an address; True if a call instruction ends there."""
+    if len(before) < 6:
+        return False
+    w2 = int.from_bytes(before[4:6], "big")  # the word at address-2
+    w4 = int.from_bytes(before[2:4], "big")
+    w6 = int.from_bytes(before[0:2], "big")
+    if 0x4E90 <= w2 <= 0x4E97:  # jsr (An)
+        return True
+    if w2 >> 8 == 0x61 and w2 & 0xFF not in (0, 0xFF):  # bsr.s
+        return True
+    if 0x4EA8 <= w4 <= 0x4EBB:  # jsr d16(An), d8(An,Xn), abs.w, d16(pc), d8(pc,Xn)
+        return True
+    if w4 == 0x6100:  # bsr.w
+        return True
+    return w6 in (0x4EB9, 0x61FF)  # jsr abs.l, bsr.l
+
+
+SIGNALS = {0: "abort", 1: "child", 4: "single/blit", 5: "intuition", 7: "net", 8: "dos",
+           12: "Ctrl-C", 13: "Ctrl-D", 14: "Ctrl-E", 15: "Ctrl-F"}
+
+
+def signal_names(mask: int) -> str:
+    if not mask:
+        return "none"
+    names = [SIGNALS.get(b, str(b)) for b in range(32) if mask >> b & 1]
+    return f"${mask:08X} (" + ", ".join(names) + ")"
+
+
+def backtrace(stack: bytes, sp: int, namer: Namer, check, most: int = 16) -> list[str]:
+    """Likely return addresses on a stack from sp upwards, named.
+
+    check(addresses) gives the 6 bytes before each address that named code; a
+    longword counts only if a call instruction ends right before it, which
+    leaves out most code addresses that are merely data."""
+    found = []
+    for off in range(0, len(stack) - 3, 2):
+        v = int.from_bytes(stack[off:off + 4], "big")
+        if v & 1 or v < 0x400:
+            continue
+        where = namer.name(v)
+        if not where or " base +" in where or "jump table" in where:
+            continue
+        found.append((sp + off, v, where))
+        if len(found) >= most * 16:
+            break
+    befores = check([v for _, v, _ in found]) if found else []
+    out = []
+    for (at, v, where), before in zip(found, befores):
+        if before is not None and called_before(before):
+            out.append(f"  sp+${at - sp:04X}  {v:08X}  {where}")
+            if len(out) >= most:
+                break
+    return out

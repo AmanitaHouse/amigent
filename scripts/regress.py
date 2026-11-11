@@ -200,6 +200,36 @@ class Run:
         self.s.amiga_break(job=number)
         return "tracepoint fired, registers caught, the program ran on"
 
+    def probes(self):
+        hunks = self.s.amiga_loaded("programs", "amigentd")
+        assert "hunk 0" in hunks, hunks
+        vec = self.s.amiga_memory("$00000004", 4)
+        assert vec.startswith("$00000004"), vec
+        said = self.s.amiga_job("Wait 20", wait=1)
+        number = int(said.split()[1])
+        time.sleep(1)
+        stack = self.s.amiga_task("Wait", stack=6)
+        twice = self.s.amiga_start("Wait 1", unique=True)
+        self.s.amiga_break(job=number)
+        assert twice.startswith("not started"), twice
+        assert "waits for" in stack, stack
+        locks = self.s.amiga_locks()
+        assert "layerinfo" in locks, locks
+        load = self.s.amiga_cpu(2)
+        assert "idle" in load, load
+        return (f"hunks, vectors, {stack.count(chr(10)) - 2} stack lines, "
+                f"{locks.count(chr(10))} locks, {load.splitlines()[0]}")
+
+    def drag_measure(self):
+        before = self.s.screen.ui_tree()
+        w = next(i for i in before if i["kind"] == "window" and i["title"] == TITLE)
+        said = self.s.amiga_drag(w["x"] + 60, w["y"] + 4, w["x"] + 100, w["y"] + 24)
+        assert "moved from" in said, said
+        self.s.amiga_drag(w["x"] + 100, w["y"] + 24, w["x"] + 60, w["y"] + 4)
+        measured = self.s.amiga_drag_measure(TITLE, steps=32, step=4)
+        assert "median" in measured, measured
+        return measured.splitlines()[2]
+
     def state(self):
         self.s.amiga_state("save", "regress")
         said = self.s.amiga_state("compare", "regress")
@@ -573,8 +603,8 @@ class Run:
 
 
 ORDER = ["status", "version", "exec", "missing_volume", "job", "live_output", "loaded", "memory",
-         "journal", "tasks", "trace", "state", "gurus", "screen_diff", "emulator", "files", "screen", "open_shell",
-         "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
+         "journal", "tasks", "trace", "probes", "state", "gurus", "screen_diff", "emulator", "files", "screen", "open_shell",
+         "drag_measure", "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
          "install_undo", "debug", "clipboard", "notes", "aminet", "pause", "takeover", "pointer",
          "close_shell"]
 

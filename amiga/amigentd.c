@@ -105,10 +105,11 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
     CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
-    CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE  /* protocol 6 */
+    CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
+    CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET  /* protocol 6, "probe" in SYSINFO */
 };
 
-const char version[] = "$VER: amigentd 1.4.0 (10.11.2026)";
+const char version[] = "$VER: amigentd 1.4.0 (11.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
 
@@ -2885,12 +2886,16 @@ struct monmsg {
  * (amiga_wait_text would find them). Refreshed by every mon_say, the
  * statistics among them once a second. */
 static struct Task *volatile mon_task;
+static volatile ULONG mon_quiet_until;  /* now_ms(): the monitor gets nothing before, see QUIET */
 
 static void mon_say(UBYTE kind, const char *what, const char *arg)
 {
     struct MsgPort *port;
     struct monmsg *m;
     LONG a = strlen(what), b = arg ? strlen(arg) : 0, i;
+
+    if (kind != 'Q' && mon_quiet_until && (LONG)(mon_quiet_until - now_ms()) > 0)
+        return;  /* a measurement runs: its window must not draw meanwhile */
 
     Forbid();
     port = FindPort(MON_PORT);
@@ -3545,6 +3550,10 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
+    t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
+    t_str(&t, (const UBYTE *)"execbase=", FALSE);
+    t_hex(&t, (ULONG)SysBase);
+    t_chr(&t, '\n');
     if (self_path[0]) {  /* where this amigentd lives, for "amigentd FOLLOW" in jobs */
         t_str(&t, (const UBYTE *)"self=", FALSE);
         t_str(&t, (const UBYTE *)self_path, FALSE);
@@ -5888,6 +5897,8 @@ static BOOL peek_allowed(ULONG at, ULONG n)
         return FALSE;
     if (at >= 0xF80000UL && end <= 0xFFFFFFUL)
         return TRUE;
+    if (end < 0x400)  /* vectors and ExecBase at 4: chip RAM below exec's list */
+        return TRUE;
     Forbid();
     for (mh = (struct MemHeader *)SysBase->MemList.lh_Head; mh->mh_Node.ln_Succ;
          mh = (struct MemHeader *)mh->mh_Node.ln_Succ)
@@ -6313,6 +6324,374 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
     return c_ok(l);
 }
 
+/* ---- probes: locks, CPU load, window dragging, a quiet monitor --------- */
+
+/* The monitor stops drawing for secs seconds (0 again at once): its window
+ * holds its layer while it draws, and Intuition waits for that. */
+static void quiet_monitor(ULONG secs)
+{
+    char n[12];
+
+    mon_quiet_until = secs ? now_ms() + secs * 1000 : 0;
+    dec(n, secs);
+    mon_say('Q', n, NULL);
+}
+
+/* A task's name, and its command when a Shell runs one. */
+static void t_who(struct text *t, struct Task *task)
+{
+    if (!task) {
+        t_chr(t, '-');
+        return;
+    }
+    t_hex(t, (ULONG)task);
+    t_chr(t, ' ');
+    t_str(t, (const UBYTE *)(TypeOfMem(task) && task->tc_Node.ln_Name ? task->tc_Node.ln_Name : "?"), FALSE);
+    if (TypeOfMem(task) && task->tc_Node.ln_Type == NT_PROCESS && ((struct Process *)task)->pr_CLI) {
+        struct CommandLineInterface *cli = BADDR(((struct Process *)task)->pr_CLI);
+        const UBYTE *cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+        LONG k;
+
+        if (cmd && cmd[0]) {
+            t_str(t, (const UBYTE *)" (", FALSE);
+            for (k = 1; k <= cmd[0]; k++)
+                t_chr(t, cmd[k] < ' ' ? ' ' : cmd[k]);
+            t_chr(t, ')');
+        }
+    }
+}
+
+/* K  kind  address  what  owner  nest  queue  waiters (", " between, s: shared) */
+static void t_sem(struct text *t, const char *kind, APTR at, const UBYTE *what,
+                  struct SignalSemaphore *sem)
+{
+    struct SemaphoreRequest *r;
+    LONG n = 0;
+
+    t_chr(t, 'K');
+    t_tab(t);
+    t_str(t, (const UBYTE *)kind, FALSE);
+    t_tab(t);
+    t_hex(t, (ULONG)at);
+    t_tab(t);
+    t_str(t, what ? what : (const UBYTE *)"", FALSE);
+    t_tab(t);
+    t_who(t, sem->ss_Owner);
+    t_tab(t);
+    t_num(t, sem->ss_NestCount);
+    t_tab(t);
+    t_num(t, sem->ss_QueueCount);
+    t_tab(t);
+    for (r = (struct SemaphoreRequest *)sem->ss_WaitQueue.mlh_Head;
+         r->sr_Link.mln_Succ && n < 16; r = (struct SemaphoreRequest *)r->sr_Link.mln_Succ, n++) {
+        ULONG w = (ULONG)r->sr_Waiter;
+
+        if (n)
+            t_str(t, (const UBYTE *)", ", FALSE);
+        t_who(t, (struct Task *)(w & ~1UL));
+        if (w & 1)
+            t_str(t, (const UBYTE *)" s", FALSE);
+    }
+    t_chr(t, '\n');
+}
+
+/* Who holds the layer locks of a screen and its windows, and who waits.
+ * Only Forbid, never LockIBase or LockLayerInfo: the point is to look at a
+ * screen that may be stuck in them. */
+static BOOL c_locks(struct link *l, UWORD len)
+{
+    struct text t = {0};
+    struct Screen *s;
+    struct Window *w;
+    struct Layer *ly;
+    BOOL alive;
+    ULONG want;
+
+    if (!c_address(l, len, &want, &alive))
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    Forbid();
+    for (s = IntuitionBase->FirstScreen; want && s && (ULONG)s != want; s = s->NextScreen)
+        ;
+    if (!s)
+        s = IntuitionBase->FirstScreen;
+    if (s) {
+        t_sem(&t, "layerinfo", s, screen_title(s), &s->LayerInfo.Lock);
+        for (ly = s->LayerInfo.top_layer; ly; ly = ly->back) {
+            for (w = s->FirstWindow; w && w->WLayer != ly; w = w->NextWindow)
+                ;
+            if (w)
+                t_sem(&t, "window", w, w->Title, &ly->Lock);
+            else if (ly->Lock.ss_Owner || ly->Lock.ss_QueueCount >= 0)
+                t_sem(&t, "layer", ly, NULL, &ly->Lock);
+        }
+    }
+    if (GfxBase->ActiViewCprSemaphore)
+        t_sem(&t, "view", GfxBase->ActiViewCprSemaphore, (const UBYTE *)"graphics ActiView",
+              GfxBase->ActiViewCprSemaphore);
+    Permit();
+    return c_text(l, &t);
+}
+
+#define CPU_SLOTS 64
+
+struct cpu_slot {
+    struct Task *task;
+    ULONG n;
+    char name[40];
+};
+
+/* What runs, sampled every ms milliseconds for secs seconds by a task above
+ * everything else: each time it wakes, the head of TaskReady is what it
+ * interrupted (or the one next in turn at that priority), none means idle.
+ * The PC asks once; no traffic while it samples. */
+static BOOL c_cpu(struct link *l, UWORD secs, UWORD ms)
+{
+    struct text t = {0};
+    struct MsgPort *port;
+    struct timerequest *tr;
+    struct cpu_slot *slot;
+    struct Task *me = FindTask(NULL);
+    ULONG samples, i, idle = 0, other = 0, disp0 = SysBase->DispCount, idle0 = SysBase->IdleCount;
+    LONG used = 0, k, old;
+
+    if (secs < 1) secs = 1;
+    if (secs > 60) secs = 60;
+    if (ms < 2) ms = 2;
+    if (ms > 1000) ms = 1000;
+    samples = (ULONG)secs * 1000 / ms;
+    if (!(slot = AllocVec(sizeof(*slot) * CPU_SLOTS, MEMF_ANY | MEMF_CLEAR)))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    if (!(port = CreateMsgPort())) {
+        FreeVec(slot);
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    }
+    tr = (struct timerequest *)CreateIORequest(port, sizeof(*tr));
+    if (!tr || OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_MICROHZ, (struct IORequest *)tr, 0)) {
+        if (tr)
+            DeleteIORequest((struct IORequest *)tr);
+        DeleteMsgPort(port);
+        FreeVec(slot);
+        return c_fail(l, 1, "timer.device did not open");
+    }
+    mon_say('C', "measure CPU load", NULL);
+    quiet_monitor(secs + 2);
+    old = SetTaskPri(me, 30);
+    for (i = 0; i < samples; i++) {
+        struct Node *n;
+
+        tr->tr_node.io_Command = TR_ADDREQUEST;
+        tr->tr_time.tv_secs = ms / 1000;
+        tr->tr_time.tv_micro = (ms % 1000) * 1000UL;
+        DoIO((struct IORequest *)tr);
+        Forbid();
+        n = SysBase->TaskReady.lh_Head;
+        if (!n->ln_Succ)
+            idle++;
+        else {
+            for (k = 0; k < used && slot[k].task != (struct Task *)n; k++)
+                ;
+            if (k == used && used < CPU_SLOTS) {
+                slot[k].task = (struct Task *)n;
+                strncpy(slot[k].name, n->ln_Name ? n->ln_Name : "?", sizeof(slot[k].name) - 1);
+                used++;
+            }
+            if (k < used)
+                slot[k].n++;
+            else
+                other++;
+        }
+        Permit();
+    }
+    SetTaskPri(me, old);
+    quiet_monitor(0);
+    CloseDevice((struct IORequest *)tr);
+    DeleteIORequest((struct IORequest *)tr);
+    DeleteMsgPort(port);
+    /* N  samples  ms  idle  other  dispatches  idle_count (exec's counters meanwhile) */
+    t_chr(&t, 'N');
+    t_tab(&t);
+    t_num(&t, samples);
+    t_tab(&t);
+    t_num(&t, ms);
+    t_tab(&t);
+    t_num(&t, idle);
+    t_tab(&t);
+    t_num(&t, other);
+    t_tab(&t);
+    t_num(&t, SysBase->DispCount - disp0);
+    t_tab(&t);
+    t_num(&t, SysBase->IdleCount - idle0);
+    t_chr(&t, '\n');
+    for (k = 0; k < used; k++) {  /* C  address  samples  name */
+        t_chr(&t, 'C');
+        t_tab(&t);
+        t_hex(&t, (ULONG)slot[k].task);
+        t_tab(&t);
+        t_num(&t, slot[k].n);
+        t_tab(&t);
+        t_str(&t, (const UBYTE *)slot[k].name, FALSE);
+        t_chr(&t, '\n');
+    }
+    FreeVec(slot);
+    return c_text(l, &t);
+}
+
+static void drag_event(struct IOStdReq *io, struct InputEvent *ev)
+{
+    GetSysTime(&ev->ie_TimeStamp);
+    io->io_Command = IND_WRITEEVENT;
+    io->io_Data = ev;
+    io->io_Length = sizeof(*ev);
+    io->io_Flags = 0;
+    DoIO((struct IORequest *)io);
+}
+
+static void drag_to(struct IOStdReq *io, struct Screen *s, WORD x, WORD y, BOOL down)
+{
+    struct InputEvent ev;
+    struct IEPointerPixel pp;
+
+    pp.iepp_Screen = s;
+    pp.iepp_Position.X = x;
+    pp.iepp_Position.Y = y;
+    memset(&ev, 0, sizeof(ev));
+    ev.ie_Class = IECLASS_NEWPOINTERPOS;
+    ev.ie_SubClass = IESUBCLASS_PIXEL;
+    ev.ie_Qualifier = down ? IEQUALIFIER_LEFTBUTTON : 0;
+    ev.ie_EventAddress = &pp;
+    drag_event(io, &ev);
+}
+
+static void drag_button(struct IOStdReq *io, BOOL down)
+{
+    struct InputEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.ie_Class = IECLASS_RAWMOUSE;
+    ev.ie_Code = IECODE_LBUTTON | (down ? 0 : IECODE_UP_PREFIX);
+    ev.ie_Qualifier = IEQUALIFIER_RELATIVEMOUSE | (down ? IEQUALIFIER_LEFTBUTTON : 0);
+    drag_event(io, &ev);
+}
+
+/* The window whose layer is frontmost at x,y on s; call under Forbid. */
+static struct Window *window_at(struct Screen *s, LONG x, LONG y)
+{
+    struct Layer *ly;
+    struct Window *w;
+
+    for (ly = s->LayerInfo.top_layer; ly; ly = ly->back)
+        if (x >= ly->bounds.MinX && x <= ly->bounds.MaxX && y >= ly->bounds.MinY && y <= ly->bounds.MaxY) {
+            for (w = s->FirstWindow; w && w->WLayer != ly; w = w->NextWindow)
+                ;
+            return w;
+        }
+    return NULL;
+}
+
+/* Drag a window by its title bar, as a hand would, and time every step:
+ * pattern 0 zigzag (8 steps one way, 8 back), 1 jumps (4 steps' worth each
+ * way in turn). Runs at priority 21, above input.device. One line a step:
+ * D  step  x  y  event_us  frame_us  left  top  mouse_x  mouse_y */
+static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD step)
+{
+    struct text t = {0};
+    struct MsgPort *port;
+    struct IOStdReq *io;
+    struct Screen *s;
+    struct Window *w, *hit = NULL;
+    struct Gadget *g;
+    struct Task *me = FindTask(NULL);
+    struct EClockVal e0;
+    LONG box[4], x, y, x0 = 0, y0 = 0, i, old, dx;
+    BOOL alive, found = FALSE;
+    ULONG want, frame_us;
+
+    if (!c_address(l, len, &want, &alive))
+        return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+    if (steps < 2) steps = 2;
+    if (steps > 512) steps = 512;
+    if (step < 1) step = 1;
+    if (step > 64) step = 64;
+    Forbid();
+    s = IntuitionBase->FirstScreen;
+    for (w = s ? s->FirstWindow : NULL; w && (ULONG)w != want; w = w->NextWindow)
+        ;
+    if (w) {
+        for (g = w->FirstGadget; g; g = g->NextGadget)
+            if ((g->GadgetType & GTYP_SYSGADGET) && (g->GadgetType & GTYP_SYSTYPEMASK) == GTYP_WDRAGGING) {
+                gadget_box(w, g, box);
+                found = TRUE;
+                break;
+            }
+    }
+    if (found) {
+        x0 = box[0] + box[2] / 2;
+        y0 = box[1] + box[3] / 2;
+        hit = window_at(s, x0, y0);
+    }
+    Permit();
+    if (!w)
+        return c_fail(l, 1, "no such window on the front screen");
+    if (!found)
+        return c_fail(l, 1, "the window has no title bar to drag");
+    if (hit != w)
+        return c_fail(l, 1, "another window covers its title bar; bring it to the front first");
+    if (!(port = CreateMsgPort()))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    io = (struct IOStdReq *)CreateIORequest(port, sizeof(*io));
+    if (!io || OpenDevice((CONST_STRPTR)"input.device", 0, (struct IORequest *)io, 0)) {
+        if (io)
+            DeleteIORequest((struct IORequest *)io);
+        DeleteMsgPort(port);
+        return c_fail(l, 1, "input.device did not open");
+    }
+    mon_say('C', "measure window dragging", NULL);
+    quiet_monitor(steps / 25 + 5);
+    old = SetTaskPri(me, 21);
+    drag_to(io, s, x0, y0, FALSE);
+    WaitTOF();
+    drag_button(io, TRUE);
+    WaitTOF();
+    WaitTOF();
+    x = x0;
+    y = y0;
+    for (i = 0; i < steps; i++) {
+        dx = pattern == 1 ? ((i & 1) ? -4 * step : 4 * step) : (((i >> 3) & 1) ? -step : step);
+        x += dx;
+        ReadEClock(&e0);
+        drag_to(io, s, x, y, TRUE);
+        frame_us = eclock_us(&e0);  /* the event, until input.device took it */
+        WaitTOF();
+        t_chr(&t, 'D');
+        t_tab(&t);
+        t_num(&t, i);
+        t_tab(&t);
+        t_num(&t, x);
+        t_tab(&t);
+        t_num(&t, y);
+        t_tab(&t);
+        t_num(&t, frame_us);
+        t_tab(&t);
+        t_num(&t, eclock_us(&e0));  /* until the next frame began */
+        t_tab(&t);
+        t_num(&t, w->LeftEdge);
+        t_tab(&t);
+        t_num(&t, w->TopEdge);
+        t_tab(&t);
+        t_num(&t, s->MouseX);
+        t_tab(&t);
+        t_num(&t, s->MouseY);
+        t_chr(&t, '\n');
+    }
+    drag_button(io, FALSE);
+    SetTaskPri(me, old);
+    quiet_monitor(0);
+    CloseDevice((struct IORequest *)io);
+    DeleteIORequest((struct IORequest *)io);
+    DeleteMsgPort(port);
+    return c_text(l, &t);
+}
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -6381,6 +6760,16 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_poke(l, x, (ULONG)w << 16 | h);
     case CMD_TRACE:
         return c_trace(l, c[1], x);
+    case CMD_LOCKS:  /* a screen handle as hex in the name, none for the front one */
+        mon_say('C', "who holds the layer locks", NULL);
+        return c_locks(l, x);
+    case CMD_CPU:  /* y seconds, every w ms */
+        return c_cpu(l, y, w);
+    case CMD_DRAG:  /* window as hex in the name; arg pattern, y steps, w pixels */
+        return c_drag(l, c[1], x, y, w);
+    case CMD_QUIET:  /* the monitor draws nothing for y seconds; 0 ends it */
+        quiet_monitor(y);
+        return c_ok(l);
     case CMD_PEEK:  /* address as hex in the name, length in w:h */
         mon_say('C', "read memory", NULL);
         return c_peek(l, x, (ULONG)w << 16 | h);

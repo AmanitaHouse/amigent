@@ -458,6 +458,10 @@ else.
 | 41 | TASKCTL | 1 priority, 2 signal | x = address length, y = priority or signals | task address as hex text | (protocol 6) |
 | 42 | POKE | | x = address length, w/h = size high/low | address as hex text, the bytes | (protocol 6, only with `ALLOWPOKE`) |
 | 43 | TRACE | 1 set, 2 list, 3 clear | x = address length | address as hex text (for 1) | text for 2, see [trace](#trace) (protocol 6) |
+| 44 | LOCKS | | x = handle length | screen handle as hex text, `0` for the front screen | text, see [probes](#probes) (protocol 6, `probe`) |
+| 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
+| 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
+| 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -539,11 +543,14 @@ separated by tabs.
 - From protocol 6 (amigentd 1.4.0) SYSINFO also has `last_alert_where`,
   exec's second alert number (the task or the address), next to `last_alert`;
   `loaded`, `1` when LOADED, PEEK, TASKS, TASKCTL and TRACE are understood;
-  `poke`, `1` when amigentd runs with `ALLOWPOKE`; and `self`, where this
+  `poke`, `1` when amigentd runs with `ALLOWPOKE`; `probe`, `1` when LOCKS,
+  CPU, DRAG and QUIET are understood; `execbase`, exec's base in hex; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.
+  The vectors below $400 (with ExecBase at 4) can be read as well; Enforcer
+  and MuForce may report that as a hit.
   Anything else gets status `1` and a text saying so. Packed after COMPRESS.
 
 ### loaded
@@ -594,6 +601,37 @@ instruction: the program never stops, and each tracepoint fires once. At most
 
 all in hex but the number. When amigentd quits, armed tracepoints are taken
 out; the handler stays (a task keeps its `tc_TrapCode`) and passes traps on.
+
+### probes
+
+LOCKS looks at a screen under `Forbid` only, never `LockIBase` or
+`LockLayerInfo`, so it works on a screen that is stuck in them. One line per lock:
+
+    K  kind  address  what  owner  nest  queue  waiters
+
+kind is `layerinfo` (the screen's), `window`, `layer` (a layer without a
+window) or `view` (graphics' ActiView semaphore). owner is `-` or the task's
+address, name and Shell command; nest and queue are the semaphore's counts
+(queue `-1` is free); waiters are listed with `, ` between them, ` s` after a
+shared one. Intuition's IBase locks are private and not listed.
+
+CPU raises the channel to priority 30 and samples every w milliseconds which
+task heads `TaskReady`: the one it interrupted, or the next in turn at that
+priority; none means idle. amigent-monitor is quiet meanwhile.
+
+    N  samples  ms  idle  other  dispatches  idle_count
+    C  task  samples  name
+
+DRAG presses the left button on the middle of the window's drag bar (it must
+be on the front screen and frontmost there), moves the pointer at priority 21
+step by step with the button held, waits for the next frame after each step
+and releases the button at the end. Zigzag goes 8 steps right and 8 left, jumps
+4 steps' worth right and left in turn, so whole rounds end where they began.
+
+    D  step  x  y  event_us  frame_us  left  top  mouse_x  mouse_y
+
+event_us is how long input.device took the event, frame_us from the event to
+the next frame, left and top the window's place then.
 
 ### job helper
 

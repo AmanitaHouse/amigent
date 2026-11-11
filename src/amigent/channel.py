@@ -27,6 +27,7 @@ EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUME
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
 LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
+LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -630,6 +631,40 @@ class AmigaChannel(VolumeFlush):
             return self._one(Request(TRACE, path, op, read=_read_text))
         self._one(Request(TRACE, path, op))
         return []
+
+    def _need_probe(self, what: str) -> None:
+        self._need6(what)
+        if getattr(self, "_probe", None) is None:
+            self._probe = self.sysinfo().get("probe") == "1"
+        if not self._probe:
+            raise AmigaError(f"{what} needs a newer amigentd 1.4.0 build; run amigent-setup --update")
+
+    def locks(self, screen: int = 0) -> list[str]:
+        """K lines: kind address what owner nest queue waiters, for a screen's layers."""
+        self._need_probe("looking at locks")
+        return self._one(Request(LOCKS, f"{screen & 0xFFFFFFFF:08x}", 0, read=_read_text))
+
+    def cpu(self, seconds: int, every_ms: int = 10) -> list[str]:
+        """N and C lines: what ran, sampled on the Amiga for seconds."""
+        self._need_probe("measuring CPU load")
+        return self._one(Request(CPU, "", 0, seconds, every_ms, read=_read_text, wait=seconds + 20))
+
+    def drag_measure(self, window: int, pattern: int, steps: int, step: int) -> list[str]:
+        """D lines, one per step of dragging the window by its title bar."""
+        self._need_probe("measuring window dragging")
+        return self._one(Request(DRAG, f"{window & 0xFFFFFFFF:08x}", pattern, steps, step,
+                                 read=_read_text, wait=steps / 10 + 30))
+
+    def peek_many(self, spans: list[tuple[int, int]]) -> list:
+        """Several PEEKs on one wire: bytes, or the AmigaError, for each (address, size)."""
+        self._need6("reading memory")
+        return self.pipeline([Request(PEEK, f"{a & 0xFFFFFFFF:08x}", 0, 0, (n >> 16) & 0xFFFF, n & 0xFFFF,
+                                      read=_read_blob) for a, n in spans])
+
+    def quiet(self, seconds: int) -> None:
+        """amigent-monitor draws nothing for seconds (0: again now)."""
+        self._need_probe("a quiet monitor")
+        self._one(Request(QUIET, "", 0, seconds))
 
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""

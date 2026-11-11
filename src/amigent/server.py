@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
-from . import gdb, journal, memory, secret, system, uptime, watch
+from . import gdb, journal, memory, probes, secret, system, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
@@ -54,6 +54,12 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
 - Testing a program: amiga_create_project, amiga_build, amiga_run; amiga_trace
   for where it gets to, amiga_state before and after for leaks, amiga_screen_diff
   for what its screen looks like.
+- A hang or stutter: amiga_task(name, stack=8) for what a task waits in,
+  amiga_locks for who holds the layer locks, amiga_cpu for the load per task,
+  amiga_drag_measure for how a window follows the mouse. A "Software Failure"
+  requester: amiga_software_failure, never click Reboot.
+- amiga_drag says which window moved; if none or another did, its title bar
+  was covered. amiga_start(..., unique=True) for programs that run only once.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,
@@ -236,7 +242,7 @@ seen = uptime.Seen()  # under secret.FOLDER, looked up when used
 diary = journal.Journal()  # under secret.FOLDER, looked up when used
 # Looking around changes nothing on the Amiga; a postmortem wants what did.
 UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "amiga_screen_text",
-               "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
+               "amiga_locks", "amiga_cpu", "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
                "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
                "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text",
                "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log"}
@@ -395,12 +401,20 @@ START_WINDOWS = 30.0  # s: wait_window(new) counts windows opened since a start 
 
 
 @mcp.tool()
-def amiga_start(command: str) -> str:
+def amiga_start(command: str, unique: bool = False) -> str:
     """Start a program in the background, without capturing output.
 
-    Shows what amiga_note recorded about the program earlier, if anything.
+    unique=True first looks whether the program runs already and then starts
+    nothing: many programs open an "already running" requester instead, which
+    is easy to miss. Shows what amiga_note recorded about the program earlier.
     """
     global last_started, windows_at_start
+    if unique:
+        running = _running_as(command)
+        if running:
+            return (f"not started: {command.split()[0]} runs already as " + ", ".join(
+                f"{t.label} (${t.address:08X})" for t in running)
+                + "; amiga_tasks shows it, amiga_task(..., signal='C') asks it to quit")
     before = _clear_hold()
     windows_at_start = (time.monotonic(), _window_ids())
     _with_ctl(lambda: ctl.exec(f"Run >NIL: {command}"))
@@ -724,6 +738,20 @@ def _tasks() -> list:
     return memory.parse_tasks(_with_ctl(ctl.tasks))
 
 
+def _running_as(command: str) -> list:
+    """Tasks that run the program command starts, by its file name."""
+    word = command.strip().strip('"').split()[0] if command.strip() else ""
+    want = word.rsplit("/", 1)[-1].rsplit(":", 1)[-1].lower()
+    if not want:
+        return []
+    try:
+        tasks = _tasks()
+    except AmigaError:
+        return []  # an amigentd before 1.4.0: start as before
+    return [t for t in tasks if want in (memory.program_name(t.command), t.name.lower(),
+                                         memory.program_name(t.name))]
+
+
 @mcp.tool()
 def amiga_tasks(name: str = "") -> str:
     """All tasks and processes: address, priority, ready or waiting, stack used of
@@ -733,10 +761,13 @@ def amiga_tasks(name: str = "") -> str:
 
 
 @mcp.tool()
-def amiga_task(task: str, priority: int | None = None, signal: str = "") -> str:
-    """Change a task: priority (-128..127, 0 is normal; above 5 can starve the
-    system) or signal it with Ctrl-C, D, E or F (e.g. 'C', or 'CD'). task is a
-    name, a program as amiga_tasks shows it, or an address. Needs amigentd 1.4.0."""
+def amiga_task(task: str, priority: int | None = None, signal: str = "", stack: int = 0) -> str:
+    """Look at or change a task: priority (-128..127, 0 is normal; above 5 can
+    starve the system) or signal it with Ctrl-C, D, E or F (e.g. 'C', or 'CD').
+    stack=N shows what it waits for (SigWait, SigRecvd) and up to N return
+    addresses on its stack, named: for a task that hangs or two that wait for
+    each other. task is a name, a program as amiga_tasks shows it, or an
+    address. Needs amigentd 1.4.0."""
     tasks = _tasks()
     try:
         t = memory.find_task(tasks, task)
@@ -756,9 +787,110 @@ def amiga_task(task: str, priority: int | None = None, signal: str = "") -> str:
             bits |= 1 << "CDEF".index(ch)
         _with_ctl(lambda: ctl.task_control(t.address, 2, bits))
         done.append("sent Ctrl-" + "+".join(sorted(set(signal.upper()))))
+    if stack > 0:
+        return memory.task_table([t]) + "\n" + _backtrace(t, stack)
     if not done:
         return memory.task_table([t])
     return f"{t.label} (${t.address:08X}): " + ", ".join(done)
+
+
+def _backtrace(t, most: int) -> str:
+    """SigWait, SigRecvd and the named return addresses on a task's stack."""
+    head = _with_ctl(lambda: ctl.peek(t.address + 54, 12))  # tc_SPReg, tc_SPLower, tc_SPUpper
+    sp, lower, upper = (int.from_bytes(head[i:i + 4], "big") for i in (0, 4, 8))
+    lines = [f"waits for {memory.signal_names(t.sig_wait)}; got {memory.signal_names(t.sig_recvd)}"]
+    if t.state == "run":
+        lines.append("it runs right now (it is amigentd's own channel); its saved stack pointer is old")
+    if not lower <= sp < upper:
+        return "\n".join(lines + [f"stack pointer ${sp:08X} is outside its stack "
+                                  f"${lower:08X}-${upper:08X}: overflow or a stack of its own"])
+    size = min(upper - sp, 16384)
+    data = _with_ctl(lambda: ctl.peek(sp, size))
+    namer = _namer()
+
+    def check(addresses):
+        got = _with_ctl(lambda: ctl.peek_many([(a - 6, 6) for a in addresses]))
+        return [g if isinstance(g, bytes) else None for g in got]
+
+    calls = memory.backtrace(data, sp, namer, check, most)
+    lines.append(f"stack ${lower:08X}-${upper:08X}, sp ${sp:08X}, {upper - sp} bytes in use"
+                 + (f", first {size} read" if size < upper - sp else ""))
+    lines += ["return addresses, innermost first:"] + calls if calls else \
+        ["no return addresses found (code not in a program, library or the ROM amigentd knows)"]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def amiga_locks(screen_id: str = "") -> str:
+    """Who holds the layer locks of a screen and its windows, and who waits for them.
+
+    For a screen that stutters or hangs: a window being dragged, a program that
+    draws and holds its layer, a deadlock between two tasks. screen_id from
+    amiga_screens, default the front screen. amigentd only looks (under
+    Forbid), it takes no lock itself. Needs amigentd 1.4.0.
+    """
+    handle = _screen_handle(screen_id) if screen_id else 0
+    return probes.locks(_with_ctl(lambda: ctl.locks(handle)))
+
+
+@mcp.tool()
+def amiga_cpu(seconds: int = 5, every_ms: int = 10) -> str:
+    """CPU load per task, measured on the Amiga for seconds (1-60).
+
+    amigentd samples every every_ms milliseconds at a priority above all
+    others which task was running, with no network traffic meanwhile, and
+    amigent-monitor stays still. Shows percent per task and idle. Needs amigentd 1.4.0.
+    """
+    lines = _with_ctl(lambda: ctl.cpu(max(1, min(seconds, 60)), max(2, min(every_ms, 1000))))
+    try:
+        names = {t.address: t.label for t in _tasks()}
+    except AmigaError:
+        names = {}
+    return probes.cpu(lines, names)
+
+
+@mcp.tool()
+def amiga_quiet_monitor(seconds: int = 30) -> str:
+    """amigent-monitor's window on the Amiga stops drawing for seconds (0: draws again).
+
+    Its drawing holds its window's layer, and Intuition waits for that: it can
+    spoil a measurement of how smoothly windows move. amiga_cpu and
+    amiga_drag_measure do this themselves. Needs amigentd 1.4.0.
+    """
+    _with_ctl(lambda: ctl.quiet(max(0, min(seconds, 3600))))
+    return f"amigent-monitor quiet for {seconds} s" if seconds else "amigent-monitor draws again"
+
+
+@mcp.tool()
+def amiga_drag_measure(window: str, pattern: str = "zigzag", steps: int = 64, step: int = 8) -> str:
+    """Measure how smoothly a window follows when it is dragged by its title bar.
+
+    amigentd drags it itself, at priority 21 above input.device: zigzag (8
+    steps one way, 8 back) or jumps (4 steps' worth each way in turn), steps
+    of step pixels, and records each frame: time per step, how long
+    input.device took the event, where the window and the pointer are. Shows
+    median, p95 and max ms per step and the steps the window did not move.
+    window is part of its title or its id from amiga_ui_tree; it must be on
+    the front screen with its title bar uncovered. It ends where it started.
+    Needs amigentd 1.4.0.
+    """
+    kinds = {"zigzag": 0, "jumps": 1}
+    if pattern not in kinds:
+        raise AmigaError("pattern: zigzag or jumps")
+    w = _window(window)
+    steps = max(16, min(steps, 512)) // 16 * 16  # whole zigzags: back where it started
+    lines = _with_ctl(lambda: ctl.drag_measure(int(w["id"], 16), kinds[pattern], steps, max(1, min(step, 64))))
+    return f"window {w['title']!r} {w['id']}, {pattern}\n" + probes.drag(lines, step)
+
+
+def _window(which: str) -> dict:
+    """A window of the front screen by id or part of its title, the frontmost if several."""
+    wins = [i for i in _with_screen(screen.ui_tree) if i["kind"] == "window"]
+    hits = [w for w in wins if which.lower() in (w["id"].lower(), w["id"].lower().lstrip("0"))]
+    hits = hits or [w for w in wins if which.lower() in w["title"].lower()]
+    if not hits:
+        raise AmigaError(f"no window on the front screen matches {which!r}; amiga_ui_tree lists them")
+    return hits[0]
 
 
 @mcp.tool()
@@ -1490,6 +1622,83 @@ def _gadget_sheet(tree: list):
     return McpImage(data=pictures.png(sheet), format="png")
 
 
+def _labels_from_text(gadgets: list[dict]) -> None:
+    """Fill empty gadget labels with the screen text drawn inside their boxes."""
+    if not any(not g["label"] for g in gadgets):
+        return
+    try:
+        st = _screen_text()
+    except AmigaError:
+        return
+    rows = [r for w in st.windows for r in w.rows if not r.hidden]
+    for g in gadgets:
+        if g["label"] or g["type"] == "sys":
+            continue
+        inside = [r for r in rows if g["x"] <= r.centre[0] < g["x"] + g["w"] and g["y"] <= r.centre[1] < g["y"] + g["h"]]
+        if inside:
+            g["label"] = " ".join(r.text.strip() for r in inside)
+
+
+SAFE_BUTTONS = ("suspend", "entfernen", "remove", "ignore", "ignorieren", "resume", "fortfahren",
+                "continue", "weiter", "anhalten", "cancel", "abbrechen")
+REBOOT_BUTTONS = ("reboot", "neustart", "neu starten", "reset")
+
+
+@mcp.tool()
+def amiga_software_failure(action: str = "show") -> str:
+    """Deal with a "Software Failure" or "Task held" requester on the front screen.
+
+    action show: its text, the guru code in words and the program at fault.
+    action dismiss: click the button that leaves the Amiga running (Suspend,
+    Entfernen, Ignore...), never Reboot. Registers of the crashed task are not
+    in the requester; amiga_task(name, stack=8) reads where it stopped while
+    it is suspended.
+    """
+    from . import alerts
+
+    st = _screen_text()
+    wins = [w for w in st.windows if any(k in (w.title + " " + " ".join(r.text for r in w.rows)).lower()
+                                         for k in ("software failure", "software-fehler", "task held",
+                                                   "softwarefehler", "task interferance", "task interference"))]
+    if not wins:
+        return "no Software Failure requester on the front screen (amiga_screen_text shows what is there)"
+    w = wins[0]
+    text = "\n".join(r.text for r in w.rows)
+    out = [f"requester {w.title!r} {w.id}:", text]
+    m = re.search(r"\b([0-9A-Fa-f]{8})\b(?:[ .]+\(?(?:task[: ]*)?\$?([0-9A-Fa-f]{8}))?", text)
+    if m:
+        out.append("guru: " + alerts.describe(m.group(1), m.group(2)))
+        if m.group(2):
+            try:
+                out.append(f"at {m.group(2)}: " + (_namer().name(int(m.group(2), 16)) or "no program amigentd knows"))
+            except AmigaError:
+                pass
+    if action == "show":
+        return "\n".join(out)
+    if action != "dismiss":
+        raise AmigaError("action: show or dismiss")
+    tree = _with_screen(screen.ui_tree)
+    gadgets = [g for g in tree if g["kind"] == "gadget" and g["window"] == w.id and g["type"] != "sys"]
+    _labels_from_text(gadgets)
+    for g in gadgets:
+        name = g["label"].lower().strip("_ ")
+        if any(b in name for b in REBOOT_BUTTONS):
+            continue
+        if any(b in name for b in SAFE_BUTTONS):
+            x, y = _centre(g)
+            _with_screen(lambda: screen.click(x, y, "left", False))
+            return "\n".join(out + [f"clicked {g['label']!r}; the task stays suspended, the Amiga runs on"])
+    for r in w.rows:  # buttons whose box amigentd can't see: click their text
+        name = r.text.lower().strip()
+        if any(b in name for b in SAFE_BUTTONS) and not any(b in name for b in REBOOT_BUTTONS):
+            safe = next(b for b in SAFE_BUTTONS if b in name)
+            px, py = screentext.point_of(r, safe)
+            _with_screen(lambda: screen.click(px, py, "left", False))
+            return "\n".join(out + [f"clicked {safe!r} at ({px},{py}); the Amiga runs on"])
+    raise AmigaError("found no Suspend or Entfernen button; not clicking, since the other one reboots:\n"
+                     + "\n".join(out))
+
+
 def _centre(item: dict) -> tuple[int, int]:
     return item["x"] + item["w"] // 2, item["y"] + item["h"] // 2
 
@@ -1513,6 +1722,18 @@ def amiga_ui_click(label: str = "", window: str = "", number: int = -1, button: 
             raise AmigaError("give a label or a number")
         exact = [g for g in gadgets if g["label"].lower() == label.lower()]
         matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
+        if not matches:  # requesters and buttons that draw their text themselves
+            _labels_from_text(gadgets)
+            exact = [g for g in gadgets if g["label"].lower().strip("_ ") == label.lower()]
+            matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
+        if not matches:
+            st = _screen_text()
+            hit = screentext.find_row(st, label, window)
+            if hit:
+                win, row = hit
+                px, py = screentext.point_of(row, label)
+                _with_screen(lambda: screen.click(px, py, button, double))
+                return f"clicked the text {label!r} in {win.title!r} at ({px},{py}); no gadget carries that label"
     if len(matches) > 1 and window and window not in windows:
         # several windows share the title: the frontmost one (first in the tree) counts
         first = matches[0]["window"]
@@ -1634,9 +1855,39 @@ def amiga_drag(x1: int, y1: int, x2: int, y2: int, button: str = "left",
     themselves and ignore where the pointer is put (ProTracker 4's window, many
     games); relative=False puts the pointer at the end in one jump.
     """
+    before = _window_boxes()
     _with_screen(lambda: screen.drag(x1, y1, x2, y2, button, relative))
     how = {True: " by mouse movement only", False: " in one jump"}.get(relative, "")
-    return f"dragged {button} from ({x1},{y1}) to ({x2},{y2})" + how
+    return f"dragged {button} from ({x1},{y1}) to ({x2},{y2})" + how + _what_moved(before, x1, y1)
+
+
+def _window_boxes() -> list[dict] | None:
+    try:
+        return [i for i in _with_screen(screen.ui_tree) if i["kind"] == "window"]
+    except (AmigaError, AmigentdError, OSError, KeyError, AttributeError):
+        return None
+
+
+def _what_moved(before: list[dict] | None, x: int, y: int) -> str:
+    """Which windows moved or changed size, so a drag that caught the wrong one shows."""
+    after = _window_boxes()
+    if before is None or after is None:
+        return ""
+    was = {w["id"]: w for w in before}
+    changes = []
+    for w in after:
+        b = was.get(w["id"])
+        if b and (b["x"], b["y"], b["w"], b["h"]) != (w["x"], w["y"], w["w"], w["h"]):
+            what = (f"moved from {b['x']},{b['y']} to {w['x']},{w['y']}" if (b["w"], b["h"]) == (w["w"], w["h"])
+                    else f"changed from {b['x']},{b['y']} {b['w']}x{b['h']} to {w['x']},{w['y']} {w['w']}x{w['h']}")
+            changes.append(f"window {w['title']!r} {what}")
+    under = next((w for w in before if w["x"] <= x < w["x"] + w["w"] and w["y"] <= y < w["y"] + w["h"]), None)
+    if not changes:
+        return ("; no window moved" + (f" (the start point was on {under['title']!r})" if under else ""))
+    text = "; " + "; ".join(changes)
+    if under and not any(under["title"] and repr(under["title"]) in c for c in changes):
+        text += f"; note: the start point was on {under['title']!r}, frontmost there"
+    return text
 
 
 SETTLE_FIRST = 0.3  # after Return, before the window counts: the Shell starts the command

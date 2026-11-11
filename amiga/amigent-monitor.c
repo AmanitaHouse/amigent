@@ -43,6 +43,7 @@
 #include <proto/diskfont.h>
 #include <proto/icon.h>
 #include <string.h>
+#include <stdlib.h>
 
 const char version[] = "$VER: amigent-monitor 1.3.0 (06.11.2026)";
 
@@ -270,6 +271,8 @@ static void counters(const char *text)
     st.link_seen = seconds_now();
 }
 
+static LONG quiet;  /* ticks left without drawing: amigentd measures (Q) */
+
 static void add_line(UBYTE kind, const char *text)
 {
     struct line *last = nlines ? &lines[(nlines - 1) % LINES] : NULL;
@@ -277,6 +280,7 @@ static void add_line(UBYTE kind, const char *text)
 
     switch (kind) {
     case 'K': counters(text); return;
+    case 'Q': quiet = atol(text) * (50 / TICK); return;  /* seconds; 0 draws again */
     case 'A': st.tools++; break;
     case 'C': st.commands++; break;
     case 'I': if (text[0] == 'k') st.keys++; else st.clicks++; break;
@@ -920,9 +924,21 @@ int main(int argc, char **argv)
             add_line(m->kind, m->text);
             FreeVec(m);
         }
-        /* Everything is drawn with the layer locked and for the size the
-         * window has now; after a new size the whole inner box is cleared
-         * and drawn again, then the frame, in case something reached it. */
+        /* While amigentd measures, nothing is drawn: the layer lock would
+         * hold up Intuition. Afterwards everything once. */
+        if (quiet > 0) {
+            if (--quiet == 0)
+                full = TRUE;
+            else
+                continue;
+        }
+        /* Only with something to draw is the layer locked, and seldom: the
+         * side panel once a second, the cursor blinks slowly. Everything is
+         * drawn with the layer locked and for the size the window has now;
+         * after a new size the whole inner box is cleared and drawn again,
+         * then the frame, in case something reached it. */
+        if (!(full || changed || ticks % 5 == 0 || win->Width != cur_w || win->Height != cur_h))
+            continue;
         resized = lock_for_drawing();
         if (resized || full)
             draw_all();
@@ -932,7 +948,7 @@ int main(int argc, char **argv)
             if (changed || ticks % 5 == 0)
                 draw_side();
         }
-        draw_cursor((ticks / 3) & 1);
+        draw_cursor((ticks / 5) & 1);
         unlock_drawing();
         if (resized)
             RefreshWindowFrame(win);

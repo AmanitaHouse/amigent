@@ -65,6 +65,37 @@ Versions follow [semver](https://semver.org). The number lives in
 - `amigent-doctor` checks protocol 6, the disassembler and an emulator's GDB
   server too.
 
+### Hangs, stutter and requesters
+
+Wishes from measuring window dragging on a real A1200:
+
+- `amiga_loaded("programs", name)` lists every hunk of that program with its
+  address and size; addresses take `prog hunk 4 +$10`, `prog:hunk4+0x10` and
+  `prog hunk 4`.
+- `amiga_task(name, stack=N)` says which signals a task waits for and has, and
+  names up to N return addresses on its stack: only longwords right behind a
+  JSR or BSR, read in one go.
+- `amiga_locks` shows who holds the layer locks of a screen and its windows
+  and who waits for them, looked at under Forbid only (LOCKS, protocol 6).
+- `amiga_cpu` measures the CPU load per task on the Amiga itself, sampled at
+  priority 30 with no network traffic meanwhile (CPU).
+- `amiga_drag_measure` drags a window by its title bar at priority 21 and
+  times every step: median, p95 and max per step, steps the window did not
+  follow, how far it lagged (DRAG).
+- amigent-monitor draws only when something changed, and nothing at all while
+  amigentd measures; `amiga_quiet_monitor` keeps it still by hand (QUIET).
+  Its drawing held its layer, and Intuition waited for it.
+- `amiga_drag` says which window moved, or that none did and which one was
+  frontmost at the start point.
+- `amiga_ui_click` finds buttons whose label is drawn as text, such as those
+  of system requesters, and clicks the text when no gadget carries it.
+  `amiga_software_failure` reads a Software Failure requester, puts the guru
+  in words and clicks Suspend or Entfernen, never Reboot.
+- `amiga_memory` reads the vectors below $400, ExecBase at 4 among them, and
+  `amiga_status` gives `execbase`.
+- `amiga_start(..., unique=True)` starts nothing when the program runs
+  already, and `amiga_tasks` marks programs that run twice.
+
 ### Emulators
 
 - `amiga_emulator` talks to WinUAE's GDB server (WinUAE 6.1): status, pause,

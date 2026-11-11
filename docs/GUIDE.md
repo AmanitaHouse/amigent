@@ -196,8 +196,13 @@ starts the old one again.
 | `amiga_break` | Ctrl-C (or D, E, F) for a running command or a job by its number |
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions; after a crash the guru in words and what happened before |
 | `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
-| `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code |
-| `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack; change a priority, send Ctrl-C to F |
+| `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` and the vectors below $400 (ExecBase at 4) work too |
+| `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
+| `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
+| `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
+| `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
+| `amiga_software_failure` | a Software Failure requester: its text, the guru in words, and Suspend (never Reboot) |
 | `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
 | `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
 | `amiga_gurus` | guru codes in words, the last one and those MCP logged |

@@ -129,6 +129,7 @@ class Viewer:
                          alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
+        self.reason = ""  # why the Amiga does not answer, for the page and the terminal
         self.ever_joined = False
         self.amiga: dict = {}
         self.screen_list: list = []
@@ -172,6 +173,7 @@ class Viewer:
             picture = self.screen.snapshot()
             ws.send(json.dumps({"type": "hello", "host": machines.name_of(self.host),
                                 "address": machines.address(self.host), "online": self.online,
+                                "reason": self.reason,
                                 "version": __version__, "amiga": self.amiga,
                                 "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
@@ -252,7 +254,15 @@ class Viewer:
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
             self.online = online
-            self.event("online", online=online, reason=reason)
+            self.reason = "" if online else reason
+            self.event("online", online=online, reason=self.reason)
+            # stderr: the terminal that started amigent-viewer (stdout is the MCP server's protocol)
+            stamp = time.strftime("%H:%M:%S")
+            if online:
+                print(f"{stamp} connected to {machines.name_of(self.host)}", file=sys.stderr, flush=True)
+            else:
+                print(f"{stamp} the Amiga does not answer: {reason or 'no reason given'}",
+                      file=sys.stderr, flush=True)
 
     def _stats(self) -> None:
         seconds = 0
@@ -550,7 +560,9 @@ def main() -> None:
         remember=True,
     )
     url = viewer.start(args.port)
-    print(f"Amigent viewer: {url}\nCtrl+C to stop.", flush=True)
+    address = machines.address(host) or host
+    print(f"Amigent viewer: {url}\nConnecting to {machines.name_of(host)} at {address}, "
+          f"screen port {viewer.screen.port}; Ctrl+C to stop.", flush=True)
     if not args.no_window:
         open_window(url)
     try:

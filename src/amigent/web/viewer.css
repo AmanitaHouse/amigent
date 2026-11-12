@@ -163,6 +163,8 @@ button.icon[aria-pressed="true"] { background: var(--control); border-color: var
 }
 
 .overlay.show { display: flex; }
+.overlay .reason { margin: 0; max-width: 560px; color: #c4cad3; font-size: 12px; overflow-wrap: anywhere; }
+.overlay .reason:empty { display: none; }
 .find { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; }
 .find[hidden] { display: none; }
 .find p { margin: 0; color: #c4cad3; }

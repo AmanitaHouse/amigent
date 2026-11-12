@@ -96,6 +96,14 @@ Wishes from measuring window dragging on a real A1200:
 - `amiga_start(..., unique=True)` starts nothing when the program runs
   already, and `amiga_tasks` marks programs that run twice.
 
+### Remote desktop
+
+- When the remote desktop cannot reach the Amiga, the page says why (a key
+  that doesn't match, no answer at the address, ...) and where it connects
+  to, and `amigent-viewer` prints each change in the terminal. Before, every
+  failure looked like a hang
+  ([#4](https://github.com/akustikrausch/amigent/issues/4)).
+
 ### Emulators
 
 - `amiga_emulator` talks to WinUAE's GDB server (WinUAE 6.1): status, pause,

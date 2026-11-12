@@ -89,6 +89,8 @@
   let socketOpen = false;
   let amigaOnline = null;
   let host = "";
+  let address = "";
+  let reason = "";  // why the Amiga does not answer, as the PC side says it
 
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
@@ -118,6 +120,9 @@
     else if (amigaOnline === null) message = t("connecting");
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
+    // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
+    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? reason
+      : amigaOnline === null && address ? (address !== host ? `${host} (${address})` : host) : "";
     $("find").hidden = !(socketOpen && amigaOnline === false);
     pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
     $("state-text").textContent = socketOpen && amigaOnline ? [host, amiga.os, amiga.cpu].filter(Boolean).join(" · ") : t("state_offline");
@@ -192,6 +197,8 @@
           $("about-version").textContent = t("version", { version: m.version });
         }
         $("about-host").textContent = m.address && m.address !== host ? `${host} (${m.address})` : host;
+        address = m.address || host;
+        reason = m.reason || "";
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
         amigaOnline = m.online;
@@ -209,6 +216,7 @@
         break;
       case "online":
         amigaOnline = m.online;
+        reason = m.reason || "";
         showState();
         break;
       case "address":

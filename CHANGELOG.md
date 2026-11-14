@@ -3,6 +3,20 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### ZZ9000
+
+- amigentd reads a ZZ9000's screen through the card's own encoder instead of
+  over the Zorro bus: the card compares the screen with what it told amigentd
+  last and sends the changed tiles only. On a 68060 at 1280×720 a look at a
+  screen where little changed went from 0.73 s to 55 ms, a whole picture from
+  2.0 to 0.9 s. Needs zz9k.library 2 and ZZ9000 firmware 2.9.0 or newer (the
+  console encoder, service 0x8200); without them, or on any other screen,
+  nothing changes.
+  SYSINFO says `zz9000=1` when the last look went through the card. Numbers in
+  PERFORMANCE.md.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

@@ -56,6 +56,33 @@ Measured on a real A1200 (PiStorm, 1920×1080 RTG Workbench) over its plipbox:
 
 The raw figure is plain arithmetic: 1920 × 1080 × 3 bytes at 50 KB/s.
 
+## A ZZ9000
+
+A ZZ9000 keeps its screen in the card's memory, so reading it crosses the
+Zorro bus, changed or not. Its ARM has an encoder that compares the screen with
+the picture it told amigentd last and answers with the changed tiles only, so
+amigentd reads through that (see PROTOCOL.md, frame). Measured on a Zorro III
+Amiga with a 68060 and the ZZ9000, 1280×720 Workbench in 32 bit with a backdrop
+picture and a meter that changes two or three tiles a second, a link of about
+1.7 MB/s, medians of 5 to 10 looks:
+
+| look | read over Zorro | through the card |
+|---|---|---|
+| a few tiles changed | 0.73 s | 55 ms |
+| a Shell full of new text, about 50 tiles | 1.39 s | 0.48 s |
+| the whole picture again | 1.97 s | 0.87 s |
+| connect and first picture | 2.0 s | 1.0 s |
+| the same, first time after amigentd starts | 2.0 s | 2.3–2.5 s |
+| another screen of the same size comes to the front | 2.2–2.5 s | 1.7–2.8 s |
+
+The first time, and after a switch to another screen, the card has to send all
+of its picture; the more there is on the screen, the longer that takes, so a
+switch to the Workbench with its backdrop is 0.3 s slower than reading over
+Zorro and one to a plain screen 0.5 s faster. A whole picture is now mostly
+amigentd packing tiles for the wire (0.6 of the 0.87 s); that part is the same
+with any graphics card. While a viewer looks five times a second, amigentd
+takes about 13 % of the 68060.
+
 ## The remote desktop
 
 Measured with `scripts/bench_viewer.py`, a fake `amigentd` behind a simulated

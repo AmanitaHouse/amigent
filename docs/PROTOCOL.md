@@ -192,6 +192,17 @@ The fine print:
   every tile.
 - Screens on the chipset are read through their palette, HAM6 and HAM8
   included.
+- On a ZZ9000 the screen the card shows (24 or 32 bit, or 8 bit through its
+  palette; 15 and 16 bit screens are read the usual way) is not read over
+  Zorro: the card's ARM compares it with the picture it told amigentd last
+  (service `0x8200` of `zz9k.library`) and answers with the changed tiles only
+  (16×16 pixels, 32×16 at 8 bit), which amigentd keeps in its own copy. Same
+  rules as above, same frames on the wire; a read is one look at the whole
+  screen, and a tile it did not change keeps its age. When the card starts over
+  (a new screen size, another client of the encoder such as AmiNetXDuo's web
+  console) the next look costs about a second; when that client keeps the
+  encoder busy, amigentd reads the screen the usual way for 30 seconds before it
+  tries again. `zz9000=1` in SYSINFO says the last look went this way.
 
 ## planar
 
@@ -516,11 +527,12 @@ separated by tabs.
   unpacks, measured once on text-like data at the first SYSINFO; `text` and
   `debug`, `1` while amigentd records screen text and debug output; `note`,
   `1` when it takes [NOTE](#monitor); `readfrom`, `1` when READ can start at an
-  offset (1.3.0); `ports` and `tasks`, the names of all
-  public message ports and of all other tasks, separated by `|` (a Shell
-  process by the command it runs), at most 4 KB each. With them a client
-  notices other remote control software on the Amiga, such as a second AI
-  agent's daemon.
+  offset (1.3.0); `zz9000`, `1` when the last look at the screen went through a
+  ZZ9000 card's own encoder (see [frame](#frame)); `ports` and `tasks`, the
+  names of all public message ports and of all other tasks, separated by `|`
+  (a Shell process by the command it runs), at most 4 KB each. With them a
+  client notices other remote control software on the Amiga, such as a second
+  AI agent's daemon.
 - TREE lists a folder and everything below it in one answer, lines as DIR has
   them with the path below the folder as name (`sub/file`), parents before
   children; with arg 1 a CRC-32 in 8 hex digits follows each file (`-` when

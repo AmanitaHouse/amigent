@@ -3,12 +3,13 @@
 import os
 import socket
 import struct
+from pathlib import Path
 
 import pytest
 
 from amigent import net, pack
-from amigent.channel import (AmigaChannel, audio_request, parse_audio_body, parse_pip_body, pcm_wav,
-                             pip_request)
+from amigent.channel import (AmigaChannel, apollo_commands, audio_request, parse_audio_body,
+                             parse_pip_body, pcm_wav, pip_request)
 from amigent.follow import Follower, debug_fetch, serial_fetch, serial_port_name
 from amigent.hrtmon import plan
 from amigent.setup import apollo_os, select_build
@@ -59,6 +60,22 @@ def test_build_choice():
     assert select_build(0, {"exec_version": "51.3", "attn_flags": "0"}) == "amigentd"
     assert select_build(0, {}, "exec.library 51.3\nApolloOS\n") == "amigentd.apollo"
     assert not apollo_os({"os": "AmigaOS"})
+
+
+def test_an_empty_pip_surface_is_not_a_supported_command():
+    root = Path(__file__).resolve().parents[1]
+    daemon = (root / "src/native/amiga/daemon/amigentd.c").read_text(encoding="latin-1")
+    apollo = (root / "src/native/amiga/platform/apollo/apollo.c").read_text(encoding="latin-1")
+    assert 't_pair(&t, "audio", 1);' in daemon
+    assert 't_pair(&t, "pip", 0);' in daemon
+    assert 't_pair(&t, "pip", 1);' not in daemon
+    reader = apollo.split("LONG apollo_pip(", 1)[1].split("static ULONG peek", 1)[0]
+    assert "*x = *y = *w = *h = 0;" in reader and "return 0;" in reader
+    assert "DFF3" not in reader  # the write-only PIP registers stay unread
+    assert apollo_commands({"audio": "1", "pip": "0"}) == frozenset({"AUDIO"})
+    assert apollo_commands({"audio": "1", "pip": "1"}) == frozenset({"AUDIO", "PIP"})
+    assert apollo_commands({"audio": "0", "pip": "0"}) == frozenset()
+    assert apollo_commands(None) == frozenset()
 
 
 def test_audio_and_pip_framing():

@@ -525,8 +525,9 @@ separated by tabs.
   `debug`, `1` while amigentd records screen text and debug output; `note`,
   `1` when it takes [NOTE](#monitor); `readfrom`, `1` when READ can start at an
   offset (1.3.0). The ApolloOS build also sends `os=ApolloOS`, `board` (the
-  raw `VREG_BOARD` value), `board_name`, and `audio=1` and `pip=1` to say
-  AUDIO and PIP are answered. `ports` and `tasks`, the names of all
+  raw `VREG_BOARD` value), `board_name`, and `audio=1` when AUDIO is
+  answered. `pip` is `0` while the safe reader has no picture; `1` would mean
+  a PIP image is available. `ports` and `tasks`, the names of all
   public message ports and of all other tasks, separated by `|` (a Shell
   process by the command it runs), at most 4 KB each. With them a client
   notices other remote control software on the Amiga, such as a second AI

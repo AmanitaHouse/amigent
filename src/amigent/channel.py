@@ -109,6 +109,21 @@ def pip_request() -> bytes:
     return struct.pack(">BBHHHH", PIP, 0, 0, 0, 0, 0)
 
 
+def apollo_commands(info: dict | None) -> frozenset[str]:
+    """AUDIO and PIP when SYSINFO advertises them.
+
+    ``pip=0`` means the safe reader returned no picture. That is not a
+    supported PIP command. ``audio=1`` means AUDIO is answered.
+    """
+    info = info or {}
+    commands = set()
+    if info.get("audio") == "1":
+        commands.add("AUDIO")
+    if info.get("pip") == "1":
+        commands.add("PIP")
+    return frozenset(commands)
+
+
 def parse_audio_body(body: bytes) -> tuple[int, bytes]:
     """What follows the status byte: u32 rate, u32 length, s16le stereo."""
     if len(body) < 8:

@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines, net
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
-from .channel import Commands, pc_outdated
+from .channel import Commands, apollo_commands, pc_outdated
 from .system import OS_NAMES, describe_system, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -359,7 +359,8 @@ class Viewer:
                 continue
             info = self.amiga or {}
             now = time.monotonic()
-            if info.get("audio") != "1" or now < fail_until:
+            offered = apollo_commands(info)
+            if "AUDIO" not in offered or now < fail_until:
                 time.sleep(0.05)
             else:
                 try:
@@ -382,7 +383,7 @@ class Viewer:
                     link.close()
                     fail_until = time.monotonic() + 0.5
                     time.sleep(0.05)
-            if info.get("pip") == "1" and not quiet_pip and time.monotonic() >= pip_at:
+            if "PIP" in offered and not quiet_pip and time.monotonic() >= pip_at:
                 pip_at = time.monotonic() + 0.5
                 try:
                     x, y, w, h, rgb = self._ctl(self.ctl.pip)

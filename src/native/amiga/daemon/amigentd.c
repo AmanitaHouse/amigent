@@ -3656,7 +3656,7 @@ static BOOL c_sysinfo(struct link *l)
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
             t_pair(&t, "audio", 1);
-            t_pair(&t, "pip", 1);
+            t_pair(&t, "pip", 0);  /* apollo_pip has no picture; do not advertise one */
         }
 #endif
     }

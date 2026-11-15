@@ -1,9 +1,10 @@
 """Before-and-after inventory of a checkout.
 
-A created, removed, resized, or same-size-modified file outside ``build/`` is
-a failure. Files that were already present, including legitimate uncommitted
-work, are the baseline and are not reported. ``build/`` is the approved
-destination for generated output.
+A created, removed, resized, or same-size-modified file outside ``build/`` and
+``dist/`` is a failure. ``build/`` holds generated build and test output.
+``dist/`` holds a deliberately built distribution. Files that were already
+present, including legitimate uncommitted work, are the baseline and are not
+reported.
 """
 
 from __future__ import annotations
@@ -20,20 +21,28 @@ def _fingerprint(path: Path) -> tuple[int, str]:
     return len(data), hashlib.sha256(data).hexdigest()
 
 
+# Generated output. A file anywhere else, including one named ``2``, is drift.
+APPROVED_OUTPUT = ("build", "dist")
+
+
+def _approved(rel: str) -> bool:
+    return rel in APPROVED_OUTPUT or any(rel.startswith(name + "/") for name in APPROVED_OUTPUT)
+
+
 def inventory(root: Path) -> dict[str, tuple[int, str]]:
-    """Relative path to ``(size, sha256)``, skipping git metadata and ``build/``."""
+    """Relative path to ``(size, sha256)``, skipping git metadata and approved output."""
     found: dict[str, tuple[int, str]] = {}
     root = root.resolve()
     for dirpath, dirnames, filenames in os.walk(root):
         here = Path(dirpath)
         if here == root:
-            dirnames[:] = [name for name in dirnames if name not in {".git", "build"}]
+            dirnames[:] = [name for name in dirnames if name not in {".git", *APPROVED_OUTPUT}]
         else:
             dirnames[:] = [name for name in dirnames if name != ".git"]
         for name in filenames:
             path = here / name
             rel = path.relative_to(root).as_posix()
-            if rel == ".git" or rel.startswith(".git/") or rel == "build" or rel.startswith("build/"):
+            if rel == ".git" or rel.startswith(".git/") or _approved(rel):
                 continue
             try:
                 found[rel] = _fingerprint(path)
@@ -43,10 +52,10 @@ def inventory(root: Path) -> dict[str, tuple[int, str]]:
 
 
 def unexpected(before: dict[str, tuple[int, str]], after: dict[str, tuple[int, str]]) -> list[str]:
-    """Paths created, removed, resized, or modified outside build/."""
+    """Paths created, removed, resized, or modified outside approved output."""
     problems = []
     for rel in sorted(set(before) | set(after)):
-        if rel == "build" or rel.startswith("build/"):
+        if _approved(rel):
             continue
         if rel not in before:
             problems.append(f"created {rel}")
@@ -183,6 +192,11 @@ def wsl_bash(directory: Path, args: list[str]) -> list[str]:
 
     Every argument is one quoted word. Characters such as ``>``, ``<``, ``&``,
     and spaces stay inside that word, so bash does not open a redirection.
+
+    The whole script is one argv element. It is not a PowerShell command line.
+    Windows PowerShell parses ``2>&1`` inside a double-quoted native argument
+    and, next to ``>``, creates a file named `` 2`` (a leading space) in the
+    current directory. Do not append ``2>&1`` outside this argument.
     """
     if not args:
         raise ValueError("wsl command is empty")

@@ -40,15 +40,24 @@ def apollo_peer(info: dict | None) -> bool:
     return cpu == 68080 or str(info.get("os", "")) == "ApolloOS"
 
 
+def interface_address() -> str:
+    """The address the default route would leave from.
+
+    The UDP connect picks an interface and sends no payload. Offline tests
+    replace this function. They do not perform that connect.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("192.0.2.1", 9))  # documentation address, discard port
+        return s.getsockname()[0]
+
+
 def lan_address(peer: str = "", port: int = PORT, timeout: float = 5) -> str:
     """This PC's address: as peer sees it over TCP (NAT may disagree with the LAN), else the
     one the default route leaves from. Raises OSError when there is no answer to either."""
     if peer:
         with socket.create_connection((peer, port), timeout) as s:
             return s.getsockname()[0]
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("192.0.2.1", 9))  # not a single byte leaves; UDP connect just picks the interface
-        return s.getsockname()[0]
+    return interface_address()
 
 
 def greet(host: str, port: int = PORT, timeout: float = 2.0,

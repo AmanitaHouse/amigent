@@ -50,6 +50,16 @@ def test_unexpected_inventory_fails_on_a_root_artifact():
     same["build/pytest/cache"] = _mark(1, b"cache")
     assert unexpected(before, same) == []
 
+    shipped = dict(before)
+    shipped["dist/amigent-1.3.0.tar.gz"] = _mark(8, b"sdist")
+    shipped["build/apollo/amigentd.apollo"] = _mark(8, b"apollo")
+    assert unexpected(before, shipped) == []
+
+    numbered = dict(before)
+    numbered["2"] = _mark(0, b"")
+    numbered[" 2"] = _mark(16, b"log")
+    assert unexpected(before, numbered) == ["created  2", "created 2"]
+
     removed = dict(before)
     del removed["README.md"]
     assert unexpected(before, removed) == ["removed README.md"]

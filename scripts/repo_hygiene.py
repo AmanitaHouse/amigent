@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a command and fail if it changes a file outside build/.
+"""Run a command and fail if it changes a file outside build/ or dist/.
 
 This is the supported Python test invocation. It creates the cache directory
 under ``build/`` and chooses the temporary directory, then starts a new

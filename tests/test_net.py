@@ -36,6 +36,17 @@ def test_lan_address_as_the_peer_sees_us():
     assert net.lan_address("127.0.0.1", port) == "127.0.0.1"
 
 
+def test_offline_interface_discovery_does_not_dial():
+    """The UDP probe stays in the live function. The suite does not call it."""
+    from pathlib import Path
+
+    assert net.lan_address() == "127.0.0.1"
+    guard = (Path(__file__).resolve().parent / "conftest.py").read_text(encoding="utf-8")
+    assert "192.0.2.1" not in guard
+    real = (Path(__file__).resolve().parents[1] / "src" / "amigent" / "net.py").read_text(encoding="utf-8")
+    assert "def interface_address" in real and "192.0.2.1" in real
+
+
 def test_windows_exe_falls_back_to_the_bare_name():
     assert platform_util.windows_exe("no-such-program-4711.exe") == "no-such-program-4711.exe"
     assert isinstance(platform_util.in_wsl(), bool)

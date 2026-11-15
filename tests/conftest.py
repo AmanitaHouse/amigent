@@ -94,16 +94,17 @@ def _note(kind: str, host: str) -> None:
 def _install_offline_guard() -> None:
     """Refuse non-loopback dials for the whole process, including after a test ends.
 
-    ``lan_address`` may UDP-connect to 192.0.2.1. That picks an interface and
-    sends nothing. It is not a greeting. ``AMIGENT_LIVE=1`` is the opt-in for
-    a test marked ``live``.
+    Interface discovery is replaced with loopback. A UDP connect to a
+    documentation address is a real socket operation and is not allowed.
+    ``AMIGENT_LIVE=1`` is the opt-in for a test marked ``live``.
     """
     import socket
 
-    from amigent import machines
+    from amigent import machines, net
 
     if LIVE:
         return
+    net.interface_address = lambda: "127.0.0.1"
     real_create = socket.create_connection
     real_connect = socket.socket.connect
     real_lookup = socket.gethostbyname
@@ -122,8 +123,6 @@ def _install_offline_guard() -> None:
     def connect(self, address):
         host = host_of(address)
         if not _loopback(host):
-            if self.type == socket.SOCK_DGRAM and host == "192.0.2.1":
-                return real_connect(self, address)
             if host:
                 _note("connect", host)
             raise OSError(f"offline tests do not connect to {host or 'an empty address'}")

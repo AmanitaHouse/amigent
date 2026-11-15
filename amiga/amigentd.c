@@ -1282,6 +1282,10 @@ static BOOL zz_pass(void)
             return FALSE;
         seq = zz_get16(head + 2);
         if (zz_get16(rep.payload + 6) & ZZ_KEYFRAME) {  /* from black, asked for or not */
+            if (ty) {  /* the bands before this one would stay black: start over */
+                zz_foreign();
+                return FALSE;
+            }
             if (!zz.reset)
                 zz_foreign();
             zz_blank();

@@ -6,7 +6,9 @@
  *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
- * TLSONLY: once the TLS port is up, the plain one talks to localhost only.
+ * TLSONLY: once the TLS port is up, and not during SETUP, the plain port
+ * talks to 127.0.0.1 only. A remote plain socket is closed after the hello,
+ * before AUTH, CHANNEL or AUDIO. A failed TLS handshake does not undo that.
  * NOTEXT, NODEBUG: don't record the text programs draw, or their debug output.
  * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
  * TLSONLY.
@@ -179,7 +181,7 @@ static LONG ref_w, ref_h, cols, rows;
 static struct newcomer {
     LONG fd, have;
     UBYTE cmd[10];
-    BOOL authed, screen, outside;  /* outside: plain, and only the music stream */
+    BOOL authed, screen;
     ULONG since, addr;
 } pend[PENDING];
 
@@ -189,7 +191,6 @@ static struct channel {
     LONG id;
     volatile BOOL busy;
     volatile ULONG last;
-    BOOL audio_only;  /* plain connection from another machine: music, nothing else */
     ULONG addr, since;  /* for CLIENTS on the ARexx port */
 } chans[CHANNELS];
 static ULONG client_addr, client_since, start_ms;
@@ -2833,16 +2834,23 @@ static void accept_pending(void)
     IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through WaitSelect */
     wide_buffers(SocketBase, fd);
     load_key();
+    /* Operational TLSONLY: the TLS port is up and this is not SETUP.
+     * A failed handshake does not clear tls_only or tls_open, so it is
+     * not a downgrade to plaintext. SETUP is separate: the certificate
+     * is delivered on this port, and SETUP_END returns to this rule.
+     * Until the TLS port is listening, plain stays open. */
     locked = tls_only && tls_open && !setup_mode;
     hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0);
     l.base = SocketBase;
     l.fd = fd;
-    /* TLSONLY: strangers get the hello, so they know where the door is.
-     * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga.
-     * Another machine may stay for the music stream only. The cipher on that
-     * stream was the look leaving every pass. Screen, files and commands
-     * still come in through TLS. */
+    /* Strangers get the hello, so they know the door is PORT+1.
+     * Then a remote plain socket is closed before AUTH, CHANNEL or AUDIO.
+     * 127.0.0.1 stays: the TLS pump connects here. */
     if (!l_send(&l, hello, 8, HELLO_SECONDS)) {
+        close_fd(fd);
+        return;
+    }
+    if (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
         close_fd(fd);
         return;
     }
@@ -2851,7 +2859,6 @@ static void accept_pending(void)
     pend[i].have = 0;
     pend[i].authed = secret_len == 0;
     pend[i].screen = FALSE;
-    pend[i].outside = locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK);
     pend[i].since = now_ms();
 }
 
@@ -2895,8 +2902,6 @@ static void step(LONG i)
     } else if (p->authed) {
         if (p->cmd[0] == CMD_CHANNEL)
             start_channel(i);
-        else if (p->outside)
-            close_pending(i);  /* the plain door is the music stream, not the screen */
         else
             p->screen = TRUE;  /* serve() hands it the screen */
         return;
@@ -6477,11 +6482,7 @@ static void __saveds channel_main(void)
             ok = c_ok(&l);
             while (ok && l_recv(&l, cmd, sizeof(cmd), 0)) {
                 c->busy = TRUE;
-                if (c->audio_only && cmd[0] != CMD_AUDIO && cmd[0] != CMD_PING &&
-                    cmd[0] != CMD_CHANNEL)
-                    ok = c_fail(&l, 1, "plain connection is audio only");
-                else
-                    ok = chan_command(&l, cmd);
+                ok = chan_command(&l, cmd);
                 c->last = now_ms();
                 c->busy = FALSE;
             }
@@ -6528,7 +6529,6 @@ static void start_channel(LONG i)
         c->busy = FALSE;
         c->last = c->since = now_ms();
         c->addr = p->addr;
-        c->audio_only = p->outside;
         Forbid();
         children++;
         Permit();
@@ -6937,7 +6937,7 @@ static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
     LONG inner, n, one = 1;
 
     if (SSL_accept(ssl) != 1)
-        return;
+        return;  /* failed handshake: do not open the plain port to that client */
     if ((inner = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         return;
     memset(&addr, 0, sizeof(addr));

@@ -83,7 +83,9 @@ the protocol version, currently `5`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
 certificate is there, `4` when the plain port is closed to other machines
 (`TLSONLY`): a plain connection from another machine is closed right after the
-hello, use PORT+1. Over TLS the hello shows `4` as well, and the connection stays.
+hello, before AUTH or any command, AUDIO included. Use PORT+1. Over TLS the
+hello shows `4` as well, and the connection stays. 127.0.0.1 is not closed:
+the TLS pump connects there.
 
 ## key
 
@@ -648,15 +650,32 @@ seconds. It may be written during SETUP: the port opens within about 10 seconds.
 Up to eight TLS connections at once.
 
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
-an ordinary connection there.
+an ordinary connection there. That loopback socket is the one plain connection
+a remote client still causes, and it is not a client of its own.
 
-With `TLSONLY`, while the TLS port is open and amigentd is not in SETUP mode, a
-new plain connection from any address but 127.0.0.1 gets the hello with flag `4`
-and is closed at once. Connections already open stay. Without a certificate, or
-without AmiSSL, there is no TLS port and the plain port works as usual, so a lost
-certificate never locks you out. In SETUP mode the plain port stays open, so
-`amigent-setup` can deliver the certificate; after SETUP_END new plain connections
-from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
+### operational rule
+
+With `TLSONLY`, while the TLS port is open, a new plain connection from any
+address but 127.0.0.1 gets the hello with flag `4` and is closed at once.
+Nothing after the hello is read. AUTH is not accepted, so the key is not
+taken on that socket, and neither is CHANNEL or AUDIO. Connections already
+open stay. A TLS handshake that fails does not clear `TLSONLY` and does not
+open this path: the client is dropped, and the plain port is not offered
+instead.
+
+While the TLS port is not listening, the plain port works as usual. That is
+the case with no certificate, with a certificate AmiSSL cannot load, and
+without AmiSSL. It is not a fallback from a failed handshake. The port is
+simply not up, so a lost certificate does not lock the machine out.
+
+### setup
+
+SETUP is not the operational rule. In SETUP mode the plain port stays open
+to other machines, including while `TLSONLY` is set and the TLS port is
+already listening, so `amigent-setup` can deliver the certificate on the
+plain connection it already has. SETUP_END leaves SETUP mode. After that,
+new plain connections from outside are turned away as in the operational
+rule. TLS 1.2 and 1.3, as AmiSSL offers them.
 
 ## arexx
 

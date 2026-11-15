@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines, net
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
-from .channel import Commands, apollo_commands, pc_outdated
+from .channel import Commands, apollo_commands, audio_uses_tls, pc_outdated
 from .system import OS_NAMES, describe_system, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -348,6 +348,8 @@ class Viewer:
         One AUDIO starts a stream. The daemon copies each finished half into a
         FIFO and pushes it until this side sends stop. The page plays those
         bytes at the mix rate. The screen connection is not this socket.
+        When the daemon has closed the plain port, this socket is TLS.
+        A failed TLS handshake is not retried in the clear.
         """
         link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
         quiet_pip = False
@@ -365,7 +367,7 @@ class Viewer:
             else:
                 try:
                     if not link.connected:
-                        link.connect(plain=True)
+                        link.connect_audio(tls=audio_uses_tls(self.screen.flags, self.host))
                     link.audio_start()
                     while self._watching():
                         got = link.audio_read()

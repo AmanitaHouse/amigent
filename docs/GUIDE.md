@@ -380,9 +380,12 @@ or the close gadget ends it, C clears the log.
 - With `openssl` on the PC and AmiSSL on the Amiga, `amigentd` also accepts TLS
   on port 6802, and the PC accepts only the certificate `amigent-setup` made for
   that Amiga. Once that works, `amigent-setup` starts `amigentd` with `TLSONLY`:
-  other computers then get in only encrypted (`--allow-plain` keeps the plain
-  port open). Without TLS the connection is unencrypted, and someone who can
-  read your network traffic could read the key too.
+  other computers then get in only encrypted, the music stream included
+  (`--allow-plain` keeps the plain port open by not setting `TLSONLY`).
+  Without TLS the connection is unencrypted, and someone who can read your
+  network traffic could read the key too. SETUP mode is the bootstrap
+  exception: the plain port stays open so the certificate can be delivered,
+  and SETUP_END ends that exception.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

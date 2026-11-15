@@ -7,6 +7,7 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import re
 import struct
@@ -49,6 +50,54 @@ PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost on
 PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
                      "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
                      "to this one, or run amigent-setup again.")
+
+
+def peer_is_loopback(host: str) -> bool:
+    """127.0.0.1 and localhost. The TLS pump is one of these. A name is not."""
+    text = str(host).split("%", 1)[0]
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def connection_peer(sock: socket.socket) -> str:
+    """The address on the far end of sock, or '' when the socket has none."""
+    try:
+        return str(sock.getpeername()[0])
+    except OSError:
+        return ""
+
+
+def tls_only_locks_plain(*, tls_only: bool, tls_listening: bool, setup: bool) -> bool:
+    """Operational TLSONLY: remote plaintext is closed, AUDIO included.
+
+    False while the daemon is in SETUP, so the certificate can be delivered,
+    and false while the TLS port is not listening. A failed handshake does
+    not change these inputs, so it does not open the plain port.
+    """
+    return bool(tls_only and tls_listening and not setup)
+
+
+def audio_uses_tls(flags: int, host: str) -> bool:
+    """Remote audio goes over TLS when the daemon has closed the plain port."""
+    return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
+
+
+def plain_session_refused(flags: int, peer: str, *, tls_socket: bool, plain: bool) -> bool:
+    """True when this socket must be dropped before AUTH or any command.
+
+    A TLS socket is the required path. Loopback plaintext stays open for the
+    pump. Every other plaintext session is refused when flag 4 is set,
+    including a caller that asked for a plain audio socket.
+    """
+    if tls_socket or not (flags & PLAIN_CLOSED):
+        return False
+    if plain and peer_is_loopback(peer):
+        return False
+    return True
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
@@ -290,6 +339,7 @@ class AmigaChannel(VolumeFlush):
         self._sock: socket.socket | None = None
         self.banner = ""
         self.protocol = 0
+        self.flags = 0
         self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
         self.zlevel = 0  # what COMPRESS last set on this connection
         self._slice = SLICE  # Apollo raises this once SYSINFO says so
@@ -297,7 +347,7 @@ class AmigaChannel(VolumeFlush):
     # link
 
     def _open_plain(self) -> socket.socket:
-        """The music stream. No TLS: the cipher was leaving the mix once per pass."""
+        """Plain TCP. Used only when the daemon has not closed that port."""
         from . import machines, roster
 
         address = roster.address(self.host)
@@ -325,10 +375,12 @@ class AmigaChannel(VolumeFlush):
             if hello[:4] != b"AMGT":
                 raise AmigaError(f"unexpected greeting {hello!r}")
             self.protocol, flags = struct.unpack(">HH", hello[4:8])
+            self.flags = flags
             if self.protocol < CHANNEL_PROTOCOL:
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
-            if flags & PLAIN_CLOSED and not plain and not hasattr(self._sock, "version"):
+            if plain_session_refused(flags, connection_peer(self._sock),
+                                     tls_socket=hasattr(self._sock, "version"), plain=plain):
                 raise AmigaError(PLAIN_CLOSED_TEXT)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
@@ -724,6 +776,19 @@ class Commands:
         self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
 
+    def connect_audio(self, *, tls: bool) -> None:
+        """The music stream. TLS when the remote daemon has closed the plain port.
+
+        A TLS failure stays a failure. This does not retry the stream in the clear
+        and does not fall through to amigactld.
+        """
+        if tls:
+            channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+            channel.connect()
+            self.backend = channel
+            return
+        self.connect(plain=True)
+
     def connect(self, *, plain: bool = False) -> None:
         if plain:
             channel = self.backend if isinstance(self.backend, AmigaChannel) else AmigaChannel(
@@ -738,7 +803,8 @@ class Commands:
                 self.backend = channel
                 return
             except AmigaError as e:
-                if "refused the key" in str(e) or "wants a key" in str(e):
+                if ("refused the key" in str(e) or "wants a key" in str(e)
+                        or PLAIN_CLOSED_TEXT in str(e)):
                     raise
             self.backend = AmigaCtl(self.host, self.ctl_port, self.timeout)
         self.backend.connect()

@@ -412,6 +412,11 @@ not been run on Apollo hardware, so it is not a release-approved V4 build.
 `scripts/make_release.py` packs the archive with LhA on the Amiga. Tests for
 the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
 
+A source distribution of this tree contains the Python package and the staged
+Amiga executables under `src/amigent/amiga`. It does not contain `src/native`.
+The native daemon sources stay in git. Whether they should also travel in the
+sdist is a packaging decision, and it is not approved.
+
 ## Translations
 
 Each language of the remote desktop is one file in

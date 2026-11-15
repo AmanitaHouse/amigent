@@ -3,6 +3,14 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Building
+
+- amigentd also builds with GCC (`m68k-amigaos-gcc -noixemul`), next to vbcc.
+  The library calls amigentd declares itself (AmiSSL) and `cmp_longs()` have
+  GCC versions; vbcc builds as before. See GUIDE.md, Building amigentd.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

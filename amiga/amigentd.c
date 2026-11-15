@@ -52,14 +52,22 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
-/* The SDK here has the CGX inline stubs but no clib or cybergraphx headers;
- * the values below are from cybergraphx/cybergraphics.h. */
+/* The SDK vbcc builds with here has the CGX inline stubs but no clib or
+ * cybergraphx headers; the values below are from cybergraphx/cybergraphics.h.
+ * GCC takes the headers that come with its toolchain, and the inline macros
+ * it uses for the library calls declared in this file. */
+#ifdef __VBCC__
 extern struct Library *CyberGfxBase;
 #include <inline/cybergraphics_protos.h>
 
 #define RECTFMT_RGB 0
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
+#else
+#include <proto/cybergraphics.h>
+#include <cybergraphx/cybergraphics.h>
+#include <inline/macros.h>
+#endif
 
 #define PROTOCOL_VERSION 5
 #define NAMES_MAX 4096  /* SYSINFO ports= and tasks= */
@@ -1128,8 +1136,17 @@ static BOOL fit_planar(struct Screen *scr)
 /* n longs side by side; -1 if all equal, else n-1 minus the index of the first
  * that differs. cmpm.l and dbne: the tightest compare loop a 68000 knows,
  * 30 cycles a long. dbne counts a word, so n stays below 32768. */
+#ifdef __VBCC__
 LONG cmp_longs(__reg("a0") const ULONG *a, __reg("a1") const ULONG *b, __reg("d0") LONG n) =
     "\tsubq.w\t#1,d0\n\tcmpm.l\t(a0)+,(a1)+\n\tdbne\td0,*-2\n\text.l\td0";
+#else
+static inline LONG cmp_longs(const ULONG *a, const ULONG *b, LONG n)
+{
+    __asm__ volatile("subq.w #1,%0\n1:\tcmpm.l (%1)+,(%2)+\n\tdbne %0,1b\n\text.l %0"
+                     : "+d"(n), "+a"(a), "+a"(b) : : "cc", "memory");
+    return n;
+}
+#endif
 
 /* Marks the tiles of tile row ty, columns tx0..tx1, that moved on from pref.
  * Row by row across the whole width, as the planes lie in memory: one pass
@@ -6102,6 +6119,7 @@ typedef struct ssl_method_st SSL_METHOD;
 
 struct Library *AmiSSLMasterBase, *AmiSSLBase;
 
+#ifdef __VBCC__
 LONG __OpenAmiSSLTags(__reg("a6") struct Library *, __reg("d0") LONG APIVersion, Tag tag, ...) =
     "\tmove.l\ta0,-(a7)\n\tlea\t4(a7),a0\n\tjsr\t-60(a6)\n\tmovea.l\t(a7)+,a0";
 #define OpenAmiSSLTags(v, ...) __OpenAmiSSLTags(AmiSSLMasterBase, (v), __VA_ARGS__)
@@ -6145,6 +6163,35 @@ int __SSL_shutdown(__reg("a6") struct Library *, __reg("a0") SSL *s) = "\tjsr\t-
 #define SSL_shutdown(s) __SSL_shutdown(AmiSSLBase, (s))
 int __SSL_pending(__reg("a6") struct Library *, __reg("a0") const SSL *s) = "\tjsr\t-8352(a6)";
 #define SSL_pending(s) __SSL_pending(AmiSSLBase, (s))
+#else
+#define OpenAmiSSLTags(v, ...) ({ ULONG _t[] = {__VA_ARGS__}; \
+    LP2(60, LONG, OpenAmiSSLTagList, LONG, (v), d0, struct TagItem *, (struct TagItem *)_t, a0, \
+        struct Library *, AmiSSLMasterBase); })
+#define CloseAmiSSL() LP0NR(42, CloseAmiSSL, struct Library *, AmiSSLMasterBase)
+#define InitAmiSSL(...) ({ ULONG _t[] = {__VA_ARGS__}; \
+    LP1(36, LONG, InitAmiSSLA, struct TagItem *, (struct TagItem *)_t, a0, struct Library *, AmiSSLBase); })
+#define CleanupAmiSSL(...) ({ ULONG _t[] = {__VA_ARGS__}; \
+    LP1(42, LONG, CleanupAmiSSLA, struct TagItem *, (struct TagItem *)_t, a0, struct Library *, AmiSSLBase); })
+#define TLS_server_method() LP0(26946, const SSL_METHOD *, TLS_server_method, struct Library *, AmiSSLBase)
+#define SSL_CTX_new(m) LP1(8208, SSL_CTX *, SSL_CTX_new, const SSL_METHOD *, (m), a0, struct Library *, AmiSSLBase)
+#define SSL_CTX_free(a) LP1NR(8214, SSL_CTX_free, SSL_CTX *, (a), a0, struct Library *, AmiSSLBase)
+#define SSL_CTX_use_certificate_chain_file(c, f) LP2(8508, int, SSL_CTX_use_certificate_chain_file, \
+    SSL_CTX *, (c), a0, const char *, (f), a1, struct Library *, AmiSSLBase)
+#define SSL_CTX_use_PrivateKey_file(c, f, t) LP3(8496, int, SSL_CTX_use_PrivateKey_file, \
+    SSL_CTX *, (c), a0, const char *, (f), a1, int, (t), d0, struct Library *, AmiSSLBase)
+#define SSL_CTX_check_private_key(c) LP1(8766, int, SSL_CTX_check_private_key, \
+    const SSL_CTX *, (c), a0, struct Library *, AmiSSLBase)
+#define SSL_new(c) LP1(8784, SSL *, SSL_new, SSL_CTX *, (c), a0, struct Library *, AmiSSLBase)
+#define SSL_free(s) LP1NR(8820, SSL_free, SSL *, (s), a0, struct Library *, AmiSSLBase)
+#define SSL_set_fd(s, fd) LP2(8358, int, SSL_set_fd, SSL *, (s), a0, int, (fd), d0, struct Library *, AmiSSLBase)
+#define SSL_accept(s) LP1(8826, int, SSL_accept, SSL *, (s), a0, struct Library *, AmiSSLBase)
+#define SSL_read(s, b, n) LP3(8838, int, SSL_read, SSL *, (s), a0, void *, (b), a1, int, (n), d0, \
+    struct Library *, AmiSSLBase)
+#define SSL_write(s, b, n) LP3(8850, int, SSL_write, SSL *, (s), a0, const void *, (b), a1, int, (n), d0, \
+    struct Library *, AmiSSLBase)
+#define SSL_shutdown(s) LP1(8994, int, SSL_shutdown, SSL *, (s), a0, struct Library *, AmiSSLBase)
+#define SSL_pending(s) LP1(8352, int, SSL_pending, const SSL *, (s), a0, struct Library *, AmiSSLBase)
+#endif
 
 #define AMISSL_V303 21  /* AmiSSL 5.1, the first on OpenSSL 3 */
 #define AMISSLMASTER_MIN_VERSION 5
@@ -6264,7 +6311,7 @@ static void __saveds pump_main(void)
     }
     Permit();
     if ((SocketBase = OpenLibrary("bsdsocket.library", 4))) {
-        if (buf && InitAmiSSL(AmiSSL_SocketBase, SocketBase, AmiSSL_ErrNoPtr, &err, TAG_DONE) == 0) {
+        if (buf && InitAmiSSL(AmiSSL_SocketBase, (ULONG)SocketBase, AmiSSL_ErrNoPtr, (ULONG)&err, TAG_DONE) == 0) {
             if ((fd = ObtainSocket(p->id, AF_INET, SOCK_STREAM, 0)) < 0)
                 fd = ObtainSocket(p->id, AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (fd >= 0) {

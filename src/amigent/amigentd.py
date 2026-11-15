@@ -296,22 +296,25 @@ class Amigentd:
             return None
         return self._chunky().image(PALETTE)
 
-    def _frame_reply(self, take, planar: bool = False, packed: bool | None = None):
+    def _frame_reply(self, take, planar: bool = False, packed: bool | None = None, timing=None):
         """Parser for one FRAME answer: yields bytes wanted, gets them sent in.
 
         take(tile) gets each tile the moment it is complete, as RGB332 for the
         chunky formats. Returns the tile count, the bytes and the seconds from
         header to last byte. With planar the format byte says what follows.
-        packed: whether the frame was asked for packed, for the policy to time.
+        packed: whether the frame was asked for packed, for the policy to time;
+        timing: (since, now), two clocks: when the Amiga could start on the frame
+        and when its bytes came. The Amiga may pack a small frame whole before
+        it sends the header, so the header is no start.
         """
         kind = (yield 1)[0] if planar else 0
-        return (yield from self._format_reply(kind, take, packed))
+        return (yield from self._format_reply(kind, take, packed, timing))
 
-    def _format_reply(self, kind: int, take, packed: bool | None = None):
+    def _format_reply(self, kind: int, take, packed: bool | None = None, timing=None):
         if kind == 1:
-            return (yield from self._planar_reply(take, packed))
+            return (yield from self._planar_reply(take, packed, timing))
         if kind == 2:
-            return (yield from self._chunky_reply(take, packed))
+            return (yield from self._chunky_reply(take, packed, timing))
         if kind != 0:
             raise AmigentdError(f"unknown frame format {kind}")
         if self._planes is not None:
@@ -328,11 +331,12 @@ class Amigentd:
         self.received += size
         return count, size, time.perf_counter() - start
 
-    def _tiles_into(self, surface, take, size: int, packed: bool | None = None):
+    def _tiles_into(self, surface, take, size: int, packed: bool | None = None, timing=None):
         """The tile list of format 1 and 2: each one through the pipeline at once,
         its partners are the picture as it was before this frame."""
         surface.begin_frame()
         start = time.perf_counter()
+        since = timing[0]() if timing else None
         count = struct.unpack(">I", (yield 4))[0]
         size += 4
         raw = size  # as it would have come unpacked
@@ -354,11 +358,11 @@ class Amigentd:
             take((x, y, w, h, surface.tile(x, y, w, h) if isinstance(surface, Chunky) else data))
         self.received += size
         elapsed = time.perf_counter() - start
-        if self.policy and packed is not None:
-            self.policy.note_frame(raw, elapsed, packed)
+        if self.policy and packed is not None and since is not None:
+            self.policy.note_frame(raw, timing[1]() - since, packed)
         return count, size, elapsed
 
-    def _planar_reply(self, take, packed: bool | None = None):
+    def _planar_reply(self, take, packed: bool | None = None, timing=None):
         """Format 1: the planes, maybe a palette, then tiles."""
         depth, flags, width, height = planar_header((yield 7))
         size = 8
@@ -377,14 +381,14 @@ class Amigentd:
             if planes.set_palette((yield 3 * count)) and not fresh:
                 planes.repaint = True
             size += 2 + 3 * count
-        return (yield from self._tiles_into(planes, take, size, packed))
+        return (yield from self._tiles_into(planes, take, size, packed, timing))
 
-    def _chunky_reply(self, take, packed: bool | None = None):
+    def _chunky_reply(self, take, packed: bool | None = None, timing=None):
         """Format 2: RGB332 tiles for graphics cards, sharing the classic picture."""
         _, _, _, width, height = struct.unpack(">BBBHH", (yield 7))
         if (width, height) != (self.width, self.height):
             self._apply_size(width, height)
-        return (yield from self._tiles_into(self._chunky(), take, 8, packed))
+        return (yield from self._tiles_into(self._chunky(), take, 8, packed, timing))
 
     def _screens_reply(self):
         found = []
@@ -515,8 +519,10 @@ class Amigentd:
             tiles: list = []
             try:
                 arg = self.frame_arg(force)
+                asked = time.perf_counter()  # nothing else in flight: the Amiga starts now
                 self._send(CMD_FRAME, arg, *region)
-                self._drive(self._frame_reply(tiles.append, self.planar, self.frame_packed(arg)))
+                timing = (lambda: asked, time.perf_counter)
+                self._drive(self._frame_reply(tiles.append, self.planar, self.frame_packed(arg), timing))
             except (OSError, AmigentdError):
                 self.drop_picture()  # the service has moved on, ours is incomplete
                 raise
@@ -891,6 +897,10 @@ class Pipeline:
         self.waiting: deque = deque()  # [parser, bytes wanted, kind]
         self.frames = self.inputs = self.moves = 0
         self.heard = time.monotonic()
+        # perf_counter of the last bytes read, and of the read that ended the last
+        # answer: the Amiga works through requests in order, so the next one can't
+        # have started before that answer was out
+        self.got_at = self.done_at = time.perf_counter()
         self._tiles: list = []
         self.sock.settimeout(0.0)
 
@@ -938,9 +948,11 @@ class Pipeline:
         """Ask for a region; tiles reach the picture as each one lands."""
         arg = self.screen.frame_arg(force)
         packed = self.screen.frame_packed(arg)
+        asked = time.perf_counter()
+        timing = (lambda: max(asked, self.done_at), lambda: self.got_at)
 
         def parse():
-            result = yield from self.screen._frame_reply(self._landed, self.screen.planar, packed)
+            result = yield from self.screen._frame_reply(self._landed, self.screen.planar, packed, timing)
             if on_done:
                 on_done(*result)
 
@@ -971,6 +983,7 @@ class Pipeline:
                 raise AmigentdError("connection closed by amigentd")
             if data:
                 self.heard = time.monotonic()
+                self.got_at = time.perf_counter()
                 self.inbuf += data
                 self._parse()
         if self.waiting and time.monotonic() - self.heard > self.screen.timeout:
@@ -1001,6 +1014,7 @@ class Pipeline:
             try:
                 entry[1] = entry[0].send(chunk)
             except StopIteration:
+                self.done_at = self.got_at
                 self.waiting.popleft()
                 kind = entry[2]
                 if kind == "frame":

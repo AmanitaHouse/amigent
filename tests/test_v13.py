@@ -198,6 +198,35 @@ def test_screens_find_packing_on_a_line_that_got_slow(tmp_path):
     assert ways[0] == 0 and all(ways[2:30]) and ways.count(0) <= 3
 
 
+def test_small_screens_do_not_keep_the_losing_way_on(tmp_path):
+    """Typing and cursor blinks come in screens too small to measure: the way not
+    measured yet gets one of them in thirty, not all of them."""
+    p = _policy(tmp_path, 1800.0)
+    _screens(p, plain_kbs=235, packed_kbs=70, count=1)  # one whole screen, unpacked
+    ways = []
+    for _ in range(60):
+        level = p.frame_level()
+        p.note_frame(2048, 0.05, bool(level))  # too small to count
+        ways.append(level)
+    assert ways.count(1) == 2
+
+
+def test_a_screen_counts_the_time_before_its_header(tmp_path, monkeypatch):
+    """amigentd packs a small screen whole before it sends the header: the time
+    runs from when it could start on the screen, not from the header."""
+    from amigent.amigentd import Amigentd
+
+    monkeypatch.setattr(pack, "MIN_SAMPLE", 0)
+    screen = Amigentd("127.0.0.1")
+    screen.policy = _policy(tmp_path, 1800.0)
+    parser = screen._frame_reply(lambda tile: None, True, True, (lambda: 100.0, lambda: 100.5))
+    next(parser)
+    with pytest.raises(StopIteration):
+        for chunk in (b"\2", struct.pack(">BBBHH", 0, 0, 0, 64, 64), struct.pack(">I", 0)):
+            parser.send(chunk)  # format 2, 64x64, no tiles: 12 bytes in half a second
+    assert screen.policy._screens[True] == pytest.approx(12 / 1024 / 0.5)
+
+
 def test_mode_off_by_hand_wins():
     fake = Fake5(files={"S:f": b"y" * 10000})
     ch = channel_to(fake, mode="off", line=10.0)

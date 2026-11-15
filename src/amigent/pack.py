@@ -55,7 +55,7 @@ class Policy:
             self.line_kbs = None
         self._lock = threading.Lock()
         self._screens: dict[bool, float | None] = {False: None, True: None}  # KB/s unpacked, packed
-        self._turns = 0
+        self._since_try = EXPLORE  # screens since the losing way was tried: due at once
 
     def set_mode(self, mode: str) -> None:
         """auto, off, fast or best; kept for this Amiga from now on."""
@@ -126,7 +126,8 @@ class Policy:
     # Screens are measured, not modelled: a screen comes as fast as the Amiga
     # turns it into tiles, so its pace says little about the line. What counts
     # is how fast the tile bytes (as unpacked) arrive each way; the faster way
-    # wins, and the other gets a screen now and then in case it pays now.
+    # wins. The other way gets one screen in EXPLORE (the first right after the
+    # first measurement), whether or not that screen is big enough to measure.
 
     def frame_level(self) -> int:
         """0, 1 or 2 for the next screen."""
@@ -139,14 +140,15 @@ class Policy:
         with self._lock:
             plain, squeezed = self._screens[False], self._screens[True]
             if plain is None and squeezed is None:
-                pack_it = bool(model)
-            elif plain is None or squeezed is None:
-                pack_it = squeezed is None  # the way not measured yet
+                return packed if model else 0
+            if plain is None or squeezed is None:
+                pack_it = squeezed is not None  # the way measured so far
             else:
                 pack_it = squeezed > plain
-                self._turns += 1
-                if self._turns % EXPLORE == 0:
-                    pack_it = not pack_it
+            self._since_try += 1
+            if self._since_try > EXPLORE:
+                self._since_try = 1
+                pack_it = not pack_it
         return packed if pack_it else 0
 
     def note_frame(self, raw: int, seconds: float, packed: bool) -> None:

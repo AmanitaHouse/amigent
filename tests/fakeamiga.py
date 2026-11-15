@@ -59,6 +59,7 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
+        self.cpu = ""  # set to 68080 to look like amigentd.apollo
         self.pause_end = 0.0  # time.monotonic() at the end of a screen pause
         self.lock = threading.Lock()
         self.listener = socket.socket()
@@ -195,7 +196,9 @@ class FakeAmiga:
                 time.sleep(len(self.files[path]) / self.crc_rate)
             return self.ok(struct.pack(">I", zlib.crc32(self.files[path])))
         if cmd == 30:
-            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n")
+            cpu = f"cpu={self.cpu}\n" if self.cpu else ""
+            return self.text(
+                f"chip_free=100\n{cpu}kickstart=47.115\nscreen_paused={self.pause_left()}\n")
         if cmd == 31:
             return self.text("RAM Disk:\t10\t20\t30\t512\n")
         if cmd == 6:

@@ -29,7 +29,12 @@ What it needs: a 68020 or better for `bin/amigentd`, any 68000 for
 `bin/amigentd.000` (built from `src/native/amiga` with `build-amigentd CPU 68000 TO ///build/classic/amigentd.000`; no
 68020 instructions, no word or long access at odd addresses), and for a Vampire
 `bin/amigentd.080`, built by vbcc for the 68080 (`CPU 68080 TO ///build/classic/amigentd.080`); that one is not
-tried on a real Vampire yet, `bin/amigentd` runs there as well, OS 2.04 or newer, and a TCP stack with
+tried on a real Vampire yet, and `bin/amigentd` runs there as well. ApolloOS gets
+`bin/amigentd.apollo`, built with ApolloCrossDev's `m68k-amigaos-gcc -m68080`
+(`src/native/amiga/Makefile.apollo`; the compiler prefix comes from `APOLLOCROSSDEV`).
+The default target writes `build/apollo/` and does not replace a packaged binary.
+`amigent-setup` installs `amigentd.apollo` only after an ApolloOS
+check, and AmigaOS on a Vampire keeps `bin/amigentd`. OS 2.04 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read
 through `graphics.library`, `cybergraphics.library` is only used when it is there. AmiSSL 5 is
 only needed for [TLS](#tls).
@@ -452,6 +457,8 @@ else.
 | 35 | TREE | 1 = with CRC-32 | x = path length, w = most entries (0: 50000) | path | text |
 | 36 | DEBUGLOG | | w/h = count to start from, high/low | | `u32 count`, `u32 length`, bytes |
 | 37 | NOTE | | x = text length | text | nothing, see [monitor](#monitor) |
+| 38 | AUDIO | 0 one shot, 1 start a stream, 2 stop that stream | y = ms, one shot only | | one shot: `u32 rate`, `u32 length`, s16le stereo. A stream, after the status byte, repeats `u32 rate`, `u32 length`, s16le; length 0 waits, `ffffffff` ends it. ApolloOS only |
+| 39 | PIP | | | | `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, RGB bytes. ApolloOS only; w is 0. sagadoc marks the PIP registers write-only, and a read clears the overlay, so the surface is not read |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -501,7 +508,8 @@ separated by tabs.
   `fast_free`, `fast_total`, `fast_largest`, `total_free` in bytes, and
   `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
   as `47.115`), `bsdsocket` and `graphics` as `version.revision`, `cpu` (68000,
-  68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows) and
+  68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows; the
+  ApolloOS build reports `68080`) and
   `attn_flags`, exec's AttnFlags as a number, for bits newer than that list,
   and from protocol 4 `screen_paused`, the seconds of [pause](#pause) left.
   From amigentd 1.3.0 also `uptime`, the seconds since the Amiga started (its
@@ -516,7 +524,9 @@ separated by tabs.
   unpacks, measured once on text-like data at the first SYSINFO; `text` and
   `debug`, `1` while amigentd records screen text and debug output; `note`,
   `1` when it takes [NOTE](#monitor); `readfrom`, `1` when READ can start at an
-  offset (1.3.0); `ports` and `tasks`, the names of all
+  offset (1.3.0). The ApolloOS build also sends `os=ApolloOS`, `board` (the
+  raw `VREG_BOARD` value), `board_name`, and `audio=1` and `pip=1` to say
+  AUDIO and PIP are answered. `ports` and `tasks`, the names of all
   public message ports and of all other tasks, separated by `|` (a Shell
   process by the command it runs), at most 4 KB each. With them a client
   notices other remote control software on the Amiga, such as a second AI

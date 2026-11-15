@@ -9,8 +9,8 @@ Amiga: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL), a TCP/IP
 stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
-plain 68000; `amigent-setup` picks the right one. A Vampire's 68080 runs the
-plain `amigentd`. An RTG graphics card is optional: chipset screens, HAM included, are
+plain 68000; `amigent-setup` picks the right one. AmigaOS on a Vampire keeps
+that 68020 build. ApolloOS gets `amigentd.apollo`. An RTG graphics card is optional: chipset screens, HAM included, are
 read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
 about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 
@@ -400,7 +400,15 @@ the executable are written to `build/classic/`, not beside `daemon/amigentd.c`.
 same directory, `daemon/hookstub.s` is assembled separately:
 `vasmm68k_mot -Fbin -o ///build/classic/hookstub.bin daemon/hookstub.s`.
 This output layout has not been compiled with vbcc in the restructuring
-checkout, so it is not yet a release-approved classic build.
+checkout, so it is not yet a release-approved classic build. The ApolloOS
+binary is separate. [`src/native/amiga/Makefile.apollo`](../src/native/amiga/Makefile.apollo)
+builds `amigentd.apollo` with ApolloCrossDev's gcc and vasmm68k_mot. Set
+`APOLLOCROSSDEV` to the ApolloCrossDev checkout; the makefile uses
+`$APOLLOCROSSDEV/Compilers/GCC-6.50-Stable`. The default target writes
+`build/apollo/` and does not copy anything into `src/amigent/amiga/bin/`.
+`make -f src/native/amiga/Makefile.apollo install` does that copy. A clean
+compile here reproduced the preserved 108076-byte product baseline. It has
+not been run on Apollo hardware, so it is not a release-approved V4 build.
 `scripts/make_release.py` packs the archive with LhA on the Amiga. Tests for
 the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
 

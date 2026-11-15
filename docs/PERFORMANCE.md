@@ -87,6 +87,21 @@ detail, and asking again for an unchanged screen returns a short note instead
 of a picture. On the real A1200, 100 files (236 KB) go up in 5.3 s, and again
 in 0.7 s because unchanged files stay where they are.
 
+## Apollo V4 and A6000
+
+The numbers above are the slow end: a 68000 and a plipbox, small TCP windows,
+small sends. `amigentd.apollo` is the build for machines that do not live
+there. A V4 or an A6000 has a real Ethernet, so that build sends a frame 32 KB
+at a time instead of 2 KB, and sets a 32 KB receive window. Larger than that
+is not safe: AROSTCP corrupts the memory list (alert 0x0100000F) if a socket
+buffer or a single send is hundreds of kilobytes. The PC still asks for a 1 MB
+window and copies to those machines in 1 MB blocks. `amigentd` and
+`amigentd.000` keep the small windows.
+
+Packing still follows the line. A fast CPU stays unpacked until a bulk reply
+has shown how fast the wire is, so a gigabit link stays raw and a 68080
+behind a plipbox still packs once that sample is in.
+
 ## Measure it yourself
 
 ```bash

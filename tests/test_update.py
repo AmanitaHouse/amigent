@@ -39,6 +39,9 @@ def channel_for(amiga):
         def write_file(self, path, data):
             amiga.files[path] = data
 
+        def sysinfo(self):
+            return getattr(amiga, "info", {"exec_version": "0", "attn_flags": "0"})
+
         def exec(self, command):
             amiga.commands.append(command)
             if command.startswith("CPU CHECK"):
@@ -47,8 +50,12 @@ def channel_for(amiga):
                 if amiga.outcome == b"new":
                     amiga.files["C:amigentd"] = amiga.files.pop("C:amigentd.new")
                 amiga.files["T:amigent-update.done"] = amiga.outcome + b"\n"
+            if command.startswith("Version FULL"):
+                return ExecResult(0, getattr(amiga, "version_full", ""))
             if command.startswith("Version"):
                 return ExecResult(0, "amigentd 1.2.0\n")
+            if "amigent-apollo-probe" in command and not command.startswith("Protect"):
+                return ExecResult(0, getattr(amiga, "probe", ""))
             return ExecResult(0, "")
 
     return Channel
@@ -84,6 +91,43 @@ def test_a_68000_gets_its_own_build(run):
     amiga = Amiga(cpu_rc=5)
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.000").read_bytes()
+
+
+def test_apolloos_gets_its_own_build(run):
+    amiga = Amiga()
+    amiga.info = {"os": "ApolloOS", "exec_version": "51.3", "attn_flags": "1024"}
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+
+
+def test_amigaos_on_a_vampire_keeps_amigentd(run):
+    amiga = Amiga()
+    amiga.info = {"exec_version": "47.96", "attn_flags": "1024"}
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+
+
+def test_exec_51_without_the_fpga_bit_is_not_apollo(run):
+    amiga = Amiga()
+    amiga.info = {"exec_version": "51.3", "attn_flags": "0"}
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+
+
+def test_the_version_text_can_name_apolloos(run):
+    amiga = Amiga()
+    amiga.version_full = "exec.library 51.3\nApolloOS\n"
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+
+
+def test_apolloos_without_the_binary_changes_nothing(run, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(setup, "AMIGA", tmp_path)
+    amiga = Amiga()
+    amiga.info = {"os": "ApolloOS"}
+    assert run(amiga) == 1
+    assert "C:amigentd.new" not in amiga.files
+    assert "not in this package" in capsys.readouterr().out
 
 
 def test_nothing_to_do_when_it_is_already_current(run, capsys):

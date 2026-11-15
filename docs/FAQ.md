@@ -147,6 +147,13 @@ link free. Chipset screens come in their exact colours, and
 `amigentd` reads the frontmost Intuition screen. Software that takes over the
 hardware won't be in there.
 
+**On Apollo, why is the PiP window mostly black?**
+The picture is in the window, and that is what the viewer shows. The Apollo
+monitor lays a second picture over the window, and only the monitor gets that
+layer. The sample never gives it any colours, so it comes out black and hides
+the window. Drag the window and the picture shows for a moment, until the
+black layer catches up and covers it again.
+
 **The viewer window doesn't show up.**
 The AI agent gets the address as well. Open it in any browser on the same PC. Under
 WSL the window is started on the Windows side, which needs Edge (it's always

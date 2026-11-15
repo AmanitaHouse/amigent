@@ -242,6 +242,33 @@ def test_unknown_rates_never_pack(tmp_path):
     assert p.level() == 0 and p.line() == pack.LOCAL_LINE
 
 
+def test_a_fast_cpu_stays_raw_until_the_line_is_measured(tmp_path):
+    """Packing on the slow-line guess would hide a gigabit Apollo for good."""
+    p = pack.Policy("V4", "10.0.0.8", path=tmp_path / "l.json")
+    p.learn({"cpu": "68080", "os": "ApolloOS", "deflate_fast": "8000",
+             "deflate_best": "4000", "inflate": "12000"})
+    assert p.apollo and p.level() == 0 and not p.upload()
+    p.note(1024 * 1024, 0.1)  # 10 MB/s: the Ethernet, not a plipbox
+    assert p.level() == 0 and not p.upload()
+    slow = pack.Policy("plip", "10.0.0.9", path=tmp_path / "l.json")
+    slow.learn({"cpu": "68080", "deflate_fast": "8000", "deflate_best": "4000", "inflate": "12000"})
+    slow.note(64 * 1024, 2.0)  # 32 KB/s, a plipbox behind the same CPU
+    assert slow.level() == 2 and slow.upload()
+
+
+def test_packed_traffic_can_only_raise_the_line(tmp_path):
+    p = pack.Policy("V4b", "10.0.0.10", path=tmp_path / "l.json")
+    p.learn({"deflate_fast": "8000", "deflate_best": "4000", "inflate": "12000"})
+    p.line_kbs = 40
+    assert p.level() == 2
+    p.note_floor(256 * 1024, 0.05)  # 5120 KB/s of packed bytes did cross the wire
+    assert p.line_kbs > 2000 and p.level() == 1
+    held = p.line_kbs
+    p.note_floor(64 * 1024, 4.0)  # 16 KB/s: the CPU was the wait, not the wire
+    p.note_floor(100, 0.05)  # too small to count
+    assert p.line_kbs == held
+
+
 # ---- screen text
 
 LINES = [

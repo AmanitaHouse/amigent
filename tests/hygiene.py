@@ -104,6 +104,67 @@ def main_worktree(root: Path) -> Path | None:
     return main if (main / ".git").exists() else None
 
 
+def modes_survive(directory: Path) -> bool:
+    """Private Unix modes stick. A drvfs mount reports 0777 for every file.
+
+    Windows has no Unix mode bits. The tests that check them do not run there,
+    and pytest's temporary files work on a native NTFS directory.
+    """
+    if os.name == "nt":
+        return True
+    directory.mkdir(parents=True, exist_ok=True)
+    probe = directory / f".mode-{os.getpid()}"
+    try:
+        probe.write_bytes(b"x")
+        os.chmod(probe, 0o600)
+        return (probe.stat().st_mode & 0o777) == 0o600
+    except OSError:
+        return False
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+
+
+def os_temporary_root() -> Path:
+    """A temporary directory on the operating system's own filesystem.
+
+    ``TMPDIR`` is ignored. The canonical runner may already have pointed it at
+    the repository, and on WSL that repository directory can be a drvfs mount.
+    """
+    if os.name == "nt":
+        for name in ("TEMP", "TMP"):
+            value = os.environ.get(name)
+            if value:
+                return Path(value)
+        return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "Temp"
+    return Path("/tmp")
+
+
+def temporary_directory(root: Path) -> Path:
+    """Where the test run keeps private files.
+
+    ``build/tmp`` is used when that directory keeps the file modes the suite
+    checks. When it does not, an isolated directory under the operating
+    system's temporary storage is used instead. That directory is outside the
+    repository, one per checkout, and is still not a maintained source folder.
+    """
+    root = root.resolve()
+    local = (root / "build" / "tmp").resolve()
+    local.mkdir(parents=True, exist_ok=True)
+    if modes_survive(local):
+        return local
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    isolated = (os_temporary_root() / f"amigent-{digest}").resolve()
+    isolated.mkdir(parents=True, exist_ok=True)
+    if root == isolated or root in isolated.parents:
+        raise RuntimeError(f"temporary directory {isolated} is inside {root}")
+    if not modes_survive(isolated):
+        raise RuntimeError(f"no temporary directory keeps private file modes: {isolated}")
+    return isolated
+
+
 def sh_quote(text: str) -> str:
     """Single-quote text for bash, including empty strings and quotes."""
     return "'" + text.replace("'", "'\"'\"'") + "'"

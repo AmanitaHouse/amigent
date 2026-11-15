@@ -1,7 +1,8 @@
 ; The stub in front of each patched system function, see "hooks" in amigentd.c.
 ; amigentd copies these bytes into memory of their own, so the stub outlives
 ; amigentd when another program patched the same function later and the
-; vector can't go back. Assembled with: vasmm68k_mot -Fbin -o hookstub.bin hookstub.s
+; vector can't go back. Assembled from src/native/amiga with:
+;   vasmm68k_mot -Fbin -o ///build/classic/hookstub.bin daemon/hookstub.s
 ;
 ; All registers are saved, the hook (if set) gets a pointer to them, d0-d7
 ; then a0-a6, and the original function runs with the registers as they came.

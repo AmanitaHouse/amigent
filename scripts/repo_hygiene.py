@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """Run a command and fail if it changes a file outside build/.
 
-This is the supported Python test invocation. It creates the cache and
-temporary directories, then starts a new interpreter with those locations
-already in the environment. Python reads ``PYTHONPYCACHEPREFIX`` only while
-it is starting, and ``tempfile`` keeps the first directory it finds, so
-setting either one after startup does not move output that has already been
-placed.
+This is the supported Python test invocation. It creates the cache directory
+under ``build/`` and chooses the temporary directory, then starts a new
+interpreter with those locations already in the environment. Python reads
+``PYTHONPYCACHEPREFIX`` only while it is starting, and ``tempfile`` keeps the
+first directory it finds, so setting either one after startup does not move
+output that has already been placed.
 
-Usage: python scripts/repo_hygiene.py -- pytest -q
+Bytecode and the pytest cache stay under ``build/``. Private temporary files
+stay in ``build/tmp`` when that directory keeps Unix file modes. On a WSL
+drvfs mount it does not: every file is reported as mode 0777, and the suite's
+key-file check fails. In that case the temporary directory is an isolated
+folder in the operating system's own temporary storage, outside the
+repository. Maintained source directories are never that destination.
+
+Usage: python scripts/repo_hygiene.py -- python -m pytest -q
 """
 
 from __future__ import annotations
@@ -20,27 +27,39 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = (ROOT / "build" / "pycache").resolve()
-TEMPORARY = (ROOT / "build" / "tmp").resolve()
 PREFIX = str(CACHE)
-TEMP = str(TEMPORARY)
 
 
-def runtime_env() -> dict[str, str]:
+def temporary_path() -> str:
+    # This import happens in the first process, before the re-exec. Point
+    # bytecode at build/pycache first so tests/hygiene.py is not compiled
+    # beside the source.
+    if not sys.pycache_prefix:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        sys.pycache_prefix = str(CACHE)
+    sys.path.insert(0, str(ROOT / "tests"))
+    from hygiene import temporary_directory
+
+    return str(temporary_directory(ROOT))
+
+
+def runtime_env(temp: str) -> dict[str, str]:
     """Cache and temporary directories for an interpreter that has not started."""
     env = os.environ.copy()
     env["PYTHONPYCACHEPREFIX"] = PREFIX
-    env["TMPDIR"] = TEMP
-    env["TEMP"] = TEMP
-    env["TMP"] = TEMP
+    env["TMPDIR"] = temp
+    env["TEMP"] = temp
+    env["TMP"] = temp
     return env
 
 
 def runtime_ready() -> bool:
+    temp = temporary_path()
     return (
         os.environ.get("PYTHONPYCACHEPREFIX") == PREFIX
-        and os.environ.get("TMPDIR") == TEMP
-        and os.environ.get("TEMP") == TEMP
-        and os.environ.get("TMP") == TEMP
+        and os.environ.get("TMPDIR") == temp
+        and os.environ.get("TEMP") == temp
+        and os.environ.get("TMP") == temp
     )
 
 
@@ -49,8 +68,7 @@ def main(argv: list[str]) -> int:
     # Windows does not keep this process id, so the parent waits on a child.
     if not runtime_ready():
         CACHE.mkdir(parents=True, exist_ok=True)
-        TEMPORARY.mkdir(parents=True, exist_ok=True)
-        return subprocess.run([sys.executable, *sys.argv], env=runtime_env()).returncode
+        return subprocess.run([sys.executable, *sys.argv], env=runtime_env(temporary_path())).returncode
     if argv and argv[0] == "--":
         argv = argv[1:]
     if not argv:

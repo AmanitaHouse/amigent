@@ -12,7 +12,9 @@ import pytest
 from hygiene import (
     combine_exit,
     guarded,
+    modes_survive,
     sh_quote,
+    temporary_directory,
     unexpected,
     wsl_bash,
     wsl_path,
@@ -110,11 +112,32 @@ def test_runner_starts_python_with_the_cache_prefix():
         cwd=ROOT, env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     prefix = str((ROOT / "build" / "pycache").resolve())
-    temp = str((ROOT / "build" / "tmp").resolve())
+    temp = str(temporary_directory(ROOT))
     lines = [line.strip() for line in done.stdout.splitlines() if line.strip()]
     assert lines[-6:] == [prefix, prefix, temp, temp, temp, temp]
     assert prefix.startswith(str((ROOT / "build").resolve()))
-    assert temp.startswith(str((ROOT / "build").resolve()))
+    assert Path(temp).is_dir()
+    build_tmp = (ROOT / "build" / "tmp").resolve()
+    if modes_survive(build_tmp):
+        assert Path(temp) == build_tmp
+    else:
+        assert ROOT.resolve() not in Path(temp).resolve().parents
+        assert Path(temp).name.startswith("amigent-")
+        assert modes_survive(Path(temp))
+
+
+def test_repository_temp_is_used_when_private_modes_survive(tmp_path, monkeypatch):
+    monkeypatch.setattr("hygiene.modes_survive", lambda directory: True)
+    chosen = temporary_directory(tmp_path)
+    assert chosen == (tmp_path / "build" / "tmp").resolve()
+
+
+def test_os_temp_is_used_when_private_modes_do_not_survive(tmp_path, monkeypatch):
+    monkeypatch.setattr("hygiene.modes_survive", lambda directory: directory.name != "tmp")
+    chosen = temporary_directory(tmp_path)
+    assert chosen.name.startswith("amigent-")
+    assert tmp_path.resolve() not in chosen.parents
+    assert chosen.is_dir()
 
 
 def test_clean_command_stays_clean(tmp_path, capsys):

@@ -264,7 +264,14 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
   border-top: 1px solid var(--line);
   color: var(--muted);
   font: 11.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+#status::-webkit-scrollbar { height: 0; }
+#status span { white-space: nowrap; flex: none; }
+#st-graphics[hidden] { display: none; }
 
 #st-version { margin-left: auto; }
 

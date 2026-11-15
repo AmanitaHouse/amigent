@@ -98,6 +98,7 @@
  "mem_line": "Chip {chip}, Fast {fast} wolne",
  "free_of": "{free} z {size} wolne",
  "status_free": "{size} wolne",
+ "status_graphics": "pamięć grafiki {size}",
  "screen_select": "Ekran",
  "screen_untitled": "Ekran bez nazwy",
  "pc_outdated": "Amiga ma nowszy Amigent niż ten komputer. Zaktualizuj go także tutaj: pipx upgrade amigent",

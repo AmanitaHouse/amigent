@@ -98,6 +98,7 @@
  "mem_line": "Chip {chip}, Fast {fast} ledigt",
  "free_of": "{free} av {size} ledigt",
  "status_free": "{size} ledigt",
+ "status_graphics": "grafikminne {size}",
  "screen_select": "Skärm",
  "screen_untitled": "Namnlös skärm",
  "pc_outdated": "Amigan har en nyare Amigent än den här datorn. Uppdatera den här också: pipx upgrade amigent",

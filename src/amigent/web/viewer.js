@@ -156,6 +156,38 @@
     return `${Math.round(n / 1024)} KB`;
   }
 
+  // graphics is available Chip RAM, AvailMem(MEMF_CHIP), already on the SYSINFO
+  // reply. null when that field was absent: a real zero still shows. free is the
+  // existing status total, Chip plus Fast, and a missing Chip reading adds
+  // nothing. That total is not Fast RAM by itself.
+  function memoryIndicators(info, format) {
+    const chipRaw = info.chip_free;
+    const chipKnown = chipRaw !== null && chipRaw !== undefined && chipRaw !== ""
+      && Number.isFinite(Number(chipRaw));
+    const chip = chipKnown ? Number(chipRaw) : 0;
+    const fastRaw = Number(info.fast_free);
+    const fast = Number.isFinite(fastRaw) ? fastRaw : 0;
+    return {
+      graphics: chipKnown ? format(chip) : null,
+      free: format(chip + fast),
+    };
+  }
+
+  function applyMemoryStatus(info, graphicsEl, memoryEl, label) {
+    const shown = memoryIndicators(info, bytes);
+    if (shown.graphics === null) {
+      if (!graphicsEl.hidden) graphicsEl.hidden = true;
+      if (graphicsEl.textContent) graphicsEl.textContent = "";
+    } else {
+      const text = label.graphics(shown.graphics);
+      if (graphicsEl.hidden) graphicsEl.hidden = false;
+      if (graphicsEl.textContent !== text) graphicsEl.textContent = text;
+    }
+    const freeText = label.free(shown.free);
+    if (memoryEl.textContent !== freeText) memoryEl.textContent = freeText;
+    return shown;
+  }
+
   let toldOutdated = false;
 
   function showAmiga(info) {
@@ -183,7 +215,10 @@
       row.append(free);
       list.append(row);
     }
-    $("st-mem").textContent = t("status_free", { size: bytes(info.chip_free + info.fast_free) });
+    applyMemoryStatus(info, $("st-graphics"), $("st-mem"), {
+      graphics: (size) => t("status_graphics", { size }),
+      free: (size) => t("status_free", { size }),
+    });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
     showState();
   }

@@ -163,8 +163,8 @@ class Policy:
 
     def _follow(self, chosen: str) -> None:
         """The mode link.json has now, set with set_mode by whoever it was."""
-        if chosen and chosen not in MODES:
-            return
+        if chosen == self.chosen or (chosen and chosen not in MODES):
+            return  # nobody chose anew: this process's mode stays, also "off" for lack of memory
         self.chosen = chosen
         if not self._given:
             self.mode = chosen or "auto"

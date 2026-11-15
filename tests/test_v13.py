@@ -253,6 +253,20 @@ def test_a_mode_chosen_elsewhere_survives_and_is_followed(tmp_path):
     assert fixed.mode == "off" and json.loads(path.read_text())["A"]["mode"] == "best"
 
 
+def test_off_for_lack_of_memory_stays_until_someone_chooses(tmp_path):
+    """The channel switches packing off when the Amiga has no memory for it; a save
+    must not switch it back on just because link.json still says what it said."""
+    path = tmp_path / "l.json"
+    p = pack.Policy("A", "10.0.0.2", path=path)
+    p.note(64 * 1024, 0.1)
+    p.mode = "off"  # what AmigaChannel._sync_packing does when COMPRESS is refused
+    p.note(64 * 1024, 0.1)
+    assert p.mode == "off"
+    pack.Policy("A", "10.0.0.2", path=path).set_mode("fast")  # a choice by hand
+    p.note(64 * 1024, 0.1)
+    assert p.mode == "fast"
+
+
 def test_unknown_rates_never_pack(tmp_path):
     p = pack.Policy("C", "127.0.0.1", path=tmp_path / "l.json")
     assert p.level() == 0 and p.line() == pack.LOCAL_LINE

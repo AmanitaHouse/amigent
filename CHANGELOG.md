@@ -3,6 +3,17 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Updating
+
+- Replacing a running amigentd (Amigent-Update, `amigent-setup --update`)
+  failed when the old one had served many connections: the TCP stack
+  (AmiNetXDuo here) keeps the port taken for about a minute after it quits,
+  while the new amigentd tried for 60 s and the script waited 15 s for it,
+  then put the old one back. The new amigentd now tries for 90 s, the script
+  waits 100 s and `amigent-setup --update` 180 s.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

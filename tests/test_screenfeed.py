@@ -133,7 +133,17 @@ def test_feed_shows_a_key_through_a_slow_link(kind):
     lock = threading.Lock()
     inputs = InputQueue()
     feed = Feed(screen, lambda: lock, inputs)
-    threading.Thread(target=feed.run, daemon=True).start()
+    thread = threading.Thread(target=feed.run, daemon=True)
+    thread.start()
+    try:
+        _key_shows_through(amiga, link, screen, lock, inputs, feed, kind)
+    finally:
+        feed.stop()
+        thread.join(timeout=8)
+    assert not thread.is_alive()
+
+
+def _key_shows_through(amiga, link, screen, lock, inputs, feed, kind):
     deadline = time.monotonic() + 10
     while (not screen.width or screen.missing_tiles()) and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -172,10 +182,16 @@ def test_feed_stays_online_while_another_client_holds_the_screen(answers, monkey
         raise OSError("connection closed by amigentd")
 
     feed._burst = burst
-    threading.Thread(target=feed.run, daemon=True).start()
-    time.sleep(0.3)
-    assert seen == ([] if answers else [False])
-    deadline = time.monotonic() + 5
-    while not seen and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert seen == [False]  # a screen that stays taken is reported in the end
+    thread = threading.Thread(target=feed.run, daemon=True)
+    thread.start()
+    try:
+        time.sleep(0.3)
+        assert seen == ([] if answers else [False])
+        deadline = time.monotonic() + 5
+        while not seen and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert seen == [False]  # a screen that stays taken is reported in the end
+    finally:
+        feed.stop()
+        thread.join(timeout=8)
+    assert not thread.is_alive()

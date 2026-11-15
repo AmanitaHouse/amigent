@@ -58,7 +58,17 @@ def test_the_feed_asks_for_no_frames_while_paused_but_input_goes_through(amiga, 
     lock = threading.Lock()
     inputs = InputQueue()
     feed = Feed(screen, lambda: lock, inputs)
-    threading.Thread(target=feed.run, daemon=True).start()
+    thread = threading.Thread(target=feed.run, daemon=True)
+    thread.start()
+    try:
+        _pause_lets_input_through(amiga, screen, lock, inputs, feed, until)
+    finally:
+        feed.stop()
+        thread.join(timeout=8)
+    assert not thread.is_alive()
+
+
+def _pause_lets_input_through(amiga, screen, lock, inputs, feed, until):
     until(lambda: screen.width and not screen.missing_tiles())
     amiga.set_pause(30)
     until(lambda: screen.paused_until > time.monotonic())  # an INFO with the next sweep

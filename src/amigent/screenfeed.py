@@ -294,6 +294,7 @@ class Feed:
         self.on_screens = on_screens
         self.on_refused = on_refused
         self.alive = alive  # the Amiga answers on another line, so the screen was taken
+        self._stop = threading.Event()
         self.wake = threading.Event()
         self._bell_r, self._bell_w = socket.socketpair()
         self._bell_r.setblocking(False)
@@ -319,6 +320,11 @@ class Feed:
         self.sweeps = 0
         self.keys_out: Counter = Counter()
 
+    def stop(self) -> None:
+        """Leave the loop. A feed that keeps running will dial again after the caller is gone."""
+        self._stop.set()
+        self.ring()
+
     def ring(self) -> None:
         """Input arrived: wake the loop, wherever it waits."""
         self.wake.set()
@@ -343,7 +349,7 @@ class Feed:
 
     def run(self) -> None:
         retried, shared_since = False, 0.0
-        while True:
+        while not self._stop.is_set():
             if not self.watching():
                 self.wake.wait(1)
                 self.wake.clear()

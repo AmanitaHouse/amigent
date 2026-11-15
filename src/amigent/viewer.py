@@ -132,6 +132,8 @@ class Viewer:
         self.httpd: _Server | None = None
         self.clients: set[WebSocket] = set()
         self.clients_lock = threading.Lock()
+        self._stopped = threading.Event()
+        self._threads: list[threading.Thread] = []
         self._out = threading.Condition()
         self._audio_out: list = []
         self._other_out: list = []
@@ -174,10 +176,34 @@ class Viewer:
                 out.write(json.dumps({"url": self.url, "host": self.host}))
         except OSError:
             pass
+        self._threads = []
         for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker,
                        self._stats, self._media, self._send_queued):
-            threading.Thread(target=target, daemon=True).start()
+            thread = threading.Thread(target=target, name=f"amigent-viewer-{target.__name__}", daemon=True)
+            thread.start()
+            self._threads.append(thread)
         return self.url
+
+    def stop(self) -> None:
+        """Stop the page and the threads that talk to the Amiga."""
+        self._stopped.set()
+        self.feed.stop()
+        with self.clients_lock:
+            self.clients.clear()
+        with self._out:
+            self._out.notify_all()
+        self.uploads.put(None)
+        httpd = self.httpd
+        self.httpd = None
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
+        threads, self._threads = self._threads, []
+        for thread in threads:
+            thread.join(timeout=8)
+        stuck = [thread.name for thread in threads if thread.is_alive()]
+        if stuck:
+            raise RuntimeError("viewer threads still running: " + ", ".join(stuck))
 
     # pages
 
@@ -225,10 +251,12 @@ class Viewer:
             self._out.notify()
 
     def _send_queued(self) -> None:
-        while True:
+        while not self._stopped.is_set():
             with self._out:
-                while not self._audio_out and not self._other_out:
-                    self._out.wait()
+                while not self._audio_out and not self._other_out and not self._stopped.is_set():
+                    self._out.wait(0.2)
+                if self._stopped.is_set():
+                    return
                 if self._audio_out:
                     batch = self._audio_out
                     self._audio_out = []
@@ -293,9 +321,10 @@ class Viewer:
 
     def _stats(self) -> None:
         seconds = 0
-        while True:
+        while not self._stopped.is_set():
             before = self.screen.received
-            time.sleep(1)
+            if self._stopped.wait(1):
+                return
             with self.clients_lock:
                 watching = bool(self.clients)
             if not watching:
@@ -324,7 +353,7 @@ class Viewer:
         quiet_pip = False
         pip_at = 0.0
         fail_until = 0.0
-        while True:
+        while not self._stopped.is_set():
             if not self._watching():
                 time.sleep(0.05)
                 continue
@@ -477,8 +506,11 @@ class Viewer:
         return job
 
     def _upload_worker(self) -> None:
-        while True:
-            job, data = self.uploads.get()
+        while not self._stopped.is_set():
+            item = self.uploads.get()
+            if item is None or self._stopped.is_set():
+                return
+            job, data = item
             try:
                 done = 0
                 step = net.APOLLO_BLOCK if self._on_apollo() else UPLOAD_CHUNK

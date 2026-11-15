@@ -67,43 +67,52 @@ def test_page_gets_picture_and_drives_the_mouse():
     port = serve([full, struct.pack(">I", 0)], seen)
     viewer = Viewer("127.0.0.1", screen_port=port)
     viewer.start(0)
-    page = Page(viewer.port, viewer.token)
+    try:
+        page = Page(viewer.port, viewer.token)
 
-    messages = []
-    deadline = time.monotonic() + 5
-    while not any(isinstance(m, bytes) and m[0] == 1 for m in messages):
-        assert time.monotonic() < deadline
-        messages.append(page.receive())
-    hello = json.loads(messages[0])
-    assert hello["type"] == "hello"
-    tiles = next(m for m in messages if isinstance(m, bytes))
-    assert struct.unpack(">HHHHI", tiles[1:13])[:4] == (0, 0, 64, 64)
+        messages = []
+        deadline = time.monotonic() + 5
+        while not any(isinstance(m, bytes) and m[0] == 1 for m in messages):
+            assert time.monotonic() < deadline
+            messages.append(page.receive())
+        hello = json.loads(messages[0])
+        assert hello["type"] == "hello"
+        tiles = next(m for m in messages if isinstance(m, bytes))
+        assert struct.unpack(">HHHHI", tiles[1:13])[:4] == (0, 0, 64, 64)
 
-    page.send({"t": "move", "x": 100, "y": 20})
-    page.send({"t": "buttons", "mask": 1})
-    deadline = time.monotonic() + 5
-    while not any(c[0] == 4 for c in seen):
-        assert time.monotonic() < deadline
-        time.sleep(0.05)
-    move = next(c for c in seen if c[0] == 3)
-    assert struct.unpack(">HH", move[2:6]) == (100, 20)
-    assert next(c for c in seen if c[0] == 4)[1] == 1
+        page.send({"t": "move", "x": 100, "y": 20})
+        page.send({"t": "buttons", "mask": 1})
+        deadline = time.monotonic() + 5
+        while not any(c[0] == 4 for c in seen):
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        move = next(c for c in seen if c[0] == 3)
+        assert struct.unpack(">HH", move[2:6]) == (100, 20)
+        assert next(c for c in seen if c[0] == 4)[1] == 1
+    finally:
+        viewer.stop()
 
 
 def test_wrong_token_is_refused():
     viewer = Viewer("127.0.0.1", screen_port=1)
     viewer.start(0)
-    sock = socket.create_connection(("127.0.0.1", viewer.port), 5)
-    sock.sendall(f"GET /?t=nope HTTP/1.1\r\nHost: 127.0.0.1:{viewer.port}\r\n\r\n".encode())
-    assert sock.recv(100).startswith(b"HTTP/1.1 403")
+    try:
+        sock = socket.create_connection(("127.0.0.1", viewer.port), 5)
+        sock.sendall(f"GET /?t=nope HTTP/1.1\r\nHost: 127.0.0.1:{viewer.port}\r\n\r\n".encode())
+        assert sock.recv(100).startswith(b"HTTP/1.1 403")
+    finally:
+        viewer.stop()
 
 
 def test_foreign_host_header_is_refused():
     viewer = Viewer("127.0.0.1", screen_port=1)
     viewer.start(0)
-    sock = socket.create_connection(("127.0.0.1", viewer.port), 5)
-    sock.sendall(f"GET /?t={viewer.token} HTTP/1.1\r\nHost: evil.example:{viewer.port}\r\n\r\n".encode())
-    assert sock.recv(100).startswith(b"HTTP/1.1 403")
+    try:
+        sock = socket.create_connection(("127.0.0.1", viewer.port), 5)
+        sock.sendall(f"GET /?t={viewer.token} HTTP/1.1\r\nHost: evil.example:{viewer.port}\r\n\r\n".encode())
+        assert sock.recv(100).startswith(b"HTTP/1.1 403")
+    finally:
+        viewer.stop()
 
 
 def test_windows_launcher_quotes_for_vbs(monkeypatch):

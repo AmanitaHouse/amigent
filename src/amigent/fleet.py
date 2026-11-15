@@ -49,6 +49,8 @@ class Fleet:
                                  "online": None, "info": {}, "preview": None, "seen": 0.0})
         self.httpd = None
         self.url = ""
+        self._stop = threading.Event()
+        self._threads: list[threading.Thread] = []
 
     def start(self, port: int = 6820) -> str:
         handler = type("FleetHandler", (_FleetHandler,), {"fleet": self})
@@ -58,15 +60,35 @@ class Fleet:
             self.httpd = QuietServer(("127.0.0.1", 0), handler)
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        for entry in self.entries:
-            threading.Thread(target=self._watch, args=(entry,), daemon=True).start()
+        self._stop.clear()
+        self._threads = [threading.Thread(target=self.httpd.serve_forever, name="amigent-fleet-http",
+                                          daemon=True)]
+        self._threads.extend(threading.Thread(target=self._watch, args=(entry,), name="amigent-fleet-watch",
+                                              daemon=True)
+                             for entry in self.entries)
+        for thread in self._threads:
+            thread.start()
         return self.url
+
+    def stop(self) -> None:
+        """Stop the overview and its watchers. A watcher must not outlive this call."""
+        self._stop.set()
+        httpd = self.httpd
+        self.httpd = None
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
+        threads, self._threads = self._threads, []
+        for thread in threads:
+            thread.join(timeout=5)
+        stuck = [thread.name for thread in threads if thread.is_alive()]
+        if stuck:
+            raise RuntimeError("fleet threads still running: " + ", ".join(stuck))
 
     def _watch(self, entry: dict) -> None:
         """Keep one Amiga's status and preview fresh, at a pace a slow link can stomach."""
         viewer = entry["viewer"]
-        while True:
+        while not self._stop.is_set():
             try:
                 with viewer.lock():
                     picture = viewer.screen.capture()
@@ -83,7 +105,8 @@ class Fleet:
                 entry["error"] = str(e)
                 with viewer.lock():
                     viewer.screen.close()
-            time.sleep(PREVIEW_EVERY)
+            if self._stop.wait(PREVIEW_EVERY):
+                return
 
     def status(self) -> list[dict]:
         rows = []

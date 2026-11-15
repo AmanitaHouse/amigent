@@ -93,16 +93,19 @@ def test_page_gets_decoded_pixels_from_planes():
     amiga = FakeAmiga(128, 64, profile="fast")
     viewer = Viewer("127.0.0.1", screen_port=amiga.port, ctl_port=1)
     viewer.start(0)
-    page = Page(viewer.port, viewer.token)
-    deadline = clock.monotonic() + 5
-    while True:
-        assert clock.monotonic() < deadline
-        message = page.receive()
-        if isinstance(message, bytes) and message[0] == 3:
-            break
-    x, y, w, h = struct.unpack(">HHHH", message[1:9])
-    assert len(message) >= 9 + w * h * 3 and message[9:12] == bytes(screen_rgb(amiga, x, y))
-    amiga.close()
+    try:
+        page = Page(viewer.port, viewer.token)
+        deadline = clock.monotonic() + 5
+        while True:
+            assert clock.monotonic() < deadline
+            message = page.receive()
+            if isinstance(message, bytes) and message[0] == 3:
+                break
+        x, y, w, h = struct.unpack(">HHHH", message[1:9])
+        assert len(message) >= 9 + w * h * 3 and message[9:12] == bytes(screen_rgb(amiga, x, y))
+    finally:
+        viewer.stop()
+        amiga.close()
 
 
 def screen_rgb(amiga, x, y):

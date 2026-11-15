@@ -516,9 +516,9 @@ separated by tabs.
   and it does not include ApolloOS or SAGA graphics memory that exec does not
   classify as `MEMF_CHIP`. `0` is a real amount of free Chip RAM. A daemon that
   omits `chip_free` has not reported it; a client must not show that absence as
-  zero. The viewer status bar prints `chip_free` as "graphics mem" immediately
-  before the existing memory total. That total stays available Chip RAM plus
-  available Fast RAM, the figure it already showed, and is not Fast RAM alone.
+  zero. The viewer status bar prints `chip_free` as "graphics mem" and
+  `fast_free` as "fast mem", in that order. A missing `chip_free` hides only
+  the first of those. The fleet overview still adds the two for its total.
   The same lines also carry
   `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
   as `47.115`), `bsdsocket` and `graphics` as `version.revision`, `cpu` (68000,

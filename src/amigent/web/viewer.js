@@ -156,20 +156,17 @@
     return `${Math.round(n / 1024)} KB`;
   }
 
-  // graphics is available Chip RAM, AvailMem(MEMF_CHIP), already on the SYSINFO
-  // reply. null when that field was absent: a real zero still shows. free is the
-  // existing status total, Chip plus Fast, and a missing Chip reading adds
-  // nothing. That total is not Fast RAM by itself.
+  // graphics is available Chip RAM, AvailMem(MEMF_CHIP). null when that field
+  // was absent: a real zero still shows. fast is available Fast RAM alone.
   function memoryIndicators(info, format) {
     const chipRaw = info.chip_free;
     const chipKnown = chipRaw !== null && chipRaw !== undefined && chipRaw !== ""
       && Number.isFinite(Number(chipRaw));
-    const chip = chipKnown ? Number(chipRaw) : 0;
     const fastRaw = Number(info.fast_free);
     const fast = Number.isFinite(fastRaw) ? fastRaw : 0;
     return {
-      graphics: chipKnown ? format(chip) : null,
-      free: format(chip + fast),
+      graphics: chipKnown ? format(Number(chipRaw)) : null,
+      fast: format(fast),
     };
   }
 
@@ -183,8 +180,8 @@
       if (graphicsEl.hidden) graphicsEl.hidden = false;
       if (graphicsEl.textContent !== text) graphicsEl.textContent = text;
     }
-    const freeText = label.free(shown.free);
-    if (memoryEl.textContent !== freeText) memoryEl.textContent = freeText;
+    const fastText = label.fast(shown.fast);
+    if (memoryEl.textContent !== fastText) memoryEl.textContent = fastText;
     return shown;
   }
 
@@ -217,7 +214,7 @@
     }
     applyMemoryStatus(info, $("st-graphics"), $("st-mem"), {
       graphics: (size) => t("status_graphics", { size }),
-      free: (size) => t("status_free", { size }),
+      fast: (size) => t("status_fast", { size }),
     });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
     showState();

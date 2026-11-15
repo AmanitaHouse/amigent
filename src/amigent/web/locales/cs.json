@@ -99,6 +99,7 @@
  "free_of": "{free} z {size} volné",
  "status_free": "{size} volné",
  "status_graphics": "grafická paměť {size}",
+ "status_fast": "rychlá paměť {size}",
  "screen_select": "Obrazovka",
  "screen_untitled": "Obrazovka bez názvu",
  "pc_outdated": "Amiga má novější Amigent než tento počítač. Aktualizujte ho i zde: pipx upgrade amigent",

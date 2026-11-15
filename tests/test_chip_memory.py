@@ -1,8 +1,8 @@
-"""Available Chip RAM on the viewer status bar.
+"""Chip RAM and Fast RAM on the viewer status bar.
 
-The daemon already reports it as chip_free from AvailMem(MEMF_CHIP). The page
-shows that reading as "graphics mem" and leaves the existing status total
-alone. That total is Chip plus Fast, not Fast RAM by itself.
+The page shows chip_free as "graphics mem" and fast_free as "fast mem".
+The fleet total still adds the two. A missing Chip RAM reading hides only
+the graphics item.
 """
 
 import hashlib
@@ -182,6 +182,8 @@ def test_fleet_total_ignores_unreported_chip_and_keeps_fast(monkeypatch):
     assert row["info"]["chip_free"] is None
     fleet.entries[0]["info"] = {"os": "AmigaOS", "cpu": "68030", "chip_free": 0, "fast_free": 4096}
     assert fleet.status()[0]["free"] == 4096
+    fleet.entries[0]["info"] = {"os": "AmigaOS", "cpu": "68030", "chip_free": 1887436, "fast_free": 970981376}
+    assert fleet.status()[0]["free"] == 1887436 + 970981376
 
 
 def test_memory_refresh_stays_on_the_existing_sysinfo_tick():
@@ -197,7 +199,7 @@ def test_memory_refresh_stays_on_the_existing_sysinfo_tick():
     assert "chip_free" not in binary and "st-graphics" not in binary and "memoryIndicators" not in binary
 
 
-def test_status_bar_puts_graphics_mem_before_the_existing_total():
+def test_status_bar_puts_graphics_mem_before_fast_mem():
     html = (WEB / "index.html").read_text(encoding="utf-8")
     status = html.split('id="status"', 1)[1].split("</footer>", 1)[0]
     assert status.index('id="st-graphics"') < status.index('id="st-mem"')
@@ -205,7 +207,18 @@ def test_status_bar_puts_graphics_mem_before_the_existing_total():
     assert "hidden" in graphics
     english = json.loads((WEB / "locales" / "en.json").read_text(encoding="utf-8"))
     assert english["status_graphics"] == "graphics mem {size}"
+    assert english["status_fast"] == "fast mem {size}"
     assert english["status_free"] == "{size} free"
+    script = VIEWER_JS.read_text(encoding="utf-8")
+    assert 't("status_fast"' in script
+    assert "chip + fast" not in script
+    fleet = (WEB / "fleet.js").read_text(encoding="utf-8")
+    assert 't("status_free"' in fleet
+    for path in (WEB / "locales").glob("*.json"):
+        texts = json.loads(path.read_text(encoding="utf-8"))
+        assert texts["status_graphics"].count("{size}") == 1
+        assert texts["status_fast"].count("{size}") == 1
+        assert texts["status_free"].count("{size}") == 1
     css = (WEB / "viewer.css").read_text(encoding="utf-8")
     assert "font: 11.5px/1" in css.split("#status {", 1)[1].split("}", 1)[0]
     assert "font" not in css.split("#st-graphics", 1)[1].split("}", 1)[0]
@@ -218,7 +231,7 @@ def test_graphics_mem_formatting_order_and_absence(tmp_path):
     program += r"""
 const label = {
   graphics: (size) => `graphics mem ${size}`,
-  free: (size) => `${size} free`,
+  fast: (size) => `fast mem ${size}`,
 };
 function watch(hidden, text) {
   const el = { hidden, textContent: text, writes: 0 };
@@ -240,16 +253,16 @@ const fast = 970981376;
 const g = watch(true, "");
 const m = watch(false, "");
 paint({ chip_free: chip, fast_free: fast }, g, m);
-const first = { graphics: g.textContent, free: m.textContent, hidden: g.hidden, writes: g.writes + m.writes };
+const first = { graphics: g.textContent, fast: m.textContent, hidden: g.hidden, writes: g.writes + m.writes };
 paint({ chip_free: chip, fast_free: fast }, g, m);
 const same = g.writes + m.writes;
 paint({ chip_free: 524288, fast_free: fast }, g, m);
-const replaced = { graphics: g.textContent, free: m.textContent, writes: g.writes + m.writes };
+const replaced = { graphics: g.textContent, fast: m.textContent, writes: g.writes + m.writes };
 const g2 = watch(false, first.graphics);
-const m2 = watch(false, first.free);
+const m2 = watch(false, first.fast);
 paint({ chip_free: chip, fast_free: fast + 1048576 }, g2, m2);
 const gone = watch(false, first.graphics);
-const goneMem = watch(false, first.free);
+const goneMem = watch(false, first.fast);
 paint({ chip_free: null, fast_free: fast }, gone, goneMem);
 const absent = watch(false, "stale");
 const absentMem = watch(false, "stale");
@@ -263,11 +276,11 @@ paint({ chip_free: "", fast_free: fast }, blank, blankMem);
 console.log(JSON.stringify({
   first, same, replaced,
   fastChangedGraphics: g2.textContent,
-  fastChangedFree: m2.textContent,
-  missing: { hidden: gone.hidden, graphics: gone.textContent, free: goneMem.textContent },
-  absent: { hidden: absent.hidden, graphics: absent.textContent, free: absentMem.textContent },
-  zero: { hidden: zero.hidden, graphics: zero.textContent, free: zeroMem.textContent },
-  blank: { hidden: blank.hidden, graphics: blank.textContent, free: blankMem.textContent },
+  fastChangedFast: m2.textContent,
+  missing: { hidden: gone.hidden, graphics: gone.textContent, fast: goneMem.textContent },
+  absent: { hidden: absent.hidden, graphics: absent.textContent, fast: absentMem.textContent },
+  zero: { hidden: zero.hidden, graphics: zero.textContent, fast: zeroMem.textContent },
+  blank: { hidden: blank.hidden, graphics: blank.textContent, fast: blankMem.textContent },
   units: {
     kb: bytes(1024),
     mb: bytes(99 * 1024 ** 2),
@@ -303,22 +316,23 @@ console.log(JSON.stringify({
     assert units["gb"] == "1.0 GB" and units["zero"] == "0 KB"
     assert units["chip"] == "1.8 MB" and units["fastOnly"] == "926 MB"
     assert units["total"] != units["fastOnly"]
+    fast_text = "fast mem " + units["fastOnly"]
     assert got["first"]["graphics"] == "graphics mem 1.8 MB"
-    assert got["first"]["free"] == units["total"] + " free"
-    assert got["first"]["free"] != units["fastOnly"] + " free"
+    assert got["first"]["fast"] == fast_text
+    assert got["first"]["fast"] != "fast mem " + units["total"]
     assert got["first"]["hidden"] is False
     assert got["same"] == got["first"]["writes"]
     assert got["replaced"]["graphics"] == "graphics mem 512 KB"
-    assert got["replaced"]["free"] != got["first"]["free"]
+    assert got["replaced"]["fast"] == fast_text
     assert got["fastChangedGraphics"] == got["first"]["graphics"]
-    assert got["fastChangedFree"] != got["first"]["free"]
-    fast_free = units["fastOnly"] + " free"
-    assert got["missing"] == {"hidden": True, "graphics": "", "free": fast_free}
-    assert got["absent"] == {"hidden": True, "graphics": "", "free": fast_free}
+    assert got["fastChangedFast"] == "fast mem 927 MB"
+    assert got["fastChangedFast"] != got["first"]["fast"]
+    assert got["missing"] == {"hidden": True, "graphics": "", "fast": fast_text}
+    assert got["absent"] == {"hidden": True, "graphics": "", "fast": fast_text}
     assert got["zero"]["hidden"] is False
     assert got["zero"]["graphics"] == "graphics mem 0 KB"
-    assert got["zero"]["free"] == fast_free
-    assert got["blank"] == {"hidden": True, "graphics": "", "free": fast_free}
+    assert got["zero"]["fast"] == fast_text
+    assert got["blank"] == {"hidden": True, "graphics": "", "fast": fast_text}
 
 
 def test_packaged_apollo_executable_is_the_secured_one():

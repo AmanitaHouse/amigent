@@ -99,6 +99,7 @@
  "free_of": "{free} af {size} ledig",
  "status_free": "{size} ledig",
  "status_graphics": "grafikhukommelse {size}",
+ "status_fast": "Fast-hukommelse {size}",
  "screen_select": "Skærm",
  "screen_untitled": "Unavngivet skærm",
  "pc_outdated": "Amigaen har en nyere Amigent end denne pc. Opdater den også her: pipx upgrade amigent",

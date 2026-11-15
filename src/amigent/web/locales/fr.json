@@ -99,6 +99,7 @@
  "free_of": "{free} libres sur {size}",
  "status_free": "{size} libres",
  "status_graphics": "mémoire graphique {size}",
+ "status_fast": "mémoire rapide {size}",
  "screen_select": "Écran",
  "screen_untitled": "Écran sans nom",
  "pc_outdated": "L'Amiga a un Amigent plus récent que ce PC. Mettez-le aussi à jour ici : pipx upgrade amigent",

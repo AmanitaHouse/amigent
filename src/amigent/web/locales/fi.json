@@ -99,6 +99,7 @@
  "free_of": "{free}/{size} vapaana",
  "status_free": "{size} vapaana",
  "status_graphics": "grafiikkamuisti {size}",
+ "status_fast": "nopeamuisti {size}",
  "screen_select": "Näyttö",
  "screen_untitled": "Nimetön näyttö",
  "pc_outdated": "Amigassa on uudempi Amigent kuin tässä tietokoneessa. Päivitä se myös täällä: pipx upgrade amigent",

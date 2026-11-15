@@ -99,6 +99,7 @@
  "free_of": "{free} / {size} szabad",
  "status_free": "{size} szabad",
  "status_graphics": "grafikus memória {size}",
+ "status_fast": "gyors memória {size}",
  "screen_select": "Képernyő",
  "screen_untitled": "Névtelen képernyő",
  "pc_outdated": "Az Amigán újabb Amigent fut, mint ezen a gépen. Frissítse itt is: pipx upgrade amigent",

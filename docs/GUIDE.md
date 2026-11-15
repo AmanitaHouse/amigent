@@ -345,7 +345,7 @@ what is missing and leaves everything else unchanged.
 [`scripts/make_icon.py`](../scripts/make_icon.py) creates a desktop icon for it.
 A small module per program in `repair.d` restores installed programs, their
 settings and menu entries; see
-[`amiga/repair.d/example.repair.txt`](../amiga/repair.d/example.repair.txt).
+[`src/native/amiga/examples/repair.d/example.repair.txt`](../src/native/amiga/examples/repair.d/example.repair.txt).
 
 ## Settings
 
@@ -391,11 +391,18 @@ Keep the Amiga in your home network and do not forward its ports.
 
 ## Building amigentd
 
-vbcc and the NDK are needed; AmiKit's DevPack includes both. The AmigaDOS
-script [`amiga/build-amigentd`](../amiga/build-amigentd) builds it on the Amiga
-in the folder with `amigentd.c`; `CPU 68000 TO amigentd.000` makes the 68000
-build, `DEVPACK Work:DevPack` points it to another DevPack folder. `scripts/make_release.py` packs the
-archive with LhA on the Amiga. Tests for the PC side: `python3 -m pytest -q`.
+vbcc and the NDK are needed; AmiKit's DevPack includes both. Execute
+[`src/native/amiga/build-amigentd`](../src/native/amiga/build-amigentd) on the
+Amiga with the current directory set to `src/native/amiga`. The object file and
+the executable are written to `build/classic/`, not beside `daemon/amigentd.c`.
+`CPU 68000 TO ///build/classic/amigentd.000` makes the 68000 build,
+`DEVPACK Work:DevPack` points the script at another DevPack folder. From that
+same directory, `daemon/hookstub.s` is assembled separately:
+`vasmm68k_mot -Fbin -o ///build/classic/hookstub.bin daemon/hookstub.s`.
+This output layout has not been compiled with vbcc in the restructuring
+checkout, so it is not yet a release-approved classic build.
+`scripts/make_release.py` packs the archive with LhA on the Amiga. Tests for
+the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
 
 ## Translations
 

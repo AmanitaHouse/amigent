@@ -58,7 +58,7 @@ The raw figure is plain arithmetic: 1920 × 1080 × 3 bytes at 50 KB/s.
 
 ## The remote desktop
 
-Measured with `scripts/bench_viewer.py`, a fake `amigentd` behind a simulated
+Measured with `benchmarks/bench_viewer.py`, a fake `amigentd` behind a simulated
 link (rate, latency, small buffers like a plipbox), old PC side against new:
 
 | link | first tile | whole picture | key on a busy screen | click |
@@ -73,7 +73,7 @@ repeats instead of piling them up behind a slow link.
 
 ## The AI agent
 
-Measured with `scripts/bench_mcp.py` on the same simulated links:
+Measured with `benchmarks/bench_mcp.py` on the same simulated links:
 
 | task | 50 KB/s, 20 ms | 15 KB/s, 100 ms |
 |---|---|---|
@@ -90,11 +90,11 @@ in 0.7 s because unchanged files stay where they are.
 ## Measure it yourself
 
 ```bash
-python scripts/bench_viewer.py
+python benchmarks/bench_viewer.py
 ```
 
 ```bash
-python scripts/bench_mcp.py
+python benchmarks/bench_mcp.py
 ```
 
 Both run offline against the simulated link and print a table; `--save` and

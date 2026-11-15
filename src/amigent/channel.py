@@ -74,11 +74,32 @@ def connection_peer(sock: socket.socket) -> str:
 def tls_only_locks_plain(*, tls_only: bool, tls_listening: bool, setup: bool) -> bool:
     """Operational TLSONLY: remote plaintext is closed, AUDIO included.
 
-    False while the daemon is in SETUP, so the certificate can be delivered,
-    and false while the TLS port is not listening. A failed handshake does
-    not change these inputs, so it does not open the plain port.
+    False only while the daemon is in explicit SETUP, so the certificate can
+    be delivered. ``tls_listening`` names that row of the state matrix and
+    does not open the port. A failed handshake is not an argument either:
+    it cannot clear this.
     """
-    return bool(tls_only and tls_listening and not setup)
+    del tls_listening
+    return bool(tls_only and not setup)
+
+
+def plain_closed_message(flags: int) -> str:
+    """Why a remote plaintext session is being dropped before AUTH.
+
+    Flag 2 means AmiSSL is open, so the caller can use the certificate.
+    Without it the TLS port is not there, and the text says so.
+    """
+    if flags & 2:
+        return PLAIN_CLOSED_TEXT
+    return tls.TLS_UNAVAILABLE_TEXT
+
+
+def admission_failure(message: str) -> bool:
+    """Errors that must not fall through to a plaintext session or amigactld."""
+    text = str(message)
+    return (PLAIN_CLOSED_TEXT in text or tls.TLS_UNAVAILABLE_TEXT in text
+            or tls.TLS_HANDSHAKE_TEXT in text or "refused the key" in text
+            or "wants a key" in text)
 
 
 def audio_uses_tls(flags: int, host: str) -> bool:
@@ -381,7 +402,7 @@ class AmigaChannel(VolumeFlush):
                                  f"{CHANNEL_PROTOCOL}")
             if plain_session_refused(flags, connection_peer(self._sock),
                                      tls_socket=hasattr(self._sock, "version"), plain=plain):
-                raise AmigaError(PLAIN_CLOSED_TEXT)
+                raise AmigaError(plain_closed_message(flags))
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -406,6 +427,9 @@ class AmigaChannel(VolumeFlush):
                     # 1 MB slices. The reply timeout already grows with the file,
                     # and one slice of this size still finishes inside it at 15 KB/s.
                     self._slice = net.APOLLO_SLICE
+        except (tls.TlsUnavailable, tls.TlsHandshakeFailed) as e:
+            self.close()
+            raise AmigaError(str(e)) from e
         except OSError as e:
             self.close()
             raise AmigaError(f"cannot reach amigentd at {self.host}:{self.port}: {e}") from e
@@ -803,8 +827,7 @@ class Commands:
                 self.backend = channel
                 return
             except AmigaError as e:
-                if ("refused the key" in str(e) or "wants a key" in str(e)
-                        or PLAIN_CLOSED_TEXT in str(e)):
+                if admission_failure(str(e)):
                     raise
             self.backend = AmigaCtl(self.host, self.ctl_port, self.timeout)
         self.backend.connect()

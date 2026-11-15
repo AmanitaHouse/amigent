@@ -76,7 +76,10 @@ switches encryption off for a test.
 That Amiga was set up for TLS only. Copy the files for it from
 `~/.config/amigent/` on the computer that set it up (the key and
 `tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
-there again with `amigentd SETUP` running.
+there again with `amigentd SETUP` running. If the TLS port is not up, other
+computers are still refused in the clear. The remote desktop says so.
+amigentd keeps running; recovery is from the Amiga itself, or by starting
+`amigentd SETUP` on purpose. A failed TLS start does not do that by itself.
 
 **How do I update?**
 Both halves, the PC and the Amiga. Paste this into your AI agent:

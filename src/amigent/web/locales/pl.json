@@ -1,6 +1,8 @@
 {
  "connecting": "Łączenie z Amigą…",
  "offline": "Amiga nie odpowiada. Próbuję ponownie…",
+ "tls_unavailable": "To Amiga przyjmuje tylko połączenia szyfrowane, ale jego port TLS jest niedostępny. Połączenie nie było kontynuowane jawnym tekstem.",
+ "tls_required": "To Amiga przyjmuje od innych komputerów tylko połączenia szyfrowane. Użyj jego certyfikatu; połączenie jawne pozostaje zamknięte.",
  "disconnected": "Utracono połączenie z Amigent. Próbuję ponownie…",
  "state_offline": "brak połączenia",
  "send_file": "Wyślij plik",

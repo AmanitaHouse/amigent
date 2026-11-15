@@ -177,7 +177,7 @@ def test_tls_is_pinned(tmp_path, monkeypatch):
                             str(tmp_path / "k"), "-out", str(tmp_path / "c")], capture_output=True)
     assert other.returncode == 0
     tls.remember("127.0.0.1", (tmp_path / "c").read_bytes())
-    with pytest.raises(ssl.SSLError):
+    with pytest.raises(tls.TlsHandshakeFailed, match="not retried in the clear"):
         tls.connect("127.0.0.1", port - 1, 5)
 
 

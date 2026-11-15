@@ -1,6 +1,8 @@
 {
  "connecting": "Connexion à l'Amiga…",
  "offline": "L'Amiga ne répond pas. Nouvel essai…",
+ "tls_unavailable": "Cet Amiga n'accepte que les connexions chiffrées, mais son port TLS n'est pas disponible. La connexion n'a pas été poursuivie en clair.",
+ "tls_required": "Cet Amiga n'accepte des autres ordinateurs que des connexions chiffrées. Utilisez son certificat ; la connexion en clair reste fermée.",
  "disconnected": "Connexion à Amigent perdue. Nouvel essai…",
  "state_offline": "non connecté",
  "send_file": "Envoyer un fichier",

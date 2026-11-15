@@ -29,6 +29,7 @@ TESTS = (
     "tests/test_security_contract.py",
     "tests/native/amiga/pointer-test.c",
     "tests/c/zharness_main.c",
+    "tests/c/admit_harness.c",
 )
 SCRIPTS = ("scripts/repo_hygiene.py", "scripts/make_release.py")
 

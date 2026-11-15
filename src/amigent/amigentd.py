@@ -141,6 +141,11 @@ class Amigentd:
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
             self.protocol, self.flags = struct.unpack(">HH", hello[4:8])
+            from .channel import connection_peer, plain_closed_message, plain_session_refused
+            if plain_session_refused(self.flags, connection_peer(self._sock),
+                                     tls_socket=hasattr(self._sock, "version"),
+                                     plain=not hasattr(self._sock, "version")):
+                raise AmigentdError(plain_closed_message(self.flags))
             if self.flags & 1:  # bit 0: a key is required, bit 1: TLS on the next port
                 self._authenticate()
             if self.protocol >= 2:
@@ -148,6 +153,9 @@ class Amigentd:
                 if self._exact(1) != b"\0":
                     self.drop_picture()  # frames went to someone else meanwhile
             size = self._probe_planar() if self.protocol >= 3 else self._info()
+        except (tls.TlsUnavailable, tls.TlsHandshakeFailed) as e:
+            self.close()
+            raise AmigentdError(str(e)) from e
         except OSError as e:
             self.close()
             raise AmigentdError(f"amigentd at {self.host}:{self.port} not answering: {e}") from e

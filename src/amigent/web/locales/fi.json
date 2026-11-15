@@ -1,6 +1,8 @@
 {
  "connecting": "Yhdistetään Amigaan…",
  "offline": "Amiga ei vastaa. Yritetään uudelleen…",
+ "tls_unavailable": "Tämä Amiga hyväksyy vain salatut yhteydet, mutta sen TLS-portti ei ole käytettävissä. Yhteyttä ei jatkettu selkokielisenä.",
+ "tls_required": "Tämä Amiga hyväksyy muilta tietokoneilta vain salattuja yhteyksiä. Käytä sen varmennetta; selkokielinen yhteys pysyy kiinni.",
  "disconnected": "Yhteys Amigentiin katkesi. Yritetään uudelleen…",
  "state_offline": "ei yhteyttä",
  "send_file": "Lähetä tiedosto",

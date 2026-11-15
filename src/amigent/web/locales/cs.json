@@ -1,6 +1,8 @@
 {
  "connecting": "Připojování k Amize…",
  "offline": "Amiga neodpovídá. Zkouším znovu…",
+ "tls_unavailable": "Toto Amiga přijímá jen šifrovaná spojení, ale jeho port TLS není dostupný. Spojení nepokračovalo otevřeně.",
+ "tls_required": "Toto Amiga přijímá od ostatních počítačů jen šifrovaná spojení. Použijte jeho certifikát; otevřené spojení zůstává zavřené.",
  "disconnected": "Spojení s Amigent bylo přerušeno. Zkouším znovu…",
  "state_offline": "nepřipojeno",
  "send_file": "Odeslat soubor",

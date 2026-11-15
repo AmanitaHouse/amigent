@@ -144,6 +144,7 @@ class Viewer:
                          alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
+        self.offline_reason = ""
         self.ever_joined = False
         self.amiga: dict = {}
         self.screen_list: list = []
@@ -212,6 +213,7 @@ class Viewer:
             picture = self.screen.snapshot()
             ws.send(json.dumps({"type": "hello", "host": machines.name_of(self.host),
                                 "address": machines.address(self.host), "online": self.online,
+                                "reason": self.offline_reason,
                                 "version": __version__, "amiga": self.amiga,
                                 "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
@@ -315,8 +317,10 @@ class Viewer:
         self.feed.ring()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
-        if online != self.online:
+        reason = "" if online else (reason or "")
+        if online != self.online or reason != self.offline_reason:
             self.online = online
+            self.offline_reason = reason
             self.event("online", online=online, reason=reason)
 
     def _stats(self) -> None:

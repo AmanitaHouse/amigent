@@ -6,9 +6,11 @@
  *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
- * TLSONLY: once the TLS port is up, and not during SETUP, the plain port
- * talks to 127.0.0.1 only. A remote plain socket is closed after the hello,
- * before AUTH, CHANNEL or AUDIO. A failed TLS handshake does not undo that.
+ * TLSONLY: except during SETUP, the plain port talks to 127.0.0.1 only,
+ * whether or not the TLS port is listening. A remote plain socket is closed
+ * after the hello, before AUTH, CHANNEL or AUDIO. TLS failing to start does
+ * not enter SETUP and does not open that socket. A failed handshake does
+ * not undo the close. The daemon keeps running so 127.0.0.1 can still recover.
  * NOTEXT, NODEBUG: don't record the text programs draw, or their debug output.
  * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
  * TLSONLY.
@@ -2778,6 +2780,26 @@ static BOOL l_skip(struct link *l, ULONG len, LONG secs)
 
 /* ---- newcomers --------------------------------------------------------- */
 
+/* BEGIN PLAIN ADMISSION */
+/* Remote plaintext under TLSONLY. The TLS listener is not an argument: it
+ * being down is not a downgrade, and it does not enter SETUP. Loopback stays
+ * for the TLS pump and for recovery on this machine. AUDIO and CHANNEL are
+ * the same decision, because the socket is closed before either is read. */
+static int amigent_plain_reject(int tls_only, int setup, int peer_is_loopback)
+{
+    if (tls_only && !setup && !peer_is_loopback)
+        return 1;
+    return 0;
+}
+
+static int amigent_plain_closed_flag(int tls_only, int setup)
+{
+    if (tls_only && !setup)
+        return 4;
+    return 0;
+}
+/* END PLAIN ADMISSION */
+
 /* A connection only becomes the screen client with its first screen command, so
  * one that sends its key or asks for a command channel leaves the screen alone. */
 
@@ -2816,7 +2838,6 @@ static void accept_pending(void)
     struct sockaddr_in addr;
     socklen_t len = sizeof(addr);
     LONG fd, one = 1, i, old = 0;
-    BOOL locked;
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
 
@@ -2834,13 +2855,11 @@ static void accept_pending(void)
     IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through WaitSelect */
     wide_buffers(SocketBase, fd);
     load_key();
-    /* Operational TLSONLY: the TLS port is up and this is not SETUP.
-     * A failed handshake does not clear tls_only or tls_open, so it is
-     * not a downgrade to plaintext. SETUP is separate: the certificate
-     * is delivered on this port, and SETUP_END returns to this rule.
-     * Until the TLS port is listening, plain stays open. */
-    locked = tls_only && tls_open && !setup_mode;
-    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0);
+    /* Operational TLSONLY closes remote plaintext whether or not the TLS
+     * port is listening. Handshake failure is not an input. SETUP is only
+     * the operator's SETUP argument, never a TLS failure. */
+    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0)
+        | amigent_plain_closed_flag(tls_only, setup_mode);
     l.base = SocketBase;
     l.fd = fd;
     /* Strangers get the hello, so they know the door is PORT+1.
@@ -2850,7 +2869,8 @@ static void accept_pending(void)
         close_fd(fd);
         return;
     }
-    if (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+    if (amigent_plain_reject(tls_only, setup_mode,
+                             addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK))) {
         close_fd(fd);
         return;
     }
@@ -7166,6 +7186,9 @@ static void __saveds tls_main(void)
                         CloseSocket(listen_fd);
                         listen_fd = -1;
                     }
+                    /* STATUS only. Admission does not read tls_open: TLSONLY
+                     * stays closed to remote plaintext when the listen fails.
+                     * This task keeps running, and so does the daemon. */
                     tls_open = listen_fd >= 0;
                     sigs = SIGBREAKF_CTRL_C;
                     if (listen_fd >= 0) {

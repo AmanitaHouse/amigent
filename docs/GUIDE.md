@@ -382,10 +382,13 @@ or the close gadget ends it, C clears the log.
   that Amiga. Once that works, `amigent-setup` starts `amigentd` with `TLSONLY`:
   other computers then get in only encrypted, the music stream included
   (`--allow-plain` keeps the plain port open by not setting `TLSONLY`).
-  Without TLS the connection is unencrypted, and someone who can read your
-  network traffic could read the key too. SETUP mode is the bootstrap
-  exception: the plain port stays open so the certificate can be delivered,
-  and SETUP_END ends that exception.
+  That stays true when the TLS port is down: remote plaintext is refused,
+  and amigentd keeps running for the machine itself. It does not drop into
+  SETUP. Without TLS, and without `TLSONLY`, the connection is unencrypted,
+  and someone who can read your network traffic could read the key too.
+  SETUP mode is the bootstrap exception, and only when you start it:
+  the plain port stays open so the certificate can be delivered, and
+  SETUP_END ends that exception.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

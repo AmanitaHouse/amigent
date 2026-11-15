@@ -1,6 +1,8 @@
 {
  "connecting": "Forbinder til Amigaen…",
  "offline": "Amigaen svarer ikke. Prøver igen…",
+ "tls_unavailable": "Denne Amiga tager kun krypterede forbindelser, men dens TLS-port er ikke tilgængelig. Forbindelsen blev ikke fortsat i klartekst.",
+ "tls_required": "Denne Amiga tager kun krypterede forbindelser fra andre computere. Brug dens certifikat; klartekstforbindelsen forbliver lukket.",
  "disconnected": "Forbindelsen til Amigent blev afbrudt. Prøver igen…",
  "state_offline": "ikke forbundet",
  "send_file": "Send fil",

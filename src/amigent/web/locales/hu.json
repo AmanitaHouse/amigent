@@ -1,6 +1,8 @@
 {
  "connecting": "Kapcsolódás az Amigához…",
  "offline": "Az Amiga nem válaszol. Újrapróbálás…",
+ "tls_unavailable": "Ez az Amiga csak titkosított kapcsolatot fogad, de a TLS-portja nem érhető el. A kapcsolat nem ment tovább titkosítatlanul.",
+ "tls_required": "Ez az Amiga más gépektől csak titkosított kapcsolatot fogad. Használja a tanúsítványát; a titkosítatlan kapcsolat zárva marad.",
  "disconnected": "Megszakadt a kapcsolat az Amigenttel. Újrapróbálás…",
  "state_offline": "nincs kapcsolat",
  "send_file": "Fájl küldése",

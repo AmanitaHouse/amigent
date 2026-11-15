@@ -1,6 +1,8 @@
 {
  "connecting": "Conectando con el Amiga…",
  "offline": "El Amiga no responde. Reintentando…",
+ "tls_unavailable": "Este Amiga solo acepta conexiones cifradas, pero su puerto TLS no está disponible. La conexión no continuó en claro.",
+ "tls_required": "Este Amiga solo acepta conexiones cifradas desde otros ordenadores. Use su certificado; la conexión en claro sigue cerrada.",
  "disconnected": "Se perdió la conexión con Amigent. Reintentando…",
  "state_offline": "sin conexión",
  "send_file": "Enviar archivo",

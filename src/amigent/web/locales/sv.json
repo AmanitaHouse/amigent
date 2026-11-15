@@ -1,6 +1,8 @@
 {
  "connecting": "Ansluter till Amigan…",
  "offline": "Amigan svarar inte. Försöker igen…",
+ "tls_unavailable": "Den här Amigan tar bara krypterade anslutningar, men dess TLS-port är inte tillgänglig. Anslutningen fortsatte inte i klartext.",
+ "tls_required": "Den här Amigan tar bara krypterade anslutningar från andra datorer. Använd dess certifikat; klartextanslutningen förblir stängd.",
  "disconnected": "Anslutningen till Amigent bröts. Försöker igen…",
  "state_offline": "inte ansluten",
  "send_file": "Skicka fil",

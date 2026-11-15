@@ -14,8 +14,9 @@ Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
-included. `TLSONLY` closes the plain port to other machines while the TLS port is
-open, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
+included. `TLSONLY` closes the plain port to other machines whether or not the TLS
+port is listening, see [TLS](#tls). It does not turn itself off when TLS
+fails to start. `NOTEXT` and `NODEBUG` leave out recording the text
 programs draw and their debug output, see [hooks](#hooks). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
@@ -83,9 +84,10 @@ the protocol version, currently `5`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
 certificate is there, `4` when the plain port is closed to other machines
 (`TLSONLY`): a plain connection from another machine is closed right after the
-hello, before AUTH or any command, AUDIO included. Use PORT+1. Over TLS the
-hello shows `4` as well, and the connection stays. 127.0.0.1 is not closed:
-the TLS pump connects there.
+hello, before AUTH or any command, AUDIO included, even when the TLS port is
+not listening. Use PORT+1. Over TLS the hello shows `4` as well, and the
+connection stays. 127.0.0.1 is not closed: the TLS pump connects there, and
+so does local recovery while the TLS port is down.
 
 ## key
 
@@ -655,27 +657,39 @@ a remote client still causes, and it is not a client of its own.
 
 ### operational rule
 
-With `TLSONLY`, while the TLS port is open, a new plain connection from any
-address but 127.0.0.1 gets the hello with flag `4` and is closed at once.
-Nothing after the hello is read. AUTH is not accepted, so the key is not
-taken on that socket, and neither is CHANNEL or AUDIO. Connections already
-open stay. A TLS handshake that fails does not clear `TLSONLY` and does not
-open this path: the client is dropped, and the plain port is not offered
-instead.
+With `TLSONLY`, and not in SETUP, a new plain connection from any address
+but 127.0.0.1 gets the hello with flag `4` and is closed at once. This does
+not depend on the TLS port. Nothing after the hello is read. AUTH is not
+accepted, so the key is not taken on that socket, and neither is CHANNEL
+or AUDIO. Connections already open stay. A TLS handshake that fails does
+not clear `TLSONLY` and does not open this path: the client is dropped in
+the TLS pump, before it connects to the plain port, and the plain port is
+not offered instead.
 
-While the TLS port is not listening, the plain port works as usual. That is
-the case with no certificate, with a certificate AmiSSL cannot load, and
-without AmiSSL. It is not a fallback from a failed handshake. The port is
-simply not up, so a lost certificate does not lock the machine out.
+### when TLS does not start
+
+If AmiSSL is missing, the certificate is missing or will not load, or the
+TLS port cannot bind, amigentd keeps running. It does not exit, it does not
+enter SETUP, and it does not accept remote plaintext. 127.0.0.1 still
+connects, so the TLS pump can attach when the port later comes up, and
+someone at the machine can recover locally. STATUS shows `tls=off` and
+`tls_only=on` together in that state. The certificate is looked at again
+every 10 seconds, and the TLS port can open then without a restart.
+
+While `TLSONLY` is not set, the plain port works as usual. That includes
+no certificate and no AmiSSL. It is a configuration, not a fallback from
+a failed handshake or a failed TLS start.
 
 ### setup
 
-SETUP is not the operational rule. In SETUP mode the plain port stays open
-to other machines, including while `TLSONLY` is set and the TLS port is
-already listening, so `amigent-setup` can deliver the certificate on the
-plain connection it already has. SETUP_END leaves SETUP mode. After that,
-new plain connections from outside are turned away as in the operational
-rule. TLS 1.2 and 1.3, as AmiSSL offers them.
+SETUP is not the operational rule, and a TLS failure does not enter it.
+SETUP is only the SETUP argument or the SETUP tool type. In that mode the
+plain port stays open to other machines, including while `TLSONLY` is set
+and whether or not the TLS port is listening, so `amigent-setup` can deliver
+the certificate on the plain connection it already has. PUT and RUN run only
+in this mode. SETUP_END leaves it. After that, new plain connections from
+outside are turned away as in the operational rule. TLS 1.2 and 1.3, as
+AmiSSL offers them.
 
 ## arexx
 

@@ -14,6 +14,7 @@ import os
 import shutil
 import socket
 import ssl
+import struct
 import subprocess
 import tempfile
 import time
@@ -37,6 +38,23 @@ def wanted(host: str) -> bool:
     return os.environ.get("AMIGENT_TLS", "auto").lower() != "off" and pinned(host).exists()
 
 
+TLS_UNAVAILABLE_TEXT = (
+    "amigentd accepts only encrypted connections, but its TLS port is not available. "
+    "The plain connection was closed before any key was sent."
+)
+TLS_HANDSHAKE_TEXT = (
+    "amigentd's TLS handshake failed. The connection was not retried in the clear."
+)
+
+
+class TlsUnavailable(OSError):
+    """The TLS port is not accepting connections. Do not open a plaintext session."""
+
+
+class TlsHandshakeFailed(OSError):
+    """TCP reached the TLS port and the handshake failed. Do not retry in the clear."""
+
+
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     """TLS over sock; the pinned certificate gets in, nobody else."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -52,28 +70,69 @@ def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
         try:
             net.widen(sock)
             return wrap(sock, host)
-        except (OSError, ssl.SSLError):
+        except (OSError, ssl.SSLError) as exc:
             sock.close()
-            raise
+            raise TlsHandshakeFailed(TLS_HANDSHAKE_TEXT) from exc
     sock = socket.create_connection((address, port), timeout)
     net.widen(sock)
     return sock
+
+
+def _plain_requires_tls(address: str, port: int, timeout: float) -> bool:
+    """Read the plain hello and close. True when flag 4 is set.
+
+    Nothing is sent. This is how a failed TLS dial tells a closed daemon
+    from one that is not there, without offering the key.
+    """
+    try:
+        sock = socket.create_connection((address, port), min(float(timeout), 1.0))
+    except OSError:
+        return False
+    try:
+        sock.settimeout(min(float(timeout), 1.0))
+        data = bytearray()
+        while len(data) < 8:
+            chunk = sock.recv(8 - len(data))
+            if not chunk:
+                return False
+            data += chunk
+        if bytes(data[:4]) != b"AMGT":
+            return False
+        flags = struct.unpack(">H", data[6:8])[0]
+        return bool(flags & 4)
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 
 def connect(host: str, port: int, timeout: float) -> socket.socket:
     """Plain to port, or TLS to port + 1 when a certificate is pinned.
 
     host is a name or an address. No answer there? One sweep of the local
-    network, and the Amiga is picked up again at its new address.
+    network, and the Amiga is picked up again at its new address. A failed
+    TLS handshake is not that sweep, and it is not a plaintext session.
+    When the plain hello says TLSONLY, a dead TLS port stays an error.
     """
     address = roster.address(host)  # machines is only rung when the line stays dead
     try:
         return _dial(address, host, port, timeout)
-    except (OSError, ssl.SSLError):
+    except TlsHandshakeFailed:
+        raise
+    except (OSError, ssl.SSLError) as first:
+        if wanted(host) and _plain_requires_tls(address, port, timeout):
+            raise TlsUnavailable(TLS_UNAVAILABLE_TEXT) from first
         moved = machines.relocate(host)
         if not moved or moved == address:
             raise
-        return _dial(moved, host, port, timeout)
+        try:
+            return _dial(moved, host, port, timeout)
+        except TlsHandshakeFailed:
+            raise
+        except (OSError, ssl.SSLError) as again:
+            if wanted(host) and _plain_requires_tls(moved, port, timeout):
+                raise TlsUnavailable(TLS_UNAVAILABLE_TEXT) from again
+            raise
 
 
 def find_openssl() -> str | None:

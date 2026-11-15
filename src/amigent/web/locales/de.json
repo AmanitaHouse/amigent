@@ -1,6 +1,8 @@
 {
  "connecting": "Verbinde mit dem Amiga…",
  "offline": "Der Amiga antwortet nicht. Neuer Versuch läuft…",
+ "tls_unavailable": "Dieser Amiga nimmt nur verschlüsselte Verbindungen an, aber sein TLS-Port ist nicht erreichbar. Die Verbindung wurde nicht im Klartext fortgesetzt.",
+ "tls_required": "Dieser Amiga nimmt von anderen Rechnern nur verschlüsselte Verbindungen an. Das Zertifikat verwenden; die unverschlüsselte Verbindung bleibt zu.",
  "disconnected": "Verbindung zu Amigent getrennt. Neuer Versuch läuft…",
  "state_offline": "nicht verbunden",
  "send_file": "Datei senden",

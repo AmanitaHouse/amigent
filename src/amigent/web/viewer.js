@@ -117,12 +117,22 @@
     };
   }
 
+  let offlineReason = "";
+
+  function offlineMessage() {
+    const reason = offlineReason || "";
+    if (reason.includes("TLS port is not available") || reason.includes("not retried in the clear"))
+      return t("tls_unavailable");
+    if (reason.includes("only encrypted connections")) return t("tls_required");
+    return t("offline");
+  }
+
   function showState() {
     const pill = $("state");
     const overlay = $("overlay");
     let message = "";
     if (!socketOpen) message = t("disconnected");
-    else if (amigaOnline === false) message = t("offline");
+    else if (amigaOnline === false) message = offlineMessage();
     else if (amigaOnline === null) message = t("connecting");
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
@@ -203,6 +213,7 @@
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
         amigaOnline = m.online;
+        offlineReason = m.reason || "";
         if (m.w) setSize(m.w, m.h);
         showState();
         break;
@@ -217,6 +228,7 @@
         break;
       case "online":
         amigaOnline = m.online;
+        offlineReason = m.online ? "" : (m.reason || "");
         showState();
         break;
       case "address":

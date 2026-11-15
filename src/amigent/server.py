@@ -15,7 +15,7 @@ from . import secret, system, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
-from .channel import Commands, Request, pc_outdated, perform
+from .channel import Commands, Request, pc_outdated, perform, pcm_wav
 from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot, wait_gone
 from .power import available as power_available
 from .viewer import Viewer, open_window
@@ -50,7 +50,8 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,
-  so the user can take it back with amiga_install_undo."""
+  so the user can take it back with amiga_install_undo.
+- To hear what an AHI program is playing on ApolloOS, amiga_listen."""
 
 mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
 # One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
@@ -1016,6 +1017,33 @@ viewer: Viewer | None = None
 last_look = 0.0  # when the agent last looked at the screen; wait_change counts from here
 
 
+def _listen_clip(seconds: float) -> tuple[int, bytes]:
+    """Gather up to seconds of the Apollo mix.
+
+    Each call collects about as much audio as it asks for, off the same clock
+    as the DAC. The deadline is slack for a player that starts a moment late.
+    """
+    deadline = time.monotonic() + max(seconds, 0.4) * 12
+    chunks: list[bytes] = []
+    rate = 0
+    last = b""
+    want = int(seconds * 48000 * 4)
+    while time.monotonic() < deadline and sum(len(c) for c in chunks) < want:
+        got_rate, pcm = _with_ctl(lambda: ctl.audio(200))
+        if pcm and pcm != last:
+            if rate and got_rate != rate:
+                break
+            rate = got_rate or rate
+            last = pcm
+            chunks.append(pcm)
+            if rate:
+                want = int(seconds * rate * 4)
+            continue
+        time.sleep(0.002)
+    pcm = b"".join(chunks)
+    return rate, pcm_wav(pcm, rate) if pcm and rate else b""
+
+
 @mcp.tool()
 def amiga_viewer() -> str:
     """Open a live window of the Amiga screen on the user's desktop for manual control.
@@ -1031,6 +1059,34 @@ def amiga_viewer() -> str:
     url = viewer.start(VIEWER_PORT)
     open_window(url)
     return f"viewer window opened: {url}"
+
+
+def _audio_result(wav: bytes):
+    """An MCP audio block, from whichever module this sdk version exports it."""
+    try:
+        from mcp.server.fastmcp import Audio as McpAudio
+    except ImportError:
+        from mcp.server.fastmcp.utilities.types import Audio as McpAudio
+    return McpAudio(data=wav, format="wav")
+
+
+@mcp.tool()
+def amiga_listen(seconds: float = 1.0) -> list:
+    """Hear what an AHI program is playing on ApolloOS.
+
+    A short clip of the mix arne.audio is sending to the DAC, which is what
+    AmigaAMP and other AHI programs play. Nothing comes back when the Amiga
+    is quiet, or when the sound is not going through AHI. seconds is capped
+    at two.
+    """
+    seconds = min(2.0, max(0.2, float(seconds)))
+    info = _with_ctl(ctl.sysinfo)
+    if info.get("audio") != "1":
+        return ["this Amiga has no AHI mix to hear"]
+    rate, wav = _listen_clip(seconds)
+    if not wav:
+        return ["nothing is playing through AHI"]
+    return [f"heard {len(wav) - 44} bytes at {rate} Hz", _audio_result(wav)]
 
 
 @mcp.tool()
@@ -1397,13 +1453,38 @@ def amiga_debug_log(everything: bool = False) -> str:
 followers: dict = {}  # source -> follow.Follower
 
 
+def _debug_log_path(local_path: str):
+    """Where serial text joins the debug log."""
+    from . import paths
+    if local_path:
+        return Path(local_path).expanduser()
+    running = followers.get("debug")
+    if running:
+        return running.target
+    return paths.FOLDER / "follow" / "debug.log"
+
+
+def _follow_serial(port: str, target, every: float) -> str:
+    from . import follow
+    if "serial" in followers:
+        f = followers["serial"]
+        return f"already following serial: {f.written} bytes in {f.target}"
+    read, close = follow.open_serial(port)
+    followers["serial"] = follow.Follower("serial", target, follow.serial_fetch(read),
+                                          max(0.2, every), 0, on_stop=close).start()
+    return f"serial {follow.serial_port_name(port)} at 115200 8N1 is merged into {target}"
+
+
 @mcp.tool()
 def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False,
-                 every: float = 1.0) -> str:
+                 every: float = 1.0, serial_port: str = "") -> str:
     """Copy a growing log from the Amiga to this PC while it grows, so it survives a crash.
 
-    source is "debug" (kprintf, Enforcer and MuForce output) or a file on the
-    Amiga, such as a program's log. Every `every` seconds what is new goes to
+    source is "debug" (kprintf, Enforcer and MuForce output), "serial" (the host
+    COM port at 115200 8N1, merged into the debug log), or a file on the Amiga.
+    serial_port, for example COM3, also merges that port into a debug follow.
+    The daemon does not open the port; the ROM already owns the Amiga side.
+    Every `every` seconds what is new goes to
     local_path (default: amigent's config folder, follow/<name>.log), on a
     connection of its own. When the Amiga hangs, the copy holds everything up to
     that moment, also what its filesystem had not yet written to disk, with a
@@ -1421,6 +1502,10 @@ def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False
                 f.stop()
                 done.append(f"{name}: {f.written} bytes in {f.target}")
         return "stopped " + "; ".join(done) if done else "nothing was being followed"
+    if source == "serial":
+        if not serial_port:
+            raise AmigaError("name the serial port, for example COM3")
+        return _follow_serial(serial_port, _debug_log_path(local_path), every)
     if source in followers:
         f = followers[source]
         state = f" (Amiga not answering since {time.strftime('%H:%M:%S', time.localtime(f.lost_since))})" \
@@ -1439,8 +1524,36 @@ def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", source.replace(":", "_")).strip("_") or "log"
     target = Path(local_path).expanduser() if local_path else paths.FOLDER / "follow" / f"{name}.log"
     followers[source] = follow.Follower(source, target, fetch, max(0.2, every), start).start()
-    return (f"following {source} into {target}, from now on (what is already there: "
+    text = (f"following {source} into {target}, from now on (what is already there: "
             f"amiga_get or amiga_debug_log)")
+    if serial_port and source == follow.DEBUG:
+        text += ". " + _follow_serial(serial_port, target, every)
+    return text
+
+
+@mcp.tool()
+def amiga_hrtmon() -> str:
+    """Start the HRTmon program under ApolloOS and use it through the screen and keyboard.
+
+    The ROM HRTMon is not used: its picture is not an Intuition screen, so the
+    remote desktop cannot see it. HRTmon the program runs under the operating
+    system, and the screen and keyboard already drive it. Its commands are in
+    HRTmon.guide.
+    """
+    from .hrtmon import plan
+    info = _with_ctl(ctl.sysinfo)
+    os_name = info.get("os", "")
+    version = ""
+    if os_name != "ApolloOS":
+        version = _with_ctl(lambda: ctl.exec("Version FULL exec.library")).output
+    on_path = False
+    if os_name == "ApolloOS" or "ApolloOS" in version:
+        if "hrtmon" not in info.get("tasks", "").lower():
+            on_path = _with_ctl(lambda: ctl.exec("Which HRTmon")).rc == 0
+    text, start = plan(os_name, version, info.get("tasks", ""), on_path)
+    if start:
+        _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
+    return text
 
 
 RUN_DIR = "RAM:amigent-run"

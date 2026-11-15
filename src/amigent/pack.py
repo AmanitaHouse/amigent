@@ -7,6 +7,11 @@ the line carries fewer bytes, and the CPU is not what waits. A Pi-based
 accelerator or a 68080 behind a plipbox packs a hundred times faster than the
 line; a 7 MHz 68000 on a fast emulated network does not, and stays unpacked.
 
+A fast CPU is left unpacked until a bulk reply has been timed. The sample is
+taken from raw replies, so packing on the guess of a slow line would hide a
+fast Ethernet for good. Packed replies can only raise that estimate: those
+bytes did cross the wire, and a CPU-bound pack must not be read as a slow one.
+
 AMIGENT_COMPRESS, or "compress" for an Amiga in amigas.json, decides it by
 hand: auto (the default), off, fast or best.
 """
@@ -20,6 +25,7 @@ import time
 from pathlib import Path
 
 from . import secret
+from .net import apollo_peer
 
 MODES = ("auto", "off", "fast", "best")
 FAST_FACTOR = 2.0  # level 1 when the Amiga packs this many times faster than the line
@@ -28,6 +34,10 @@ UNKNOWN_LINE = 100.0  # KB/s to assume before anything was measured: a typical A
 LOCAL_LINE = 20000.0  # KB/s for an emulator on this PC
 MIN_SAMPLE = 8192  # bytes; smaller replies say more about latency than about the line
 ALPHA = 0.3  # weight of a new measurement
+FLOOR_ALPHA = 0.5  # a packed sample is a lower bound, so it moves the estimate up faster
+# deflate_fast at this rate is not a 68000. Packing before a real sample would
+# stick: the line is only timed while replies are raw.
+FAST_CPU = 1500.0
 
 
 def _file() -> Path:
@@ -48,6 +58,7 @@ class Policy:
         if self.mode not in MODES:
             self.mode = "auto"
         self.rates: dict[str, int] = {}
+        self.apollo = False  # amigentd.apollo: large windows, large copies
         try:
             self.line_kbs: float | None = float(stored["kbs"]) if stored.get("kbs") else None
         except (TypeError, ValueError):
@@ -70,6 +81,12 @@ class Policy:
                 self.rates[key] = int(sysinfo.get(key, 0))
             except ValueError:
                 self.rates[key] = 0
+        self.apollo = apollo_peer(sysinfo)
+
+    def _needs_probe(self) -> bool:
+        """Auto mode, fast CPU, line not timed yet: stay raw so the wire can show its speed."""
+        return (self.mode == "auto" and self.line_kbs is None
+                and self.rates.get("deflate_fast", 0) >= FAST_CPU)
 
     @property
     def known(self) -> bool:
@@ -84,6 +101,22 @@ class Policy:
         kbs = nbytes / 1024 / seconds
         with self._lock:
             self.line_kbs = kbs if self.line_kbs is None else (1 - ALPHA) * self.line_kbs + ALPHA * kbs
+        self._save()
+
+    def note_floor(self, nbytes: int, seconds: float) -> None:
+        """A packed reply. nbytes crossed the wire, so the line is at least that fast.
+
+        A slower sample is ignored. Packing may have been waiting on the CPU,
+        and that must not drag a fast line back down to the packed rate.
+        """
+        if nbytes < MIN_SAMPLE or seconds <= 0.01:
+            return
+        kbs = nbytes / 1024 / seconds
+        with self._lock:
+            if self.line_kbs is not None and kbs <= self.line_kbs:
+                return
+            self.line_kbs = kbs if self.line_kbs is None else (
+                (1 - FLOOR_ALPHA) * self.line_kbs + FLOOR_ALPHA * kbs)
         self._save()
 
     def line(self) -> float:
@@ -101,6 +134,8 @@ class Policy:
             return 1 if self.rates.get("deflate_fast") else 0
         if self.mode == "best":
             return 2 if self.rates.get("deflate_best") else 0
+        if self._needs_probe():
+            return 0
         line = self.line()
         if self.rates.get("deflate_best", 0) >= BEST_FACTOR * line:
             return 2
@@ -114,6 +149,8 @@ class Policy:
             return False
         if self.mode in ("fast", "best"):
             return True
+        if self._needs_probe():
+            return False
         return self.rates["inflate"] >= FAST_FACTOR * self.line()
 
     def describe(self) -> dict:

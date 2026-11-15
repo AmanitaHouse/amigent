@@ -15,7 +15,7 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import pack, tls
+from . import net, pack, tls
 from .amigactl import AmigaCtl
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
@@ -26,6 +26,7 @@ CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
+AUDIO, PIP = 38, 39  # ApolloOS: ARNE mix, and the SAGA picture-in-picture surface
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
 PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
@@ -96,6 +97,42 @@ def unpack_frames(read, size: int) -> tuple[bytes, int]:
 def _read_debug(ch) -> tuple[int, bytes]:
     total, size = struct.unpack(">II", ch._exact(8))
     return total, ch._exact(size)
+
+
+def audio_request() -> bytes:
+    """The 10-byte header of an AUDIO command. It carries no payload."""
+    return struct.pack(">BBHHHH", AUDIO, 0, 0, 0, 0, 0)
+
+
+def pip_request() -> bytes:
+    """The 10-byte header of a PIP command. It carries no payload."""
+    return struct.pack(">BBHHHH", PIP, 0, 0, 0, 0, 0)
+
+
+def parse_audio_body(body: bytes) -> tuple[int, bytes]:
+    """What follows the status byte: u32 rate, u32 length, s16le stereo."""
+    if len(body) < 8:
+        raise AmigaError("short audio reply")
+    rate, size = struct.unpack(">II", body[:8])
+    return rate, body[8:8 + size]
+
+
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """s16le stereo at rate, as a WAV the model can hear."""
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(pcm), b"WAVE",
+        b"fmt ", 16, 1, 2, rate, rate * 4, 4, 16,
+        b"data", len(pcm))
+    return header + pcm
+
+
+def parse_pip_body(body: bytes) -> tuple[int, int, int, int, bytes]:
+    """What follows the status byte: x, y, w, h, length, then w*h*3 RGB bytes."""
+    if len(body) < 12:
+        raise AmigaError("short pip reply")
+    x, y, w, h, size = struct.unpack(">HHHHI", body[:12])
+    return x, y, w, h, body[12:12 + size]
 
 
 def _read_crc(ch) -> int:
@@ -240,14 +277,35 @@ class AmigaChannel(VolumeFlush):
         self.protocol = 0
         self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
         self.zlevel = 0  # what COMPRESS last set on this connection
+        self._slice = SLICE  # Apollo raises this once SYSINFO says so
 
     # link
 
-    def connect(self) -> None:
-        self.close()
+    def _open_plain(self) -> socket.socket:
+        """The music stream. No TLS: the cipher was leaving the mix once per pass."""
+        from . import machines, roster
+
+        address = roster.address(self.host)
         try:
-            self._sock = tls.connect(self.host, self.port, self.timeout)
-            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock = socket.create_connection((address, self.port), self.timeout)
+        except OSError:
+            moved = machines.relocate(self.host)
+            if not moved or moved == address:
+                raise
+            sock = socket.create_connection((moved, self.port), self.timeout)
+        net.widen(sock)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        return sock
+
+    def connect(self, *, plain: bool = False) -> None:
+        self.close()
+        self._slice = SLICE
+        try:
+            if plain:
+                self._sock = self._open_plain()
+            else:
+                self._sock = tls.connect(self.host, self.port, self.timeout)
+                self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigaError(f"unexpected greeting {hello!r}")
@@ -255,7 +313,7 @@ class AmigaChannel(VolumeFlush):
             if self.protocol < CHANNEL_PROTOCOL:
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
-            if flags & PLAIN_CLOSED and not hasattr(self._sock, "version"):
+            if flags & PLAIN_CLOSED and not plain and not hasattr(self._sock, "version"):
                 raise AmigaError(PLAIN_CLOSED_TEXT)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
@@ -277,6 +335,10 @@ class AmigaChannel(VolumeFlush):
                     self.policy = pack.policy_for(self.host)
                 if not self.policy.known:
                     self.policy.learn(self.sysinfo())
+                if self.policy.apollo:
+                    # 1 MB slices. The reply timeout already grows with the file,
+                    # and one slice of this size still finishes inside it at 15 KB/s.
+                    self._slice = net.APOLLO_SLICE
         except OSError as e:
             self.close()
             raise AmigaError(f"cannot reach amigentd at {self.host}:{self.port}: {e}") from e
@@ -293,7 +355,7 @@ class AmigaChannel(VolumeFlush):
         assert self._sock
         data = bytearray()
         while len(data) < n:
-            chunk = self._sock.recv(min(n - len(data), 65536))
+            chunk = self._sock.recv(min(n - len(data), net.RECV_AT_ONCE))
             if not chunk:
                 raise AmigaError("connection closed by amigentd")
             data += chunk
@@ -309,8 +371,9 @@ class AmigaChannel(VolumeFlush):
         the only thing worth timing out on."""
         assert self._sock
         view = memoryview(data)
-        for at in range(0, len(view), SLICE):
-            self._sock.sendall(view[at:at + SLICE])
+        step = self._slice
+        for at in range(0, len(view), step):
+            self._sock.sendall(view[at:at + step])
 
     def _put(self, req: Request) -> None:
         """Fire one request at the Amiga without waiting for its answer."""
@@ -332,8 +395,12 @@ class AmigaChannel(VolumeFlush):
             data, wire = unpack_frames(self._exact, size)
         else:
             data, wire = self._exact(size), size
-        if self.policy and not self.zlevel:  # packed, the Amiga's CPU may be what is measured
-            self.policy.note(wire, time.monotonic() - start)
+        if self.policy:
+            elapsed = time.monotonic() - start
+            if self.zlevel:
+                self.policy.note_floor(wire, elapsed)  # packed bytes still crossed the wire
+            else:
+                self.policy.note(wire, elapsed)
         return data
 
     def _sync_packing(self) -> None:
@@ -585,6 +652,54 @@ class AmigaChannel(VolumeFlush):
         return self._one(Request(DEBUGLOG, "", 0, 0, (since >> 16) & 0xFFFF, since & 0xFFFF,
                                  read=_read_debug))
 
+    def audio(self, ms: int = 0) -> tuple[int, bytes]:
+        """One shot of the AHI mix arne.audio is playing: (sample rate, s16le stereo).
+
+        ms is how long to collect, up to a fifth of a second. Zero returns the
+        newest finished half. Empty when nothing is playing through AHI. Only
+        the ApolloOS build answers. A viewer that wants the mix continuously
+        uses audio_start, audio_read and audio_stop instead.
+        """
+        self._need5("ARNE audio")
+        self._request(AUDIO, y=max(0, min(int(ms), 200)))
+        head = self._exact(8)
+        rate, size = struct.unpack(">II", head)
+        return rate, self._exact(size) if size else b""
+
+    def audio_start(self) -> None:
+        """Ask the daemon to copy the mix into its FIFO and push it until audio_stop.
+
+        The status byte is consumed here. Each audio_read then returns one
+        chunk: (rate, pcm). pcm is empty on a keepalive. None means the stream
+        ended. The screen connection is not this socket.
+        """
+        self._need5("ARNE audio")
+        self._request(AUDIO, arg=1)
+
+    def audio_read(self) -> tuple[int, bytes] | None:
+        """The next streamed chunk, or None when the daemon has ended the stream."""
+        rate, size = struct.unpack(">II", self._exact(8))
+        if size == 0xFFFFFFFF:
+            return None
+        if size > 256 * 1024:
+            raise AmigaError("audio chunk is too large")
+        return rate, self._exact(size) if size else b""
+
+    def audio_stop(self) -> None:
+        """Tell the daemon to finish the stream. The end marker arrives via audio_read."""
+        if not self._sock:
+            return
+        self._sock.settimeout(self.timeout)
+        self._header(AUDIO, arg=2)
+
+    def pip(self) -> tuple[int, int, int, int, bytes]:
+        """The SAGA picture-in-picture surface: x, y, w, h and RGB bytes. w is 0 when off."""
+        self._need5("SAGA picture-in-picture")
+        self._request(PIP)
+        head = self._exact(12)
+        x, y, w, h, size = struct.unpack(">HHHHI", head)
+        return x, y, w, h, self._exact(size) if size else b""
+
 
 class Commands:
     """amigentd's command channel when the Amiga offers it, else amigactld."""
@@ -594,7 +709,13 @@ class Commands:
         self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
 
-    def connect(self) -> None:
+    def connect(self, *, plain: bool = False) -> None:
+        if plain:
+            channel = self.backend if isinstance(self.backend, AmigaChannel) else AmigaChannel(
+                self.host, self.screen_port, self.timeout)
+            channel.connect(plain=True)
+            self.backend = channel
+            return
         if self.backend is None:
             channel = AmigaChannel(self.host, self.screen_port, self.timeout)
             try:

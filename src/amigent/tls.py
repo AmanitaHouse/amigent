@@ -19,7 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import machines, roster
+from . import machines, net, roster
 from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLDER
 
 
@@ -50,11 +50,14 @@ def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
     if wanted(host):
         sock = socket.create_connection((address, port + 1), timeout)
         try:
+            net.widen(sock)
             return wrap(sock, host)
         except (OSError, ssl.SSLError):
             sock.close()
             raise
-    return socket.create_connection((address, port), timeout)
+    sock = socket.create_connection((address, port), timeout)
+    net.widen(sock)
+    return sock
 
 
 def connect(host: str, port: int, timeout: float) -> socket.socket:

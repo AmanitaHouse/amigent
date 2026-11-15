@@ -22,7 +22,7 @@ if open('f', 'S:User-Startup', 'R') then do
   end
   call close('f')
 end
-line = 'Run <NIL: >NIL: C:amigentd' args
+line = 'Run >NIL: C:amigentd' args
 call pragma('D', 'SYS:')  /* amigentd inherits it: no lock on the drawer this came from */
 address command 'Wait 2'  /* lets the PC that started this hang up first */
 if ~show('P', 'AMIGENT') then do

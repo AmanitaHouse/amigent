@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .errors import AmigaError
 from .channel import Commands
+from .net import APOLLO_BLOCK, apollo_peer
 
 BLOCK = 256 * 1024
 RETRY_SECONDS = 30
@@ -33,6 +34,12 @@ def upload(host: str, local: Path, target: str) -> None:
         ctl = Commands(host, timeout=60)
         try:
             ctl.connect()
+            try:
+                step = APOLLO_BLOCK if apollo_peer(ctl.sysinfo()) else BLOCK
+            except AmigaError as e:
+                if e.code is None:
+                    raise
+                step = BLOCK  # an older daemon has no SYSINFO; keep the small steps
             done = remote_size(ctl, target)
             if done > total:
                 done = 0  # a longer leftover isn't a head start, it's a different file
@@ -40,8 +47,8 @@ def upload(host: str, local: Path, target: str) -> None:
             with local.open("rb") as f:
                 f.seek(done)
                 while done < total:
-                    ctl.write_file(target, f.read(BLOCK), append=done > 0)
-                    done = min(done + BLOCK, total)
+                    ctl.write_file(target, f.read(step), append=done > 0)
+                    done = min(done + step, total)
                     rate = (done - begin) / (time.monotonic() - started) / 1024
                     print(f"{done // 2**20}/{total // 2**20} MB, {rate:.0f} KB/s", flush=True)
             crc = 0

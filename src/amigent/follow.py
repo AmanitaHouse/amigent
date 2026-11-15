@@ -8,10 +8,15 @@ debug output (kprintf, Enforcer) is followed the same way.
 
 from __future__ import annotations
 
+import os
+import re
+import struct
 import threading
 import time
 from pathlib import Path
 from typing import Callable
+
+from .errors import AmigaError
 
 DEBUG = "debug"
 
@@ -25,8 +30,9 @@ class Follower:
     """
 
     def __init__(self, source: str, target: Path, fetch: Callable[[int], tuple[int, bytes]],
-                 every: float = 1.0, start: int = 0):
+                 every: float = 1.0, start: int = 0, on_stop: Callable[[], None] | None = None):
         self.source, self.target, self.fetch, self.every = source, target, fetch, every
+        self.on_stop = on_stop
         self.position = start
         self.written = 0
         self.lost_since: float | None = None
@@ -44,6 +50,9 @@ class Follower:
         self._stop.set()
         self._thread.join(timeout=self.every + 5)
         self._mark(f"stopped following {self.source}")
+        if self.on_stop:
+            self.on_stop()
+            self.on_stop = None
 
     def tick(self) -> None:
         """One look; the thread calls it, tests call it directly."""
@@ -96,3 +105,78 @@ def debug_fetch(debug_log: Callable[[int], tuple[int, bytes]]):
         total, data = debug_log(position)
         return total, data
     return fetch
+
+
+def serial_fetch(read: Callable[[], bytes]):
+    """fetch for a host serial port. read() returns whatever has arrived, or b''."""
+    def fetch(position: int) -> tuple[int, bytes]:
+        data = read() or b""
+        return position + len(data), data
+    return fetch
+
+
+def serial_port_name(port: str) -> str:
+    """COM3, the form Windows uses. The daemon does not open this port."""
+    name = (port or "").strip().upper()
+    if not re.fullmatch(r"COM\d+", name):
+        raise AmigaError("name the serial port as COM3")
+    return name
+
+
+def open_serial(port: str) -> tuple[Callable[[], bytes], Callable[[], None]]:
+    """The host COM port at 115200 8N1: a read of whatever is waiting, and a close.
+
+    ApolloROM's serial debug and the ApolloCrossDev samples use this rate.
+    The daemon does not also open the port; the ROM already owns the Amiga side.
+    """
+    if os.name != "nt":
+        raise AmigaError("serial follow reads a Windows COM port such as COM3")
+    name = serial_port_name(port)
+    import ctypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                                   ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                                   ctypes.c_void_p]
+    kernel.GetCommState.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.GetCommState.restype = ctypes.c_int
+    kernel.SetCommState.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.SetCommState.restype = ctypes.c_int
+    kernel.SetCommTimeouts.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.SetCommTimeouts.restype = ctypes.c_int
+    kernel.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+    kernel.ReadFile.restype = ctypes.c_int
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.CreateFileW("\\\\.\\" + name, 0x80000000, 0, None, 3, 0x80, None)
+    invalid = ctypes.c_void_p(-1).value
+    if not handle or handle == invalid:
+        raise AmigaError(f"could not open {name} ({ctypes.get_last_error()})")
+    dcb = ctypes.create_string_buffer(64)
+    if not kernel.GetCommState(handle, dcb):
+        kernel.CloseHandle(handle)
+        raise AmigaError(f"could not read the state of {name}")
+    struct.pack_into("<I", dcb, 0, 64)
+    struct.pack_into("<I", dcb, 4, 115200)
+    flags = struct.unpack_from("<I", dcb, 8)[0] | 1
+    flags &= ~2
+    struct.pack_into("<I", dcb, 8, flags)
+    dcb[18] = 8
+    dcb[19] = 0
+    dcb[20] = 0
+    timeouts = ctypes.create_string_buffer(struct.pack("<5I", 0xFFFFFFFF, 0, 0, 0, 0))
+    if not kernel.SetCommState(handle, dcb) or not kernel.SetCommTimeouts(handle, timeouts):
+        kernel.CloseHandle(handle)
+        raise AmigaError(f"could not set {name} to 115200 8N1")
+
+    def read() -> bytes:
+        chunk = ctypes.create_string_buffer(4096)
+        got = ctypes.c_uint32()
+        if not kernel.ReadFile(handle, chunk, 4096, ctypes.byref(got), None):
+            return b""
+        return chunk.raw[:got.value]
+
+    def close() -> None:
+        kernel.CloseHandle(handle)
+
+    return read, close

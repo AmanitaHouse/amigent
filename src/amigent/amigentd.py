@@ -14,7 +14,7 @@ from collections import deque
 
 from PIL import Image
 
-from . import pack, tls
+from . import net, pack, tls
 from .planar import HAM, HAS_PALETTE, Chunky, Planes, PlanarError
 from .planar import header as planar_header
 from .secret import load_key
@@ -136,6 +136,7 @@ class Amigentd:
             self._sock = tls.connect(self.host, self.port, 5)  # TLS when a certificate is pinned
             self._sock.settimeout(self.timeout)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            net.widen(self._sock)  # tls.connect already asked; a wrapper may have hidden it
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
@@ -353,8 +354,11 @@ class Amigentd:
             take((x, y, w, h, surface.tile(x, y, w, h) if isinstance(surface, Chunky) else data))
         self.received += size
         elapsed = time.perf_counter() - start
-        if not deflated and self.policy:  # the line itself, not the Amiga's packing
-            self.policy.note(size, elapsed)
+        if self.policy:
+            if deflated:
+                self.policy.note_floor(size, elapsed)  # packed tiles still crossed the wire
+            else:
+                self.policy.note(size, elapsed)
         return count, size, elapsed
 
     def _planar_reply(self, take):
@@ -424,7 +428,7 @@ class Amigentd:
         assert self._sock
         data = bytearray()
         while len(data) < n:
-            chunk = self._sock.recv(min(n - len(data), 65536))
+            chunk = self._sock.recv(min(n - len(data), net.RECV_AT_ONCE))
             if not chunk:
                 raise AmigentdError("connection closed by amigentd")
             data += chunk
@@ -953,7 +957,7 @@ class Pipeline:
                 self._write()
         if sock in readable:
             try:
-                data = sock.recv(65536)
+                data = sock.recv(net.RECV_AT_ONCE)
             except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
                 data = None
             if data == b"":

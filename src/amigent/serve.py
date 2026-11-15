@@ -20,7 +20,7 @@ from .platform_util import in_wsl, windows_exe
 
 AMIGA_BIN = AMIGA / "bin"
 
-FILES = ("amigentd", "amigentd.000")
+FILES = ("amigentd", "amigentd.000", "amigentd.apollo")
 
 
 def _windows_folder() -> tuple[Path, str]:
@@ -63,7 +63,7 @@ def serve(port: int = 8001, minutes: int = 30) -> int:
     print(f"""Serving amigentd at {url} for {minutes} minutes (Ctrl-C ends it sooner).
 
 On the Amiga, open {url} in a browser and save amigentd (amigentd.000 on a
-plain 68000) to RAM:. Or, if it has wget, in a Shell:
+plain 68000, amigentd.apollo on ApolloOS) to RAM:. Or, if it has wget, in a Shell:
 
     wget -O RAM:amigentd {url}amigentd
     Protect RAM:amigentd +e

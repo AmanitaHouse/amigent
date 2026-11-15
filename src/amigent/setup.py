@@ -50,13 +50,110 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
+AFF_FPGA = 1 << 10  # exec's attention bit for the Apollo core, from the Apollo NDK
+
+
+def apollo_os(info: dict | None = None, version_text: str = "") -> bool:
+    """ApolloOS, as opposed to AmigaOS on the same Vampire.
+
+    The public ApolloOS tree calls the system ApolloOS and its exec is version
+    51, and the core sets the FPGA attention bit. AmigaOS on a Vampire stays on
+    exec 45 to 47 and keeps the plain amigentd.
+    """
+    info = info or {}
+    if info.get("os") == "ApolloOS" or "ApolloOS" in (version_text or ""):
+        return True
+    try:
+        major = int(str(info.get("exec_version", "0")).split(".", 1)[0])
+    except ValueError:
+        major = 0
+    try:
+        flags = int(str(info.get("attn_flags", "0") or "0"), 0)
+    except ValueError:
+        flags = 0
+    return major >= 51 and bool(flags & AFF_FPGA)
+
+
+def select_build(cpu_rc: int, info: dict | None = None, version_text: str = "") -> str:
+    """amigentd.000 on a 68000, amigentd.apollo on ApolloOS, amigentd otherwise."""
+    if cpu_rc not in (0, 5):
+        raise SystemExit(f"C:CPU answered {cpu_rc}, so the CPU is unknown. Copy C:CPU from the "
+                         "Workbench disk and try again.")
+    if cpu_rc == 5:
+        return "amigentd.000"
+    if apollo_os(info, version_text):
+        return "amigentd.apollo"
+    return "amigentd"
+
+
+def binary_path(name: str):
+    path = AMIGA / "bin" / name
+    if not path.exists():
+        raise SystemExit(f"{name} is not in this package, so nothing was changed.")
+    return path
+
+
+def _probe_output(channel) -> str:
+    """What the small ApolloOS probe printed, or '' when it cannot be run."""
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not probe.exists():
+        return ""
+    try:
+        channel.write_file("T:amigent-apollo-probe", probe.read_bytes())
+        channel.exec("Protect T:amigent-apollo-probe +e")
+        return channel.exec("T:amigent-apollo-probe").output
+    except (AmigaError, AttributeError, OSError):
+        return ""
+
+
+def _reported(info: dict) -> bool:
+    return bool(info.get("os") or info.get("exec_version") or info.get("attn_flags"))
+
+
+def build_for_channel(channel) -> str:
+    """The build an Amiga that already runs amigentd should get."""
+    cpu = channel.exec("CPU CHECK 68020").rc
+    info: dict = {}
+    version_text = ""
+    if cpu == 0:
+        try:
+            info = channel.sysinfo() or {}
+        except (AmigaError, AttributeError):
+            info = {}
+        if not apollo_os(info):
+            try:
+                version_text = channel.exec("Version FULL exec.library").output
+            except (AmigaError, AttributeError):
+                version_text = ""
+        # A daemon that already described itself is trusted. With no description,
+        # the probe reads the board register and exec's id string.
+        if not apollo_os(info, version_text) and not _reported(info):
+            version_text = _probe_output(channel) or version_text
+    return select_build(cpu, info, version_text)
+
+
+def _apollo_by_probe(link: Amigentd) -> bool:
+    """SETUP only returns a program's exit code. 0 means the probe said ApolloOS."""
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not probe.exists():
+        return False
+    link.put("T:amigent-apollo-probe", probe.read_bytes())
+    link.run("Protect T:amigent-apollo-probe +e")
+    return link.run("T:amigent-apollo-probe") == 0
+
+
 def amigentd_build(link: Amigentd) -> str:
-    """amigentd.000 for a stock 68000/68010, amigentd for 68020 and up."""
+    """amigentd.000 for a 68000, amigentd.apollo for ApolloOS, amigentd otherwise."""
     code = link.run("CPU CHECK 68020")
-    if code not in (0, 5):
+    if code == 5:
+        return "amigentd.000"
+    if code != 0:
         raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
                          "Workbench disk and try again.")
-    return "amigentd.000" if code == 5 else "amigentd"
+    if _apollo_by_probe(link):
+        binary_path("amigentd.apollo")
+        return "amigentd.apollo"
+    return "amigentd"
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
@@ -149,13 +246,13 @@ def update(host: str, home: str | None) -> int:
     channel = AmigaChannel(host, timeout=30)
     try:
         channel.connect()
-        cpu = channel.exec("CPU CHECK 68020").rc
-        if cpu not in (0, 5):
-            print(f"C:CPU answered {cpu}, so the CPU is unknown. Copy C:CPU from the Workbench "
-                  "disk and try again.")
+        try:
+            build = build_for_channel(channel)
+            new = binary_path(build).read_bytes()
+        except SystemExit as e:
+            print(e)
+            channel.close()
             return 1
-        build = "amigentd.000" if cpu == 5 else "amigentd"
-        new = (AMIGA / "bin" / build).read_bytes()
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
         update_windows(channel, home)

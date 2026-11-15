@@ -509,7 +509,17 @@ separated by tabs.
   directories of one volume.
 - CHECKSUM is the zlib CRC-32 of the whole file.
 - SYSINFO has `key=value` lines: `chip_free`, `chip_total`, `chip_largest`,
-  `fast_free`, `fast_total`, `fast_largest`, `total_free` in bytes, and
+  `fast_free`, `fast_total`, `fast_largest`, `total_free` in bytes.
+  `chip_free` is the available Chip RAM, `AvailMem(MEMF_CHIP)`, and `fast_free`
+  is the available Fast RAM, `AvailMem(MEMF_FAST)`. The classic build and the
+  ApolloOS build both use those calls. `chip_free` does not include Fast RAM,
+  and it does not include ApolloOS or SAGA graphics memory that exec does not
+  classify as `MEMF_CHIP`. `0` is a real amount of free Chip RAM. A daemon that
+  omits `chip_free` has not reported it; a client must not show that absence as
+  zero. The viewer status bar prints `chip_free` as "graphics mem" immediately
+  before the existing memory total. That total stays available Chip RAM plus
+  available Fast RAM, the figure it already showed, and is not Fast RAM alone.
+  The same lines also carry
   `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
   as `47.115`), `bsdsocket` and `graphics` as `version.revision`, `cpu` (68000,
   68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows; the

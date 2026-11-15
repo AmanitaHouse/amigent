@@ -1,9 +1,9 @@
 """Time the MCP tools over a fake slow wire: plipbox speed, serial speed, real latency.
 
-    python3 scripts/bench_mcp.py                       # run, print the table
-    python3 scripts/bench_mcp.py --save before.json    # keep the numbers
-    python3 scripts/bench_mcp.py --compare before.json # before/after table
-    python3 scripts/bench_mcp.py --src /other/src      # bench another checkout
+    python3 benchmarks/bench_mcp.py                       # run, print the table
+    python3 benchmarks/bench_mcp.py --save before.json    # keep the numbers
+    python3 benchmarks/bench_mcp.py --compare before.json # before/after table
+    python3 benchmarks/bench_mcp.py --src /other/src      # bench another checkout
 
 Everything runs against tests/fakeamiga.py on 127.0.0.1; no Amiga gets hurt.
 """

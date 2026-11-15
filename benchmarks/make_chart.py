@@ -1,6 +1,6 @@
 """Draw docs/screenshots/speed.svg: seconds per screen update over a plipbox.
 
-Usage: make_chart.py
+Usage: python benchmarks/make_chart.py
 
 The Amigent figures were measured on a real A1200 (PiStorm, 1920x1080 RTG
 Workbench) over its plipbox; the raw grab is the plain arithmetic of moving the

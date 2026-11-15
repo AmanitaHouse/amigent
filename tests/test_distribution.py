@@ -52,7 +52,11 @@ def test_manifest_states_the_sdist_policy():
         assert line in text.splitlines(), line
     package = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'amigent = ["web/*", "web/locales/*", "macos/*", "amiga/*", "amiga/bin/*"]' in package
-    assert "src/native" not in package.split("[tool.setuptools.package-data]", 1)[1].split("[", 1)[0]
+    data = package.split("[tool.setuptools.package-data]", 1)[1].split("[", 1)[0]
+    assert "src/native" not in data
+    assert 'packages = ["amigent"]' in package
+    assert 'amigent = "src/amigent"' in package
+    assert 'where = ["src"]' not in package
 
 
 def test_sdist_list_has_native_sources_and_not_the_wheel_extras():

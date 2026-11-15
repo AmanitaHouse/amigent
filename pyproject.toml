@@ -39,8 +39,14 @@ amigent-fleet = "amigent.fleet:main"
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# Only src/amigent is the installable package. src/native is maintained source
+# for the sdist (see MANIFEST.in). A find rooted at src/ would copy it into
+# the wheel as a top-level native/ tree.
+[tool.setuptools]
+packages = ["amigent"]
+
+[tool.setuptools.package-dir]
+amigent = "src/amigent"
 
 [tool.setuptools.dynamic]
 version = { attr = "amigent.__version__" }

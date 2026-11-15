@@ -145,6 +145,7 @@ button.icon[aria-pressed="true"] { background: var(--control); border-color: var
 
 #screen { display: block; outline: none; background: #000; touch-action: none; }
 #screen.sharp { image-rendering: pixelated; }
+#pip { position: absolute; z-index: 2; pointer-events: none; display: none; image-rendering: pixelated; }
 #screen:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
 
 .overlay {

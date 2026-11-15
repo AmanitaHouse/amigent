@@ -6,7 +6,14 @@
   const token = new URLSearchParams(location.search).get("t") || "";
   const canvas = $("screen");
   const ctx = canvas.getContext("2d", { alpha: false });
+  const pip = $("pip");
+  const pipCtx = pip.getContext("2d");
   const stage = $("stage");
+  let audioCtx = null;
+  let player = null;
+  let playerBoot = null;
+  const playerQueue = [];
+  let lastPip = null;
   // On a Mac, Cmd pastes and Option types characters such as @ and € on its own.
   const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
 
@@ -21,6 +28,7 @@
   const LANGUAGES = {
     en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
     fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
+    ru: "Русский",
   };
 
   function pickLanguage() {
@@ -250,6 +258,11 @@
       drawing = drawing.then(() => drawTiles(buffer));
     } else if (kind === 3) {
       drawing = drawing.then(() => drawPixels(buffer));
+    } else if (kind === 4) {
+      drawing = drawing.then(() => drawPip(buffer));
+    } else if (kind === 5) {
+      const view = new DataView(buffer);
+      playPcm(view.getUint32(1), new Uint8Array(buffer, 5));
     } else if (kind === 2) {
       drawing = drawing
         .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
@@ -314,6 +327,145 @@
     }
   }
 
+  // One player for the whole stream. Waiting until a burst finished played a
+  // song as a spurt, then a break, then another spurt. This holds a quarter
+  // second and then keeps going. A late chunk does not add another wait.
+  const WORKLET = `
+class AmigentPcm extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = 48000 * 8;
+    this.L = new Float32Array(this.cap);
+    this.R = new Float32Array(this.cap);
+    this.w = 0;
+    this.r = 0;
+    this.rate = 48000;
+    this.started = false;
+    this.port.onmessage = (e) => {
+      const pcm = e.data.pcm;
+      const n = pcm.length >> 1;
+      if (e.data.rate) this.rate = e.data.rate;
+      if (this.w - this.r + n >= this.cap) this.r = this.w + n - this.cap + 1;
+      for (let i = 0; i < n; i++) {
+        const at = this.w % this.cap;
+        this.L[at] = pcm[i * 2];
+        this.R[at] = pcm[i * 2 + 1];
+        this.w++;
+      }
+    };
+  }
+  process(_inputs, outputs) {
+    const ch = outputs[0];
+    if (!ch || !ch[0]) return true;
+    const L = ch[0];
+    const R = ch[1] || ch[0];
+    if (!this.started) {
+      if (this.w - this.r < this.rate * 0.25) {
+        L.fill(0);
+        if (ch[1]) R.fill(0);
+        return true;
+      }
+      this.started = true;
+    }
+    const step = this.rate / sampleRate;
+    for (let i = 0; i < L.length; i++) {
+      if (this.w - this.r < 2) {
+        L[i] = 0;
+        if (ch[1]) R[i] = 0;
+        continue;
+      }
+      const i0 = Math.floor(this.r);
+      const f = this.r - i0;
+      const a = i0 % this.cap;
+      const b = (i0 + 1) % this.cap;
+      L[i] = this.L[a] * (1 - f) + this.L[b] * f;
+      if (ch[1]) R[i] = this.R[a] * (1 - f) + this.R[b] * f;
+      this.r += step;
+    }
+    return true;
+  }
+}
+registerProcessor("amigent-pcm", AmigentPcm);
+`;
+
+  function audioContext() {
+    if (!audioCtx) audioCtx = new AudioContext();
+    return audioCtx;
+  }
+
+  function startPlayer() {
+    const ctx = audioContext();
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+    return ctx.audioWorklet.addModule(url).then(() => {
+      URL.revokeObjectURL(url);
+      player = new AudioWorkletNode(ctx, "amigent-pcm", { outputChannelCount: [2] });
+      player.connect(ctx.destination);
+      for (const item of playerQueue) player.port.postMessage(item, [item.pcm.buffer]);
+      playerQueue.length = 0;
+    }).catch((err) => {
+      URL.revokeObjectURL(url);
+      playerBoot = null;
+      console.error(err);
+    });
+  }
+
+  function playPcm(rate, pcm) {
+    if (!pcm.byteLength || pcm.byteLength % 4) return;
+    const samples = pcm.byteLength / 4;
+    const out = new Float32Array(samples * 2);
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    for (let i = 0; i < samples; i++) {
+      out[i * 2] = view.getInt16(i * 4, true) / 32768;
+      out[i * 2 + 1] = view.getInt16(i * 4 + 2, true) / 32768;
+    }
+    const item = { rate: rate || 48000, pcm: out };
+    if (player) {
+      player.port.postMessage(item, [out.buffer]);
+      return;
+    }
+    playerQueue.push(item);
+    if (!playerBoot) playerBoot = startPlayer();
+  }
+
+  function placePip() {
+    if (!lastPip || !lastPip.w || !lastPip.h || !canvas.width) {
+      pip.style.display = "none";
+      return;
+    }
+    const screenBox = canvas.getBoundingClientRect();
+    const stageBox = stage.getBoundingClientRect();
+    const sx = screenBox.width / canvas.width;
+    const sy = screenBox.height / canvas.height;
+    pip.style.display = "block";
+    pip.style.left = `${screenBox.left - stageBox.left + lastPip.x * sx}px`;
+    pip.style.top = `${screenBox.top - stageBox.top + lastPip.y * sy}px`;
+    pip.style.width = `${lastPip.w * sx}px`;
+    pip.style.height = `${lastPip.h * sy}px`;
+  }
+
+  function drawPip(buffer) {
+    const view = new DataView(buffer);
+    const x = view.getUint16(1), y = view.getUint16(3);
+    const w = view.getUint16(5), h = view.getUint16(7);
+    lastPip = { x, y, w, h };
+    if (!w || !h) {
+      placePip();
+      return;
+    }
+    pip.width = w;
+    pip.height = h;
+    const image = pipCtx.createImageData(w, h);
+    const pixels = new Uint32Array(image.data.buffer);
+    const bytes = new Uint8Array(buffer, 9);
+    for (let i = 0, n = w * h; i < n; i++) {
+      const at = i * 3;
+      pixels[i] = 0xff000000 | (bytes[at + 2] << 16) | (bytes[at + 1] << 8) | bytes[at];
+    }
+    pipCtx.putImageData(image, 0, 0);
+    placePip();
+  }
+
   function setSize(w, h) {
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
@@ -333,10 +485,19 @@
     canvas.style.height = `${Math.max(1, Math.floor(h * scale))}px`;
     canvas.classList.toggle("sharp", scale >= 1);
     stage.classList.toggle("actual", !fit);
+    placePip();
     $("fit").setAttribute("aria-pressed", String(fit));
   }
 
+  function unlockAudio() {
+    // A context created before the click stays suspended, and a click that
+    // arrives first used to do nothing because the context did not exist yet.
+    const ctx = audioContext();
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
+  }
+
   new ResizeObserver(layout).observe(stage);
+  document.addEventListener("pointerdown", unlockAudio);
 
   // ---------------------------------------------------------------- mouse
 

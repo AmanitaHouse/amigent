@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines
+from . import __version__, machines, net
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands, pc_outdated
@@ -63,6 +63,16 @@ def pixels_message(regions) -> bytes:
         parts.append(struct.pack(">HHHH", x, y, w, h))
         parts.append(rgb)
     return b"".join(parts)
+
+
+def pip_message(x: int, y: int, w: int, h: int, rgb: bytes) -> bytes:
+    """Binary message 4: the SAGA picture-in-picture surface, drawn over the screen."""
+    return struct.pack(">BHHHH", 4, x, y, w, h) + rgb
+
+
+def pcm_message(rate: int, pcm: bytes) -> bytes:
+    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
+    return struct.pack(">BI", 5, rate) + pcm
 
 
 _join = join_path
@@ -122,6 +132,9 @@ class Viewer:
         self.httpd: _Server | None = None
         self.clients: set[WebSocket] = set()
         self.clients_lock = threading.Lock()
+        self._out = threading.Condition()
+        self._audio_out: list = []
+        self._other_out: list = []
         self.inputs = InputQueue()
         self.feed = Feed(self.screen, self.lock, self.inputs, watching=self._watching,
                          on_online=self._set_online, on_screens=self._show_screens,
@@ -161,7 +174,8 @@ class Viewer:
                 out.write(json.dumps({"url": self.url, "host": self.host}))
         except OSError:
             pass
-        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
+        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker,
+                       self._stats, self._media, self._send_queued):
             threading.Thread(target=target, daemon=True).start()
         return self.url
 
@@ -199,14 +213,35 @@ class Viewer:
         with self.clients_lock:
             return 0.0 if self.clients else time.monotonic() - self.alone_since
 
-    def broadcast(self, data: bytes | str) -> None:
-        with self.clients_lock:
-            clients = list(self.clients)
-        for ws in clients:
-            try:
-                ws.send(data)
-            except OSError:
-                self.leave(ws)
+    def broadcast(self, data: bytes | str, audio: bool = False) -> None:
+        """Queue a message. Music goes out before the next picture frame.
+
+        One sender owns the sockets. A picture frame already being written
+        still finishes, and the music waiting behind it goes next, ahead of
+        any picture frame that has not started.
+        """
+        with self._out:
+            (self._audio_out if audio else self._other_out).append(data)
+            self._out.notify()
+
+    def _send_queued(self) -> None:
+        while True:
+            with self._out:
+                while not self._audio_out and not self._other_out:
+                    self._out.wait()
+                if self._audio_out:
+                    batch = self._audio_out
+                    self._audio_out = []
+                else:
+                    batch = [self._other_out.pop(0)]
+            with self.clients_lock:
+                clients = list(self.clients)
+            for data in batch:
+                for ws in clients:
+                    try:
+                        ws.send(data)
+                    except OSError:
+                        self.leave(ws)
 
     def event(self, kind: str, **fields) -> None:
         self.broadcast(json.dumps({"type": kind, **fields}))
@@ -242,6 +277,8 @@ class Viewer:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
             raise ValueError("not an address")
         machines.move(self.host, new)
+        if hasattr(self, "_apollo"):
+            del self._apollo  # the machine at the new address may not be an Apollo
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
@@ -276,6 +313,55 @@ class Viewer:
                     pass  # the next round tries again
             seconds += 1
 
+    def _media(self) -> None:
+        """ARNE audio and the SAGA PIP, on their own command channels, only while a page is open.
+
+        One AUDIO starts a stream. The daemon copies each finished half into a
+        FIFO and pushes it until this side sends stop. The page plays those
+        bytes at the mix rate. The screen connection is not this socket.
+        """
+        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
+        quiet_pip = False
+        pip_at = 0.0
+        fail_until = 0.0
+        while True:
+            if not self._watching():
+                time.sleep(0.05)
+                continue
+            info = self.amiga or {}
+            now = time.monotonic()
+            if info.get("audio") != "1" or now < fail_until:
+                time.sleep(0.05)
+            else:
+                try:
+                    if not link.connected:
+                        link.connect(plain=True)
+                    link.audio_start()
+                    while self._watching():
+                        got = link.audio_read()
+                        if got is None:
+                            break
+                        rate, pcm = got
+                        if pcm:
+                            self.broadcast(pcm_message(rate or 48000, pcm), audio=True)
+                    if self._watching():
+                        continue
+                    link.audio_stop()
+                    while link.audio_read() is not None:
+                        pass
+                except (AmigaError, AttributeError, OSError):
+                    link.close()
+                    fail_until = time.monotonic() + 0.5
+                    time.sleep(0.05)
+            if info.get("pip") == "1" and not quiet_pip and time.monotonic() >= pip_at:
+                pip_at = time.monotonic() + 0.5
+                try:
+                    x, y, w, h, rgb = self._ctl(self.ctl.pip)
+                except (AmigaError, AttributeError, OSError):
+                    quiet_pip = True
+                else:
+                    self.broadcast(pip_message(x, y, w, h, rgb))
+
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""
         if self.screen.protocol >= 2:
@@ -303,6 +389,9 @@ class Viewer:
                    for v in self._ctl(self.ctl.volumes)]
         number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
         return {**self._system, "tcp": info.get("bsdsocket", ""),
+                "os": info.get("os", ""), "board": info.get("board", ""),
+                "board_name": info.get("board_name", ""), "cpu_id": info.get("cpu", ""),
+                "audio": info.get("audio", ""), "pip": info.get("pip", ""),
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
@@ -343,10 +432,20 @@ class Viewer:
                            key=lambda f: f["name"].lower())
         return {"path": path, "volumes": volumes, "folders": folders, "files": files}
 
+    def _on_apollo(self) -> bool:
+        """amigentd.apollo, cached: V4 and A6000 take large copies, a 68000 does not."""
+        if not hasattr(self, "_apollo"):
+            try:
+                self._apollo = net.apollo_peer(self._ctl(self.ctl.sysinfo))
+            except (AmigaError, OSError, AttributeError):
+                self._apollo = False
+        return self._apollo
+
     def download(self, path: str) -> bytes:
         size = int(self._ctl(lambda: self.ctl.stat(path)).get("size", 0) or 0)
-        if size > MAX_DOWNLOAD:
-            raise AmigaError(f"{path} is larger than {MAX_DOWNLOAD >> 20} MB")
+        limit = net.APOLLO_DOWNLOAD if self._on_apollo() else MAX_DOWNLOAD
+        if size > limit:
+            raise AmigaError(f"{path} is larger than {limit >> 20} MB")
         return self._ctl(lambda: self.ctl.read_file(path))
 
     def read_clipboard(self) -> str:
@@ -382,8 +481,9 @@ class Viewer:
             job, data = self.uploads.get()
             try:
                 done = 0
+                step = net.APOLLO_BLOCK if self._on_apollo() else UPLOAD_CHUNK
                 while True:
-                    chunk = data[done:done + UPLOAD_CHUNK]
+                    chunk = data[done:done + step]
                     self._ctl(lambda: self.ctl.write_file(job["path"], chunk, append=done > 0))
                     done += len(chunk)
                     self.event("upload", state="sending", done=done, **job)

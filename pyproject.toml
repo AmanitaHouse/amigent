@@ -54,3 +54,4 @@ amigent = ["amiga/bin/amigentd.080"]  # untested without Vampire hardware; a 680
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+cache_dir = "build/pytest"

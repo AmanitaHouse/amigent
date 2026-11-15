@@ -15,9 +15,10 @@ meanwhile.
 --report    also write the results as Markdown to FILE
 --only      comma separated check names, e.g. files,typing
 --pointer   also run scripts/pointer_test.py with this test program
-            (amiga/pointer-test.c, built on the Amiga)
---kprintf   a program that writes through RawPutChar (amiga/kprintf-test.c,
-            built for the Amiga), here or on the Amiga, for the debug check
+            (tests/native/amiga/pointer-test.c, built on the Amiga)
+--kprintf   a program that writes through RawPutChar
+            (tests/native/amiga/kprintf-test.c, built for the Amiga), here or
+            on the Amiga, for the debug check
 --aminet    a small Aminet archive to install into RAM:amigent-regress
 
 Exit code 0 when nothing failed. What it learned over earlier releases:

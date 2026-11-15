@@ -1,10 +1,25 @@
-.KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K,DEFS/K
-.DEF SOURCE amigentd.c
-.DEF TO amigentd
+.KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K,DEFS/K,OBJ/K
+.DEF SOURCE daemon/amigentd.c
+.DEF TO ///build/classic/amigentd
 .DEF CPU 68020
 .DEF DEVPACK SYS:DevPack
+.DEF OBJ ///build/classic/amigentd.o
 ; Builds amigentd on the Amiga with vbcc and the SDKs from AmiKit's DevPack.
-; Run it in the folder with amigentd.c; DEVPACK names the DevPack folder.
+; Execute it with the current directory set to src/native/amiga, the folder
+; that contains this script. Three AmigaDOS parent steps (///) reach the
+; repository root from there. DEVPACK names the DevPack folder.
+; The object and the executable are written under build/classic, not beside
+; daemon/amigentd.c. This script has not been run with vbcc during the move
+; to that output directory.
+; hookstub.bin is not produced here. From this same directory:
+;   vasmm68k_mot -Fbin -o ///build/classic/hookstub.bin daemon/hookstub.s
+FailAt 10
+If NOT EXISTS ///build
+    MakeDir ///build
+EndIf
+If NOT EXISTS ///build/classic
+    MakeDir ///build/classic
+EndIf
 FailAt 21
 Stack 65536
 Assign VBCC: <DEVPACK>/vbcc
@@ -15,4 +30,5 @@ Assign vlibos3: VBCC:targets/m68k-amigaos/lib
 Assign AGNET: "<DEVPACK>/SDK/RoadShow SDK 1.5/netinclude"
 Assign AGP96: "<DEVPACK>/SDK/P96/P96 SDK"
 Path VBCC:bin ADD
-VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=<CPU> <DEFS> -IAGNET: -o <TO> <SOURCE> -lamiga
+VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=<CPU> <DEFS> -IAGNET: -c -o <OBJ> <SOURCE>
+VBCC:bin/vc +VBCC:config/aos68k -cpu=<CPU> -o <TO> <OBJ> -lamiga

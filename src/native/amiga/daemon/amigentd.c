@@ -2813,7 +2813,8 @@ static void wide_buffers(struct Library *base, LONG fd)
 static void accept_pending(void)
 {
     struct sockaddr_in addr;
-    LONG len = sizeof(addr), fd, one = 1, i, old = 0;
+    socklen_t len = sizeof(addr);
+    LONG fd, one = 1, i, old = 0;
     BOOL locked;
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
@@ -6035,7 +6036,7 @@ static BOOL peer_local(struct link *l)
 {
     struct Library *SocketBase = l->base;
     struct sockaddr_in addr;
-    LONG len = sizeof(addr);
+    socklen_t len = sizeof(addr);
 
     if (getpeername(l->fd, (struct sockaddr *)&addr, &len) != 0)
         return TRUE;
@@ -7085,7 +7086,8 @@ static LONG tls_listen(struct Library *SocketBase)
 static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
 {
     struct sockaddr_in addr;
-    LONG len = sizeof(addr), fd, one = 1, full;
+    socklen_t len = sizeof(addr);
+    LONG fd, one = 1, full;
     struct pump *p = NULL;
     struct Process *proc;
 
@@ -7736,7 +7738,8 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
 {
     struct WBArg *arg = wb->sm_ArgList;
     struct DiskObject *icon;
-    STRPTR v, *tt;
+    STRPTR v;
+    CONST_STRPTR *tt;
     LONG i, n;
     BPTR old;
 
@@ -7745,20 +7748,20 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
     for (i = 0; i < wb->sm_NumArgs; i++, arg++) {
         old = CurrentDir(arg->wa_Lock);
         if ((icon = GetDiskObject(arg->wa_Name))) {
-            tt = (STRPTR *)icon->do_ToolTypes;
-            if ((v = FindToolType(tt, "PORT")) && StrToLong(v, &n) > 0)
+            tt = (CONST_STRPTR *)icon->do_ToolTypes;
+            if ((v = FindToolType(tt, (CONST_STRPTR)"PORT")) && StrToLong(v, &n) > 0)
                 *port = n;
-            if (FindToolType(tt, "SETUP"))
+            if (FindToolType(tt, (CONST_STRPTR)"SETUP"))
                 setup_mode = TRUE;
-            if (FindToolType(tt, "QUIET"))
+            if (FindToolType(tt, (CONST_STRPTR)"QUIET"))
                 quiet = TRUE;
-            if (FindToolType(tt, "TLSONLY"))
+            if (FindToolType(tt, (CONST_STRPTR)"TLSONLY"))
                 tls_only = TRUE;
-            if (FindToolType(tt, "NOTEXT"))
+            if (FindToolType(tt, (CONST_STRPTR)"NOTEXT"))
                 no_text = TRUE;
-            if (FindToolType(tt, "NODEBUG"))
+            if (FindToolType(tt, (CONST_STRPTR)"NODEBUG"))
                 no_debug = TRUE;
-            if ((v = FindToolType(tt, "KEY")))
+            if ((v = FindToolType(tt, (CONST_STRPTR)"KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
         }

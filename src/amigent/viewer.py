@@ -107,6 +107,39 @@ def ftxt_text(data: bytes) -> str:
     return b"".join(out).decode("iso-8859-1")
 
 
+def reported_bytes(info: dict, key: str) -> int | None:
+    """One SYSINFO byte count, or None when the daemon did not send it.
+
+    ``0`` and ``"0"`` are real readings. A missing key and a blank value are not.
+    The integer stays exact: this does not scale the count into kilobytes.
+    """
+    if key not in info:
+        return None
+    raw = info[key]
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    return int(raw)
+
+
+def counted_bytes(info: dict, key: str) -> int:
+    """``reported_bytes``, with a missing field read as ``0``.
+
+    That is how the viewer already treated SYSINFO counts. Fast RAM still uses
+    it, so an older reply keeps the same number.
+    """
+    value = reported_bytes(info, key)
+    return 0 if value is None else value
+
+
+def status_free_bytes(chip_free, fast_free) -> int:
+    """The existing status total: available Chip RAM plus available Fast RAM.
+
+    An unreported Chip RAM reading adds nothing. The total is not Fast RAM alone.
+    """
+    return counted_bytes({"chip_free": chip_free}, "chip_free") + counted_bytes(
+        {"fast_free": fast_free}, "fast_free")
+
+
 class Viewer:
     """Streams the screen to every open page and plays their input on the Amiga.
 
@@ -423,13 +456,17 @@ class Viewer:
         info = self._ctl(self.ctl.sysinfo)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
-        number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
+        # chip_free stays None when SYSINFO omits it, so the page can tell a
+        # real zero from an older daemon. The other counts keep the old "missing
+        # means 0" reading. Same SYSINFO reply, no second round trip.
         return {**self._system, "tcp": info.get("bsdsocket", ""),
                 "os": info.get("os", ""), "board": info.get("board", ""),
                 "board_name": info.get("board_name", ""), "cpu_id": info.get("cpu", ""),
                 "audio": info.get("audio", ""), "pip": info.get("pip", ""),
-                "chip_free": number("chip_free"), "chip_total": number("chip_total"),
-                "fast_free": number("fast_free"), "fast_total": number("fast_total"),
+                "chip_free": reported_bytes(info, "chip_free"),
+                "chip_total": counted_bytes(info, "chip_total"),
+                "fast_free": counted_bytes(info, "fast_free"),
+                "fast_total": counted_bytes(info, "fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
 

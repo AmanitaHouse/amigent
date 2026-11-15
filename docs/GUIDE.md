@@ -415,10 +415,16 @@ not been run on Apollo hardware, so it is not a release-approved V4 build.
 `scripts/make_release.py` packs the archive with LhA on the Amiga. Tests for
 the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
 
-A source distribution of this tree contains the Python package and the staged
-Amiga executables under `src/amigent/amiga`. It does not contain `src/native`.
-The native daemon sources stay in git. Whether they should also travel in the
-sdist is a packaging decision, and it is not approved.
+A source distribution contains the maintained Python package, the tests, the
+scripts that build and check the tree, the documentation, and the native
+sources under `src/native/amiga`: C, assembly, headers, and the build
+definitions. It does not contain `build/`, `dist/`, compiler intermediates,
+or the experimental audio diagnostics. The wheel is the installable package:
+Python modules, the browser assets, the Amiga deployment resources, and the
+staged executables approved for install. Native sources travel in the sdist
+only. They are not package data, so a wheel built from that sdist does not
+install them. `amigentd.080` stays out of the wheel until it has been run on
+a Vampire.
 
 ## Translations
 

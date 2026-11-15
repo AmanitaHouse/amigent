@@ -296,21 +296,22 @@ class Amigentd:
             return None
         return self._chunky().image(PALETTE)
 
-    def _frame_reply(self, take, planar: bool = False):
+    def _frame_reply(self, take, planar: bool = False, packed: bool | None = None):
         """Parser for one FRAME answer: yields bytes wanted, gets them sent in.
 
         take(tile) gets each tile the moment it is complete, as RGB332 for the
         chunky formats. Returns the tile count, the bytes and the seconds from
         header to last byte. With planar the format byte says what follows.
+        packed: whether the frame was asked for packed, for the policy to time.
         """
         kind = (yield 1)[0] if planar else 0
-        return (yield from self._format_reply(kind, take))
+        return (yield from self._format_reply(kind, take, packed))
 
-    def _format_reply(self, kind: int, take):
+    def _format_reply(self, kind: int, take, packed: bool | None = None):
         if kind == 1:
-            return (yield from self._planar_reply(take))
+            return (yield from self._planar_reply(take, packed))
         if kind == 2:
-            return (yield from self._chunky_reply(take))
+            return (yield from self._chunky_reply(take, packed))
         if kind != 0:
             raise AmigentdError(f"unknown frame format {kind}")
         if self._planes is not None:
@@ -327,18 +328,17 @@ class Amigentd:
         self.received += size
         return count, size, time.perf_counter() - start
 
-    def _tiles_into(self, surface, take, size: int):
+    def _tiles_into(self, surface, take, size: int, packed: bool | None = None):
         """The tile list of format 1 and 2: each one through the pipeline at once,
         its partners are the picture as it was before this frame."""
         surface.begin_frame()
         start = time.perf_counter()
         count = struct.unpack(">I", (yield 4))[0]
         size += 4
-        deflated = False
+        raw = size  # as it would have come unpacked
         for _ in range(count):
             x, y, w, h, method, n = struct.unpack(">HHHHBI", (yield 13))
             data = yield n
-            deflated = deflated or bool(method & DEFLATED)
             if method & DEFLATED:
                 try:
                     data = zlib.decompress(data, -15)
@@ -350,14 +350,15 @@ class Amigentd:
             except PlanarError as e:
                 raise AmigentdError(str(e)) from e
             size += 13 + n
+            raw += 13 + len(data)
             take((x, y, w, h, surface.tile(x, y, w, h) if isinstance(surface, Chunky) else data))
         self.received += size
         elapsed = time.perf_counter() - start
-        if not deflated and self.policy:  # the line itself, not the Amiga's packing
-            self.policy.note(size, elapsed)
+        if self.policy and packed is not None:
+            self.policy.note_frame(raw, elapsed, packed)
         return count, size, elapsed
 
-    def _planar_reply(self, take):
+    def _planar_reply(self, take, packed: bool | None = None):
         """Format 1: the planes, maybe a palette, then tiles."""
         depth, flags, width, height = planar_header((yield 7))
         size = 8
@@ -376,14 +377,14 @@ class Amigentd:
             if planes.set_palette((yield 3 * count)) and not fresh:
                 planes.repaint = True
             size += 2 + 3 * count
-        return (yield from self._tiles_into(planes, take, size))
+        return (yield from self._tiles_into(planes, take, size, packed))
 
-    def _chunky_reply(self, take):
+    def _chunky_reply(self, take, packed: bool | None = None):
         """Format 2: RGB332 tiles for graphics cards, sharing the classic picture."""
         _, _, _, width, height = struct.unpack(">BBBHH", (yield 7))
         if (width, height) != (self.width, self.height):
             self._apply_size(width, height)
-        return (yield from self._tiles_into(self._chunky(), take, 8))
+        return (yield from self._tiles_into(self._chunky(), take, 8, packed))
 
     def _screens_reply(self):
         found = []
@@ -513,8 +514,9 @@ class Amigentd:
                 region = (0, 0, self.width, self.height)  # a new picture needs everything
             tiles: list = []
             try:
-                self._send(CMD_FRAME, self.frame_arg(force), *region)
-                self._drive(self._frame_reply(tiles.append, self.planar))
+                arg = self.frame_arg(force)
+                self._send(CMD_FRAME, arg, *region)
+                self._drive(self._frame_reply(tiles.append, self.planar, self.frame_packed(arg)))
             except (OSError, AmigentdError):
                 self.drop_picture()  # the service has moved on, ours is incomplete
                 raise
@@ -526,8 +528,14 @@ class Amigentd:
     def frame_arg(self, force: bool) -> int:
         arg = int(force) | (FRAME_PLANAR if self.planar else 0)
         if self.planar and self.protocol >= PACK_PROTOCOL:
-            arg |= FRAME_DEFLATE.get(self.packing().level(), 0)
+            arg |= FRAME_DEFLATE.get(self.packing().frame_level(), 0)
         return arg
+
+    def frame_packed(self, arg: int) -> bool | None:
+        """Whether a frame asked with arg comes packed; None when packing is not in play."""
+        if not (self.planar and self.protocol >= PACK_PROTOCOL):
+            return None
+        return any(arg & bit for bit in FRAME_DEFLATE.values())
 
     def packing(self) -> pack.Policy:
         """The Amiga's packing policy, shared with the command channel that learns its rates."""
@@ -928,12 +936,15 @@ class Pipeline:
 
     def frame(self, x: int, y: int, w: int, h: int, force: bool = False, on_done=None) -> None:
         """Ask for a region; tiles reach the picture as each one lands."""
+        arg = self.screen.frame_arg(force)
+        packed = self.screen.frame_packed(arg)
+
         def parse():
-            result = yield from self.screen._frame_reply(self._landed, self.screen.planar)
+            result = yield from self.screen._frame_reply(self._landed, self.screen.planar, packed)
             if on_done:
                 on_done(*result)
 
-        self._ask("frame", parse(), CMD_FRAME, self.screen.frame_arg(force), x, y, w, h)
+        self._ask("frame", parse(), CMD_FRAME, arg, x, y, w, h)
 
     def _landed(self, tile) -> None:
         self._tiles.append(tile)  # the list is swapped per round, so no bound .append

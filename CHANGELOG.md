@@ -3,6 +3,26 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Packing
+
+- Packing could switch itself on for good on a fast line. Screens counted as
+  line samples, but a screen arrives as fast as the Amiga turns it into tiles
+  (a whole one at about 235 KB/s on a 68060 with a ZZ9000, on a line of
+  1.7 MB/s). Slow samples could pull the estimate below twice the Amiga's
+  packing speed (this PC had it at 152 KB/s); from then on every reply came
+  packed, and packed replies never measured the line again: downloads ran at
+  0.58 MB/s and whole looks took 3.0 s.
+- Screens no longer guess from the line: they measure. How fast a screen's
+  tiles arrive is timed both ways, packed and not, and the faster way wins;
+  the other gets one screen in thirty, in case things changed. A packed reply
+  on the command channel, timed from its request, can raise the line estimate
+  but never lower it. The same session as above recovered after its first
+  download (1.75 MB/s) and after one packed look (2.2 s).
+- The line estimate in link.json is written whole, also when the screen and
+  command connections save it at once.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

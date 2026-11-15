@@ -144,6 +144,60 @@ def test_packed_writes_arrive_whole():
     del noise
 
 
+def _policy(tmp_path, line, fast=350, best=140):
+    p = pack.Policy("test", "10.0.0.9", mode="auto", path=tmp_path / "link.json")
+    p.rates = {"deflate_fast": fast, "deflate_best": best, "inflate": 500}
+    p.line_kbs = line
+    return p
+
+
+def test_packed_replies_only_raise_the_line(tmp_path):
+    """A packed reply waited on the Amiga's packing too: a slow one says nothing."""
+    p = _policy(tmp_path, 150.0)
+    assert p.level() == 1
+    p.note(1024 * 1024, 20.0, at_least=True)  # about 51 KB/s
+    assert p.line_kbs == 150.0 and p.level() == 1
+    p.note(1024 * 1024, 2.0, at_least=True)  # at least 512 KB/s
+    assert 250 < p.line_kbs < 270 and p.level() == 0
+
+
+def test_a_floor_alone_is_no_estimate(tmp_path):
+    p = _policy(tmp_path, None)
+    p.note(1024 * 1024, 1.0, at_least=True)
+    assert p.line_kbs is None
+    p.note(1024 * 1024, 1.0)
+    assert p.line_kbs == 1024.0
+
+
+def _screens(p, plain_kbs, packed_kbs, count):
+    """count screens of 200 KB each, at the pace of the way frame_level picks."""
+    ways = []
+    for _ in range(count):
+        level = p.frame_level()
+        kbs = packed_kbs if level else plain_kbs
+        p.note_frame(200 * 1024, 200 / kbs, bool(level))
+        ways.append(level)
+    return ways
+
+
+def test_slow_screens_neither_touch_the_line_nor_switch_packing_on(tmp_path):
+    """A 68060 turns a whole screen into tiles at about 235 KB/s and packs them
+    slower still: taken for the line, such screens once turned packing on for good."""
+    p = _policy(tmp_path, 1800.0)
+    ways = _screens(p, plain_kbs=235, packed_kbs=70, count=60)
+    assert p.line_kbs == 1800.0
+    assert ways[0] == 0 and ways[1] == 1  # the model's way, then one try of the other
+    assert ways.count(1) <= 4  # and only now and then after that
+
+
+def test_screens_find_packing_on_a_line_that_got_slow(tmp_path):
+    """A fast Amiga remembered on a fast line, now on a slow one: the screens show
+    packing pays even when no command reply ever measures the line."""
+    p = _policy(tmp_path, 20000.0, fast=2000, best=900)
+    ways = _screens(p, plain_kbs=20, packed_kbs=150, count=40)
+    assert ways[0] == 0 and all(ways[2:30]) and ways.count(0) <= 3
+
+
 def test_mode_off_by_hand_wins():
     fake = Fake5(files={"S:f": b"y" * 10000})
     ch = channel_to(fake, mode="off", line=10.0)

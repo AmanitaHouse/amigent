@@ -33,6 +33,7 @@
 #include <graphics/view.h>
 #include <graphics/regions.h>
 #include <graphics/clip.h>
+#include <graphics/layers.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
 #include <proto/exec.h>
@@ -347,10 +348,115 @@ static struct Region *clip;  /* the inner box: nothing lands on the borders */
 static BOOL clip_ok;
 static LONG cur_w, cur_h;    /* the outer size the layout is for */
 static LONG W, H, head_h, log_x, log_y, log_w, log_h, side_x, side_w, side_end, stamp;
+static struct BitMap *back_bitmap, old_bitmap;
+static struct Layer_Info *back_info;
+static struct Layer *back_layer;
+static struct RastPort *draw_rp;
+static LONG back_w, back_h;
+static BOOL dirty;
+static struct Rectangle damage;
+
+/* Finish any outstanding blit before releasing its source storage. */
+static void free_backing(void)
+{
+    LONG i;
+
+    if (back_bitmap)
+        WaitBlit();
+    if (back_layer)
+        DeleteLayer(0, back_layer);
+    if (back_info)
+        DisposeLayerInfo(back_info);
+    if (back_bitmap == &old_bitmap) {
+        for (i = 0; i < old_bitmap.Depth; i++)
+            if (old_bitmap.Planes[i])
+                FreeRaster(old_bitmap.Planes[i], back_w, back_h);
+    } else if (back_bitmap)
+        FreeBitMap(back_bitmap);
+    back_layer = NULL;
+    back_info = NULL;
+    back_bitmap = NULL;
+}
+
+/* OS 3/RTG gets a friend bitmap; OS 2 uses ordinary chip bitplanes. A layer
+ * clips text and boxes that extend past a small window's backing bitmap.
+ * If memory is tight, keep the original direct drawing path usable. */
+static void alloc_backing(void)
+{
+    LONG i, depth;
+
+    free_backing();
+    draw_rp = win->RPort;
+    back_w = cur_w;
+    back_h = cur_h;
+    if (GfxBase->LibNode.lib_Version >= 39) {
+        depth = GetBitMapAttr(win->RPort->BitMap, BMA_DEPTH);
+        back_bitmap = AllocBitMap(back_w, back_h, depth, BMF_CLEAR,
+                                  win->RPort->BitMap);
+    } else {
+        depth = win->RPort->BitMap->Depth;
+        memset(&old_bitmap, 0, sizeof(old_bitmap));
+        InitBitMap(&old_bitmap, depth, back_w, back_h);
+        back_bitmap = &old_bitmap;
+        for (i = 0; i < depth; i++)
+            if (!(old_bitmap.Planes[i] = AllocRaster(back_w, back_h)))
+                goto failed;
+    }
+    if (!back_bitmap || !(back_info = NewLayerInfo()))
+        goto failed;
+    back_layer = CreateUpfrontLayer(back_info, back_bitmap, 0, 0,
+                                    back_w - 1, back_h - 1, LAYERSIMPLE, NULL);
+    if (!back_layer)
+        goto failed;
+    draw_rp = back_layer->rp;
+    SetFont(draw_rp, font);
+    return;
+
+failed:
+    free_backing();
+}
+
+/* Accumulate changed areas and publish only after the frame is complete.
+ * Drawing locks serialize Intuition, but do not hide erase/redraw from the
+ * display: only the finished backing bitmap is copied to the window. */
+static void damaged(LONG x0, LONG y0, LONG x1, LONG y1)
+{
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= W) x1 = W - 1;
+    if (y1 >= H) y1 = H - 1;
+    if (x1 < x0 || y1 < y0)
+        return;
+    if (!dirty) {
+        damage.MinX = x0;
+        damage.MinY = y0;
+        damage.MaxX = x1;
+        damage.MaxY = y1;
+        dirty = TRUE;
+    } else {
+        if (x0 < damage.MinX) damage.MinX = x0;
+        if (y0 < damage.MinY) damage.MinY = y0;
+        if (x1 > damage.MaxX) damage.MaxX = x1;
+        if (y1 > damage.MaxY) damage.MaxY = y1;
+    }
+}
+
+static void present(void)
+{
+    if (dirty && back_bitmap) {
+        LONG x = win->BorderLeft + damage.MinX;
+        LONG y = win->BorderTop + damage.MinY;
+
+        BltBitMapRastPort(back_bitmap, x, y, win->RPort, x, y,
+                         damage.MaxX - damage.MinX + 1,
+                         damage.MaxY - damage.MinY + 1, 0xc0);
+    }
+    dirty = FALSE;
+}
 
 static void text_at(LONG x, LONG y, LONG fg, LONG bg, const char *s, LONG n)
 {
-    struct RastPort *rp = win->RPort;
+    struct RastPort *rp = draw_rp;
 
     SetAPen(rp, fg);
     SetBPen(rp, bg);
@@ -363,14 +469,14 @@ static void box(LONG x0, LONG y0, LONG x1, LONG y1, LONG p)
 {
     if (x1 < x0 || y1 < y0)
         return;
-    SetAPen(win->RPort, p);
-    RectFill(win->RPort, win->BorderLeft + x0, win->BorderTop + y0, win->BorderLeft + x1,
+    SetAPen(draw_rp, p);
+    RectFill(draw_rp, win->BorderLeft + x0, win->BorderTop + y0, win->BorderLeft + x1,
              win->BorderTop + y1);
 }
 
 static void draw_head(void)
 {
-    struct RastPort *rp = win->RPort;
+    struct RastPort *rp = draw_rp;
     char buf[80];
     LONG n, x, y;
 
@@ -403,6 +509,7 @@ static void draw_log(void)
         cols = LINE_LEN + 40;
     if (cols <= stamp + 6)
         return;
+    damaged(log_x, log_y, log_x + log_w - 1, log_y + log_h - 1);
     for (r = 0; r < rows; r++) {
         LONG idx = nlines - rows + r, y = log_y + r * fh + base, n, at = stamp + 6;
         struct line *l;
@@ -450,6 +557,7 @@ static void draw_cursor(BOOL on)
     x = log_x + n * fw + 2;
     y = log_y + (rows - 1) * fh;
     box(x, y + 1, x + fw - 2, y + fh - 2, on ? green : black);
+    damaged(x, y + 1, x + fw - 2, y + fh - 2);
 }
 
 /* One line of the side panel, label left and value right; nothing past the end. */
@@ -532,6 +640,7 @@ static void draw_side(void)
 
     if (!side_w)  /* too narrow for the panel */
         return;
+    damaged(side_x, log_y - 4, side_x + side_w - 1, side_end + 1);
     box(side_x, log_y - 4, side_x + side_w - 1, side_end + 1, panel);
     y = title(y, "LINK", 2 * fh);
     if (!st.heard || now - st.link_seen > 3)
@@ -627,6 +736,7 @@ static void fit_size(void)
     W = cur_w - win->BorderLeft - win->BorderRight;
     H = cur_h - win->BorderTop - win->BorderBottom;
     layout();
+    alloc_backing();
     clip_ok = FALSE;
     if (clip) {
         ClearRegion(clip);
@@ -697,6 +807,7 @@ static void keep_on_screen(void)
 
 static void draw_all(void)
 {
+    damaged(0, 0, W - 1, H - 1);
     box(0, 0, W - 1, H - 1, black);
     draw_head();
     draw_log();
@@ -760,7 +871,7 @@ int main(int argc, char **argv)
     WORD zoom[4];
     struct monmsg *m;
     ULONG ticks = 0;
-    BOOL running = TRUE, changed, full, resized;
+    BOOL running = TRUE, changed, full, resized, cursor_on = FALSE;
     LONG rc = 20, room_w, room_h, min_w, min_h;
 
     if (argc == 0)
@@ -884,6 +995,7 @@ int main(int argc, char **argv)
     clip = NewRegion();
     lock_for_drawing();
     draw_all();
+    present();
     unlock_drawing();
     rc = 0;
 
@@ -932,13 +1044,18 @@ int main(int argc, char **argv)
             if (changed || ticks % 5 == 0)
                 draw_side();
         }
-        draw_cursor((ticks / 3) & 1);
+        if (resized || full || changed || cursor_on != ((ticks / 3) & 1)) {
+            cursor_on = (ticks / 3) & 1;
+            draw_cursor(cursor_on);
+        }
+        present();
         unlock_drawing();
         if (resized)
             RefreshWindowFrame(win);
     }
 
 done:
+    free_backing();
     if (port) {
         Forbid();
         RemPort(port);

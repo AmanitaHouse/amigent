@@ -18,7 +18,7 @@ import socket
 import threading
 import uuid
 
-from . import locks, paths
+from . import journal, locks, paths, states
 from .errors import AmigaError
 
 _lock = threading.RLock()
@@ -82,7 +82,7 @@ def _address_key(host):
 
 
 def _copy_missing(source, target):
-    if not source.exists():
+    if source.is_symlink() or not source.exists():
         return
     if source.is_dir():
         target.mkdir(parents=True, exist_ok=True)
@@ -139,8 +139,7 @@ def _migrate_assets(entry, amigas, *, history=True):
         # Name-derived history is only safe when its filename is unambiguous.
         if name not in allowed:
             continue
-        for folder, suffix in (("notes", ".json"), ("installs", ""), ("inventory", ""),
-                               ("journal", ""), ("states", ""), ("screens", ""), ("checkpoints", "")):
+        for folder, suffix in (("notes", ".json"), ("installs", ""), ("inventory", "")):
             _copy_missing(paths.FOLDER / folder / (paths.safe(name) + suffix),
                           paths.FOLDER / folder / (ident + suffix))
         for filename in ("uptime.json", "link.json"):
@@ -150,6 +149,40 @@ def _migrate_assets(entry, amigas, *, history=True):
                 if ident not in values and name in values:
                     values[ident] = values[name]
                     _atomic_json(path, values)
+
+
+def _migrate_v14(amigas, pending):
+    # State labels and machine names can both contain hyphens. Only copy a
+    # snapshot if all matching filename prefixes identify the same machine.
+    store = states.Store(paths.FOLDER / "states")
+    prefixes = {}
+    owners = {}
+    for entry in amigas:
+        ident = entry["id"]
+        for name in [ident, entry["name"], *entry.get("previous_names", [])]:
+            owners.setdefault(journal._safe(name).casefold(), set()).add(ident)
+            prefix = store.path(name, "").stem
+            prefixes.setdefault(prefix, set()).add(ident)
+    for source in store.folder.glob("*.json"):
+        if not source.is_file():
+            continue
+        matches = [p for p in prefixes if source.name.casefold().startswith(p.casefold())]
+        ids = {ident for prefix in matches for ident in prefixes[prefix]}
+        if len(ids) == 1 and ids <= pending and len(matches) == 1:
+            ident, = ids
+            target = store.folder / (ident + "-" + source.name[len(matches[0]):])
+            _copy_missing(source, target)
+    for entry in amigas:
+        ident = entry["id"]
+        if ident not in pending:
+            continue
+        for name in [entry["name"], *entry.get("previous_names", [])]:
+            stem = journal._safe(name)
+            if stem in (".", "..") or owners[stem.casefold()] != {ident} or stem == ident:
+                continue
+            for folder, suffix in (("journal", ".jsonl"), ("screens", ""), ("checkpoints", "")):
+                _copy_missing(paths.FOLDER / folder / (stem + suffix), paths.FOLDER / folder / (ident + suffix))
+        entry["v14_history_migrated"] = True
 
 
 def _legacy_id(name):
@@ -217,6 +250,10 @@ def load() -> list[dict]:
                 if entry["id"] == common_owner:
                     _copy_missing(paths.FOLDER / "key", paths.FOLDER / f"key-{common_owner}")
                 entry["history_migrated"] = True
+        v14 = {a["id"] for a in amigas if a.get("legacy_credentials") and not a.get("v14_history_migrated")}
+        if v14:
+            _migrate_v14(amigas, v14)
+        if pending or v14:
             save(amigas)
         return amigas
 

@@ -278,22 +278,29 @@ def test_equivalent_ipv6_addresses_are_duplicates(private_config):
 
 @pytest.mark.parametrize("already_migrated", [False, True])
 def test_common_key_and_state_upgrade(private_config, already_migrated):
+    from amigent import journal, states
     rows = [{"name": "Workbench", "host": "192.0.2.1"}]
     legacy(private_config, rows)
     (private_config / "key").write_text("sole machine")
     (private_config / "link.json").write_text('{"Workbench": {"mode": "best", "kbs": 42}}')
-    for folder in ("journal", "states", "screens", "checkpoints"):
+    for folder in ("screens", "checkpoints"):
         path = private_config / folder / "Workbench"
         path.mkdir(parents=True)
         (path / "sample").write_bytes(b"history")
+    diary = journal.Journal()
+    diary.add("Workbench", "version")
+    store = states.Store(private_config / "states")
+    store.save("Workbench", "before-test", {"at": 42})
     if already_migrated:
         (private_config / "amigas.pre-id.json").write_text(json.dumps(rows))
         legacy(private_config, [dict(rows[0], name="Renamed", previous_names=["Workbench"],
                                      id=roster._legacy_id("Workbench"), legacy_credentials=True)])
     ident = roster.load()[0]["id"]
+    assert diary.recent(ident)[0]["did"] == "version"
+    assert store.load(ident, "before-test") == {"at": 42}
     assert secret.load_key(ident) == "sole machine"
     assert json.loads((private_config / "link.json").read_text())[ident] == {"mode": "best", "kbs": 42}
-    for folder in ("journal", "states", "screens", "checkpoints"):
+    for folder in ("screens", "checkpoints"):
         assert (private_config / folder / ident / "sample").read_bytes() == b"history"
     other = roster.remember("Other", "192.0.2.2")
     assert secret.load_key(other["id"]) is None
@@ -374,3 +381,32 @@ def test_overview_samples_without_an_open_desktop(private_config, monkeypatch):
     row, = fleet_state.status()
     assert row["online"] and row["preview"] and not row["watching"]
     assert (row["os"], row["cpu"], row["free"]) == ("3.2", "68040", 8192)
+
+
+
+def test_v14_state_prefix_collision_keeps_original(private_config):
+    from amigent import states
+
+    legacy(private_config, [{"name": "Workbench", "host": "192.0.2.1"},
+                            {"name": "Workbench-Lab", "host": "192.0.2.2"}])
+    store = states.Store(private_config / "states")
+    store.save("Workbench-Lab", "before", {"at": 42})
+    a, b = roster.load()
+    assert store.load("Workbench-Lab", "before") == {"at": 42}
+    assert store.load(a["id"], "Lab-before") == {}
+    assert store.load(b["id"], "before") == {}
+
+
+def test_previous_registry_upgrade_copies_released_journal_once(private_config):
+    from amigent import journal
+
+    legacy(private_config, [{"name": "Lab  Amiga", "host": "192.0.2.1"}])
+    entry, = roster.load()
+    entry.pop("v14_history_migrated")
+    roster.save([entry])
+    diary = journal.Journal()
+    diary.add("Lab  Amiga", "first action")
+    roster.load()
+    roster.rename(entry["id"], "New name")
+    diary.add(entry["id"], "second action")
+    assert [item["did"] for item in diary.recent(entry["id"])] == ["first action", "second action"]

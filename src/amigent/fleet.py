@@ -392,8 +392,6 @@ def main() -> None:
         pass
 
 
-if __name__ == "__main__":
-    main()
 
 
 def compare_runs(results: list[dict]) -> str:
@@ -420,8 +418,11 @@ def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: floa
     amigas = amigas if amigas is not None else machines.load()
 
     def one(entry: dict) -> dict:
-        commands = Commands(entry["host"])
+        target = entry.get("id", entry["host"])
+        commands = None
         try:
+            machines.address(target)
+            commands = Commands(target)
             result = commands.exec(command, timeout=timeout)
             return {"name": entry["name"], "ok": True, "rc": result.rc,
                     "output": result.output[-OUTPUT_LIMIT:]}
@@ -429,7 +430,8 @@ def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: floa
             return {"name": entry["name"], "ok": False, "error": str(e) or type(e).__name__}
         finally:
             try:
-                commands.close()
+                if commands:
+                    commands.close()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -437,3 +439,7 @@ def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: floa
         return []
     with concurrent.futures.ThreadPoolExecutor(len(amigas)) as pool:
         return list(pool.map(one, amigas))
+
+
+if __name__ == "__main__":
+    main()

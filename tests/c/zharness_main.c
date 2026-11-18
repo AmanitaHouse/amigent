@@ -1,7 +1,16 @@
 /* zharness pack LEVEL < raw > deflate     zharness unpack < deflate > raw
  * pack writes one raw deflate stream; blocks of up to 32 KB, as amigentd sends them. */
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);  /* no CR LF translation of the bytes */
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     static UBYTE in[64 << 20];
     size_t n = fread(in, 1, sizeof(in), stdin), at = 0;
     if (argc > 2 && !strcmp(argv[1], "pack")) {

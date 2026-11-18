@@ -95,9 +95,18 @@ def _copy_missing(source, target):
         os.replace(tmp, target)
 
 
+def _all_stems(entry):
+    return [entry["name"], *entry.get("previous_names", []), entry["host"], *entry.get("seen", [])]
+
+
+def _shared_stems(entry, amigas):
+    others = {paths.safe(v) for other in amigas if other is not entry for v in _all_stems(other)}
+    return {paths.safe(v) for v in _all_stems(entry)} & others
+
+
 def _legacy_stems(entry, amigas):
     """Never borrow credentials from an address/name shared by two entries."""
-    values = [entry["name"], *entry.get("previous_names", []), entry["host"], *entry.get("seen", [])]
+    values = _all_stems(entry)
     for value in dict.fromkeys(values):
         safe = paths.safe(value)
         current = value in [entry["name"], *entry.get("previous_names", []), entry["host"]]
@@ -110,25 +119,34 @@ def _legacy_stems(entry, amigas):
 
 def _migrate_assets(entry, amigas, *, history=True):
     ident = entry["id"]
-    for old in _legacy_stems(entry, amigas):
+    allowed = list(_legacy_stems(entry, amigas))
+    for old in allowed:
         for prefix, suffix in (("key-", ""), ("tls-", ".pem")):
+            if prefix == "tls-" and paths.safe(old) in entry.get("unclaimed_pins", []):
+                continue
             _copy_missing(paths.FOLDER / f"{prefix}{paths.safe(old)}{suffix}",
                           paths.FOLDER / f"{prefix}{ident}{suffix}")
     if not history:
         return
     for name in [entry["name"], *entry.get("previous_names", [])]:
         # Name-derived history is only safe when its filename is unambiguous.
-        if name not in list(_legacy_stems(entry, amigas)):
+        if name not in allowed:
             continue
-        for folder, suffix in (("notes", ".json"), ("installs", ""), ("inventory", "")):
+        for folder, suffix in (("notes", ".json"), ("installs", ""), ("inventory", ""),
+                               ("journal", ""), ("states", ""), ("screens", ""), ("checkpoints", "")):
             _copy_missing(paths.FOLDER / folder / (paths.safe(name) + suffix),
                           paths.FOLDER / folder / (ident + suffix))
-    uptime = paths.FOLDER / "uptime.json"
-    if uptime.exists():
-        values = json.loads(uptime.read_text(encoding="utf-8"))
-        if ident not in values and entry["name"] in values:
-            values[ident] = values[entry["name"]]
-            _atomic_json(uptime, values)
+        for filename in ("uptime.json", "link.json"):
+            path = paths.FOLDER / filename
+            if path.exists():
+                values = json.loads(path.read_text(encoding="utf-8"))
+                if ident not in values and name in values:
+                    values[ident] = values[name]
+                    _atomic_json(path, values)
+
+
+def _legacy_id(name):
+    return "amiga-" + uuid.uuid5(uuid.NAMESPACE_URL, str(paths.FOLDER.resolve()) + "\0" + name).hex
 
 
 def _atomic_json(path, value):
@@ -148,6 +166,8 @@ def load() -> list[dict]:
             raw = list_file().read_text(encoding="utf-8")
         except FileNotFoundError:
             return []
+        except (OSError, UnicodeError) as exc:
+            raise RegistryError(f"Cannot read {list_file()}: {exc}") from exc
         try:
             amigas = json.loads(raw)
             if not isinstance(amigas, list) or any(
@@ -158,22 +178,37 @@ def load() -> list[dict]:
             ids = [a["id"] for a in amigas if "id" in a]
             if any(not isinstance(i, str) or not is_id(i) for i in ids) or len(set(ids)) != len(ids):
                 raise ValueError("invalid or duplicate machine IDs")
+            for a in amigas:
+                for field in ("seen", "previous_names", "unclaimed_pins"):
+                    values = a.get(field, [])
+                    if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                        raise ValueError(f"{field} must be a list of strings")
         except (ValueError, TypeError) as e:
             raise RegistryError(f"Cannot read {list_file()}: {e}") from e
+        backup = list_file().with_name("amigas.pre-id.json")
         if any("id" not in a for a in amigas):
-            backup = list_file().with_name("amigas.pre-id.json")
             if not backup.exists():
                 backup.write_text(raw, encoding="utf-8")
             for entry in amigas:
                 # Deterministic until saved: a failed migration resumes the same copies.
                 if "id" not in entry:
                     entry["legacy_credentials"] = True
-                entry.setdefault("id", "amiga-" + uuid.uuid5(uuid.NAMESPACE_URL,
-                    str(paths.FOLDER.resolve()) + "\0" + entry["name"]).hex)
+                entry.setdefault("id", _legacy_id(entry["name"]))
             if len({a["id"] for a in amigas}) != len(amigas):
                 raise RegistryError("Duplicate saved names must be resolved before migration.")
-            for entry in amigas:
+        pending = [a for a in amigas if a.get("legacy_credentials") and not a.get("history_migrated")]
+        if pending:
+            # The original roster identifies the common key's sole owner even
+            # if this is an upgrade from an earlier ID migration.
+            original = json.loads(backup.read_text()) if backup.exists() else []
+            common_owner = _legacy_id(original[0]["name"]) if len(original) == 1 else None
+            for entry in pending:
+                shared = _shared_stems(entry, amigas)
+                entry["unclaimed_pins"] = sorted(v for v in shared if (paths.FOLDER / f"tls-{v}.pem").exists())
                 _migrate_assets(entry, amigas)
+                if entry["id"] == common_owner:
+                    _copy_missing(paths.FOLDER / "key", paths.FOLDER / f"key-{common_owner}")
+                entry["history_migrated"] = True
             save(amigas)
         return amigas
 
@@ -200,7 +235,7 @@ def _find(host, amigas):
 
 
 def find(host: str) -> dict | None:
-    if isinstance(host, DirectAddress):
+    if not host or isinstance(host, DirectAddress):
         return None
     return _find(host, load())
 
@@ -296,6 +331,8 @@ def remember(name: str, host: str, make_default: bool = False) -> dict:
         # Setup may have saved credentials by address before registration.
         # Never adopt a removed machine's name-based history for a new ID.
         for prefix, suffix in (("key-", ""), ("tls-", ".pem")):
+            if prefix == "tls-" and paths.safe(host) in entry.get("unclaimed_pins", []):
+                continue
             _copy_missing(paths.FOLDER / f"{prefix}{paths.safe(host)}{suffix}",
                           paths.FOLDER / f"{prefix}{entry['id']}{suffix}")
         save(amigas)

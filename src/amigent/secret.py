@@ -31,8 +31,11 @@ def key_file(host: str = "") -> Path:
     The common key belongs to the first Amiga set up. With several Amigas on
     file it only covers a host that matches none of them.
     """
-    return (_own(host) if host else None) or (
-        FOLDER / f"key-{roster.identity(host)}" if roster.find(host) else FOLDER / "key")
+    own = _own(host) if host else None
+    if own:
+        return own
+    entry = roster.find(str(host))
+    return FOLDER / (f"key-{entry['id']}" if entry else "key")
 
 
 def load_key(host: str = "") -> str | None:

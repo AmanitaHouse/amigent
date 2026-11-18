@@ -363,8 +363,8 @@ credentials and history on disk. The default is used by tools that need one
 machine; the viewer still shows the overview when several are registered.
 
 Reachability refreshes every 20 seconds without taking over another viewer's
-screen connection. Previews and system details become available after opening
-a desktop. Each Amiga needs its own credentials from `amigent-setup`.
+screen connection. The fleet overview also samples previews, OS, CPU and memory
+while the page is open. Each Amiga needs its own credentials from `amigent-setup`.
 
 The same controls are available from the command line:
 

@@ -20,7 +20,12 @@ from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_por
 from .power import available as power_available
 from .viewer import Viewer, open_window
 
-HOST = machines.identity(machines.pick())  # AMIGENT_HOST (a name or an address), else the known Amiga
+registry_error = ""
+try:
+    HOST = machines.identity(machines.pick())
+except machines.RegistryError as exc:
+    HOST = ""
+    registry_error = str(exc)
 CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
 SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
@@ -160,6 +165,8 @@ def _noted(fn):
 
     @functools.wraps(fn)
     def run(*args, **kwargs):
+        if registry_error:
+            raise machines.RegistryError(registry_error)
         line = note_line(fn.__name__, kwargs, defaults)
         sent = _note(line)
         ok = False
@@ -2801,7 +2808,7 @@ def amiga_aminet_install(path: str, target: str) -> str:
 
 
 def main() -> None:
-    if not HOST:
+    if not HOST and not registry_error:
         raise SystemExit("no Amiga known yet: run amigent-setup, or set AMIGENT_HOST")
     mcp.run()
 

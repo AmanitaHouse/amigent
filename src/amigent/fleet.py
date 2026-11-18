@@ -50,6 +50,7 @@ class Fleet:
         self.httpd = None
         self.url = ""
         self.last_page = time.monotonic()
+        self.overview_until = 0.0
         self.ever_joined = False
         for i, amiga in enumerate(amigas):
             self.entries.append(self._entry(amiga, i))
@@ -125,21 +126,45 @@ class Fleet:
                 entry["error"] = "" if entry["online"] else "Not reachable"
                 if entry["online"]:
                     entry["seen"] = time.time()
-                viewer = entry["viewer"]
-                if viewer:
-                    entry["info"] = dict(viewer.amiga)
-                    with viewer.lock():
-                        picture = viewer.screen.snapshot()
-                    if picture:
-                        scale = min(1, PREVIEW_WIDTH / picture.width)
-                        small = picture.resize((round(picture.width * scale), max(1, round(picture.height * scale))))
-                        out = io.BytesIO()
-                        small.save(out, "PNG")
-                        entry["preview"] = out.getvalue()
             except (OSError, AmigaError, ValueError) as e:
                 entry["online"] = False
                 entry["error"] = str(e)
+            if entry["online"] and time.monotonic() < self.overview_until:
+                try:
+                    self._preview(entry)
+                except (OSError, AmigaError, AmigentdError, EOFError, ValueError) as e:
+                    entry["error"] = str(e)
             entry["stop"].wait(PREVIEW_EVERY)
+
+    def _viewer(self, entry):
+        with self.guard:
+            if entry["stop"].is_set():
+                raise ValueError("Machine changed; select it again in Your Amigas.")
+            if entry["viewer"] is None:
+                entry["viewer"] = Viewer(entry["id"] if self.saved else entry["name"],
+                                        ctl_port=self.ctl_port, screen_port=self.screen_port)
+                entry["viewer"].manager = self
+            return entry["viewer"]
+
+    def _preview(self, entry):
+        viewer = self._viewer(entry)
+        with viewer.lock():
+            if not viewer.enabled:
+                return
+            if viewer.clients:
+                picture = viewer.screen.snapshot()
+            else:
+                try:
+                    picture = viewer.screen.capture()
+                finally:
+                    viewer.screen.close()
+        if picture:
+            scale = min(1, PREVIEW_WIDTH / picture.width)
+            small = picture.resize((round(picture.width * scale), max(1, round(picture.height * scale))))
+            out = io.BytesIO()
+            small.save(out, "PNG")
+            entry["preview"] = out.getvalue()
+        entry["info"] = dict(viewer.amiga) if viewer.clients and viewer.amiga else viewer.read_amiga()
 
     def status(self) -> list[dict]:
         self.sync()
@@ -239,11 +264,7 @@ class Fleet:
         if self.saved:
             machines.address(entry["id"])  # refuse unresolved duplicate addresses
         with self.guard:
-            if entry["viewer"] is None:
-                entry["viewer"] = Viewer(entry["id"] if self.saved else entry["name"],
-                                          ctl_port=self.ctl_port, screen_port=self.screen_port)
-                entry["viewer"].manager = self
-            return entry["viewer"].start(0)
+            return self._viewer(entry).start(0)
 
 
 class _FleetHandler(TokenHandler):
@@ -268,6 +289,7 @@ class _FleetHandler(TokenHandler):
             self.fleet.ever_joined = True
             if url.path == "/api/machines":
                 return self._json(200, {"machines": self.fleet.status(), "overview": self.fleet.url, "current": ""})
+            self.fleet.overview_until = time.monotonic() + 2 * PREVIEW_EVERY
             return self._reply(200, json.dumps(self.fleet.status()).encode(), "application/json")
         if url.path.startswith("/api/preview/"):
             try:

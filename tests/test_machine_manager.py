@@ -274,3 +274,92 @@ def test_equivalent_ipv6_addresses_are_duplicates(private_config):
     assert all(roster.conflicts(a) for a in roster.load())
     with pytest.raises(roster.RegistryError, match="Ambiguous"):
         roster.find("2001:db8::1")
+
+
+@pytest.mark.parametrize("already_migrated", [False, True])
+def test_common_key_and_state_upgrade(private_config, already_migrated):
+    rows = [{"name": "Workbench", "host": "192.0.2.1"}]
+    legacy(private_config, rows)
+    (private_config / "key").write_text("sole machine")
+    (private_config / "link.json").write_text('{"Workbench": {"mode": "best", "kbs": 42}}')
+    for folder in ("journal", "states", "screens", "checkpoints"):
+        path = private_config / folder / "Workbench"
+        path.mkdir(parents=True)
+        (path / "sample").write_bytes(b"history")
+    if already_migrated:
+        (private_config / "amigas.pre-id.json").write_text(json.dumps(rows))
+        legacy(private_config, [dict(rows[0], name="Renamed", previous_names=["Workbench"],
+                                     id=roster._legacy_id("Workbench"), legacy_credentials=True)])
+    ident = roster.load()[0]["id"]
+    assert secret.load_key(ident) == "sole machine"
+    assert json.loads((private_config / "link.json").read_text())[ident] == {"mode": "best", "kbs": 42}
+    for folder in ("journal", "states", "screens", "checkpoints"):
+        assert (private_config / folder / ident / "sample").read_bytes() == b"history"
+    other = roster.remember("Other", "192.0.2.2")
+    assert secret.load_key(other["id"]) is None
+    assert secret.load_key(roster.DirectAddress(other["host"])) is None
+
+
+def test_shared_historical_pin_requires_verified_machine_pin(private_config, monkeypatch):
+    from amigent.channel import Commands
+    legacy(private_config, [{"name": "A", "host": "192.0.2.1", "seen": ["192.0.2.9"]},
+                            {"name": "B", "host": "192.0.2.2", "seen": ["192.0.2.9"]}])
+    (private_config / "tls-192.0.2.9.pem").write_text("shared")
+    (private_config / "key").write_text("unassigned")
+    a, b = roster.load()
+    assert secret.load_key(a["id"]) is None
+    monkeypatch.setattr(tls.socket, "create_connection", Mock(side_effect=AssertionError))
+    for target in (a["id"], roster.DirectAddress(b["host"])):
+        with pytest.raises(roster.RegistryError, match="Ambiguous TLS pin"):
+            Commands(target).connect()
+    roster.forget(b["id"])
+    with pytest.raises(roster.RegistryError, match="verified certificate"):
+        tls.wanted(a["id"])
+    tls.remember(a["id"], b"verified")
+    assert tls.pinned(a["id"]).read_bytes() == b"verified"
+
+
+def test_invalid_registry_keeps_mcp_available(private_config):
+    import asyncio
+    import os
+    import sys
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    config = private_config / "amigent"
+    config.mkdir(parents=True)
+    path = config / "amigas.json"
+    path.write_bytes(b"{bad json")
+    params = StdioServerParameters(command=sys.executable, args=["-m", "amigent.server"],
+                                   env=dict(os.environ, XDG_CONFIG_HOME=str(private_config), AMIGENT_HOST="A"))
+
+    async def check():
+        async with stdio_client(params) as streams, ClientSession(*streams) as client:
+            await client.initialize()
+            assert (await client.list_tools()).tools
+            reply = await client.call_tool("amiga_status", {})
+            assert reply.isError and "amigas.json" in reply.content[0].text
+
+    asyncio.run(check())
+    assert path.read_bytes() == b"{bad json"
+
+
+def test_overview_samples_without_an_open_desktop(private_config, monkeypatch):
+    from PIL import Image
+    from unittest.mock import patch
+    fleet_state = fleet.Fleet([roster.remember("Test", "192.0.2.5")])
+    entry = fleet_state.entries[0]
+    facts = {"os": "3.2", "cpu": "68040", "fast_free": 8192}
+    monkeypatch.setattr(fleet.net, "greet", lambda *a, **kw: b"AMGT")
+    monkeypatch.setattr(entry["stop"], "wait", lambda timeout: entry["stop"].set())
+    with patch("amigent.fleet.Viewer", wraps=Viewer) as make:
+        fleet_state._watch(entry)
+        make.assert_not_called()
+    entry["stop"].clear()
+    monkeypatch.setattr(Viewer, "read_amiga", lambda self: facts)
+    monkeypatch.setattr("amigent.amigentd.Amigentd.capture", lambda self: Image.new("RGB", (32, 16)))
+    fleet_state.overview_until = float("inf")
+    fleet_state._watch(entry)
+    row, = fleet_state.status()
+    assert row["online"] and row["preview"] and not row["watching"]
+    assert (row["os"], row["cpu"], row["free"]) == ("3.2", "68040", 8192)

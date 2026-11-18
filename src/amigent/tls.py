@@ -26,10 +26,17 @@ from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLD
 def pinned(host: str) -> Path:
     """This Amiga's pinned cert: by name, by any address it ever had, or by what DNS says."""
     names = roster.aliases(host)
+    entry = roster.find(str(host))
+    blocked = entry.get("unclaimed_pins", []) if entry else []
     for name in names:
+        if safe(name) in blocked:
+            continue
         path = FOLDER / f"tls-{safe(name)}.pem"
         if path.exists():
             return path
+    if blocked:
+        raise roster.RegistryError(f"Ambiguous TLS pin for {entry['name']}. "
+                                  f"Save its verified certificate as tls-{entry['id']}.pem.")
     return FOLDER / f"tls-{safe(names[0])}.pem"
 
 

@@ -7,7 +7,7 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
-from .roster import identity
+from .roster import identity, RegistryError
 
 import socket
 import re
@@ -697,6 +697,8 @@ class Commands:
                 channel.connect()
                 self.backend = channel
                 return
+            except RegistryError:
+                raise
             except AmigaError as e:
                 if "refused the key" in str(e) or "wants a key" in str(e):
                     raise

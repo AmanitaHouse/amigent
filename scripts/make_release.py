@@ -106,7 +106,7 @@ Licence: MIT, see LICENSE.
 
 # Aminet files from before the archive lost its version number; they go away with
 # the next upload. Empty this once Aminet shows only amigent.lha.
-REPLACES = "comm/net/amigent-1.1.1.lha"
+REPLACES = ""
 
 AMINET_HEAD = f"""Short:        Remote desktop and AI agent for Amigas
 Author:       Andreas Wendorf (Akustikrausch)
@@ -142,9 +142,9 @@ output and sets tracepoints in them.
 
 This archive is the Amiga half: amigentd, the small service that does the
 work on the Amiga, amigent-status, a window that shows who is connected,
-amigent-monitor, a window that shows what the agent is doing, and
-Amigent-Update for updating an earlier installation. The PC or Mac half is a
-Python package:
+amigent-monitor, a window that shows what the agent is doing,
+Amigent-Update for updating an earlier installation, and Amigent.guide, the
+help for all of it. The PC or Mac half is a Python package:
 
     pipx install amigent
 
@@ -190,6 +190,7 @@ NEW IN THIS VERSION
   amigentd no longer fails; amigentd builds with GCC as well as vbcc.
 - Thanks to kaffeine1, midwan, reinauer and AmanitaHouse for their pull
   requests.
+
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
 

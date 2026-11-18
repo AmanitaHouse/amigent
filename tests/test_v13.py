@@ -299,6 +299,79 @@ def test_packed_traffic_can_only_raise_the_line(tmp_path):
     assert p.line_kbs == held
 
 
+def _policy(tmp_path, line, fast=350, best=140):
+    p = pack.Policy("test", "10.0.0.9", mode="auto", path=tmp_path / "link.json")
+    p.rates = {"deflate_fast": fast, "deflate_best": best, "inflate": 500}
+    p.line_kbs = line
+    return p
+
+
+def test_a_floor_alone_is_no_estimate(tmp_path):
+    p = _policy(tmp_path, None)
+    p.note_floor(1024 * 1024, 1.0)
+    assert p.line_kbs is None
+    p.note(1024 * 1024, 1.0)
+    assert p.line_kbs == 1024.0
+
+
+def _screens(p, plain_kbs, packed_kbs, count):
+    """count screens of 200 KB each, at the pace of the way frame_level picks."""
+    ways = []
+    for _ in range(count):
+        level = p.frame_level()
+        kbs = packed_kbs if level else plain_kbs
+        p.note_frame(200 * 1024, 200 / kbs, bool(level))
+        ways.append(level)
+    return ways
+
+
+def test_slow_screens_neither_touch_the_line_nor_switch_packing_on(tmp_path):
+    """A 68060 turns a whole screen into tiles at about 235 KB/s and packs them
+    slower still: taken for the line, such screens once turned packing on for good."""
+    p = _policy(tmp_path, 1800.0)
+    ways = _screens(p, plain_kbs=235, packed_kbs=70, count=60)
+    assert p.line_kbs == 1800.0
+    assert ways[0] == 0 and ways[1] == 1  # the model's way, then one try of the other
+    assert ways.count(1) <= 4  # and only now and then after that
+
+
+def test_screens_find_packing_on_a_line_that_got_slow(tmp_path):
+    """A fast Amiga remembered on a fast line, now on a slow one: the screens show
+    packing pays even when no command reply ever measures the line."""
+    p = _policy(tmp_path, 20000.0, fast=2000, best=900)
+    ways = _screens(p, plain_kbs=20, packed_kbs=150, count=40)
+    assert ways[0] == 0 and all(ways[2:30]) and ways.count(0) <= 3
+
+
+def test_small_screens_do_not_keep_the_losing_way_on(tmp_path):
+    """Typing and cursor blinks come in screens too small to measure: the way not
+    measured yet gets one of them in thirty, not all of them."""
+    p = _policy(tmp_path, 1800.0)
+    _screens(p, plain_kbs=235, packed_kbs=70, count=1)  # one whole screen, unpacked
+    ways = []
+    for _ in range(60):
+        level = p.frame_level()
+        p.note_frame(2048, 0.05, bool(level))  # too small to count
+        ways.append(level)
+    assert ways.count(1) == 2
+
+
+def test_a_screen_counts_the_time_before_its_header(tmp_path, monkeypatch):
+    """amigentd packs a small screen whole before it sends the header: the time
+    runs from when it could start on the screen, not from the header."""
+    from amigent.amigentd import Amigentd
+
+    monkeypatch.setattr(pack, "MIN_SAMPLE", 0)
+    screen = Amigentd("127.0.0.1")
+    screen.policy = _policy(tmp_path, 1800.0)
+    parser = screen._frame_reply(lambda tile: None, True, True, (lambda: 100.0, lambda: 100.5))
+    next(parser)
+    with pytest.raises(StopIteration):
+        for chunk in (b"\2", struct.pack(">BBBHH", 0, 0, 0, 64, 64), struct.pack(">I", 0)):
+            parser.send(chunk)  # format 2, 64x64, no tiles: 12 bytes in half a second
+    assert screen.policy._screens[True] == pytest.approx(12 / 1024 / 0.5)
+
+
 # ---- screen text
 
 LINES = [

@@ -35,6 +35,7 @@ LOCAL_LINE = 20000.0  # KB/s for an emulator on this PC
 MIN_SAMPLE = 8192  # bytes; smaller replies say more about latency than about the line
 ALPHA = 0.3  # weight of a new measurement
 FLOOR_ALPHA = 0.5  # a packed sample is a lower bound, so it moves the estimate up faster
+EXPLORE = 30  # screens between tries of the way that lost, in case it pays now
 # deflate_fast at this rate is not a 68000. Packing before a real sample would
 # stick: the line is only timed while replies are raw.
 FAST_CPU = 1500.0
@@ -65,6 +66,8 @@ class Policy:
         except (TypeError, ValueError):
             self.line_kbs = None
         self._lock = threading.Lock()
+        self._screens: dict[bool, float | None] = {False: None, True: None}  # KB/s unpacked, packed
+        self._since_try = EXPLORE  # screens since the losing way was tried: due at once
 
     def set_mode(self, mode: str) -> None:
         """auto, off, fast or best; kept for this Amiga from now on."""
@@ -108,17 +111,18 @@ class Policy:
     def note_floor(self, nbytes: int, seconds: float) -> None:
         """A packed reply. nbytes crossed the wire, so the line is at least that fast.
 
-        A slower sample is ignored. Packing may have been waiting on the CPU,
-        and that must not drag a fast line back down to the packed rate.
+        A slower sample is ignored, and a packed sample does not start the
+        estimate. Packing may have been waiting on the CPU, and that must not
+        drag a fast line back down to the packed rate or stand in for a
+        measurement of it.
         """
         if nbytes < MIN_SAMPLE or seconds <= 0.01:
             return
         kbs = nbytes / 1024 / seconds
         with self._lock:
-            if self.line_kbs is not None and kbs <= self.line_kbs:
+            if self.line_kbs is None or kbs <= self.line_kbs:
                 return
-            self.line_kbs = kbs if self.line_kbs is None else (
-                (1 - FLOOR_ALPHA) * self.line_kbs + FLOOR_ALPHA * kbs)
+            self.line_kbs = (1 - FLOOR_ALPHA) * self.line_kbs + FLOOR_ALPHA * kbs
         self._save()
 
     def line(self) -> float:
@@ -144,6 +148,43 @@ class Policy:
         if self.rates.get("deflate_fast", 0) >= FAST_FACTOR * line:
             return 1
         return 0
+
+    # Screens are measured, not modelled: a screen comes as fast as the Amiga
+    # turns it into tiles, so its pace says little about the line. What counts
+    # is how fast the tile bytes (as unpacked) arrive each way; the faster way
+    # wins. The other way gets one screen in EXPLORE (the first right after the
+    # first measurement), whether or not that screen is big enough to measure.
+
+    def frame_level(self) -> int:
+        """0, 1 or 2 for the next screen."""
+        model = self.level()
+        if self.mode != "auto" or not self.known:
+            return model
+        packed = model or (1 if self.rates.get("deflate_fast") else 0)
+        if not packed:
+            return 0
+        with self._lock:
+            plain, squeezed = self._screens[False], self._screens[True]
+            if plain is None and squeezed is None:
+                return packed if model else 0
+            if plain is None or squeezed is None:
+                pack_it = squeezed is not None  # the way measured so far
+            else:
+                pack_it = squeezed > plain
+            self._since_try += 1
+            if self._since_try > EXPLORE:
+                self._since_try = 1
+                pack_it = not pack_it
+        return packed if pack_it else 0
+
+    def note_frame(self, raw: int, seconds: float, packed: bool) -> None:
+        """A screen of raw tile bytes (as unpacked) took seconds, packed or not."""
+        if raw < MIN_SAMPLE or seconds <= 0.01:
+            return
+        kbs = raw / 1024 / seconds
+        with self._lock:
+            old = self._screens[packed]
+            self._screens[packed] = kbs if old is None else (1 - ALPHA) * old + ALPHA * kbs
 
     def upload(self) -> bool:
         """Pack what goes to the Amiga: unpacking is its part then."""

@@ -210,7 +210,9 @@ UPDATE_TROUBLE = {
     b"missing": "C:amigentd.new did not arrive, so nothing was changed.",
 }
 WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-monitor.info")
-UPDATE_WAIT = 90.0  # seconds for the old amigentd to go and the new one to answer
+# seconds for the old amigentd to go and the new one to answer: the script waits up to 2 + 15 + 100 s,
+# and if it falls back, the old amigentd may retry its port for another 60 s
+UPDATE_WAIT = 180.0
 
 
 def update_windows(channel, home: str | None) -> None:

@@ -335,10 +335,10 @@ console.log(JSON.stringify({
     assert got["blank"] == {"hidden": True, "graphics": "", "fast": fast_text}
 
 
-def test_packaged_apollo_executable_is_the_secured_one():
+def test_packaged_apollo_executable_is_the_tested_one():
     data = APOLLO_BIN.read_bytes()
-    assert len(data) == 108112
-    assert hashlib.sha256(data).hexdigest() == "158435c2fa757febe6a0c09403ad3983e34f520c78c2b328d82f2b5b712d14d6"
+    assert len(data) == 108300
+    assert hashlib.sha256(data).hexdigest() == "f8f54dbd6d7302786a9de450abdd97f4dd3c84b711c3f77939263a4d6d8db6d4"
 
 
 def test_viewer_assets_are_package_data():

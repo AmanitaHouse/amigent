@@ -91,8 +91,10 @@ with *Amigent-Update*? The PC says so from 1.3.0 on; run the prompt anyway.
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
 shows up in **Your Amigas** in `amigent-viewer`. Use **Manage** to rename it,
-choose the default, edit its address or remove it. The AI agent works with one Amiga per MCP server
-entry, so register a second entry with `AMIGENT_HOST=A500`.
+choose the default, edit its address or remove it. A single MCP server can
+operate both: ask the agent to list your Amigas,
+then name the machine or machines in your request. Tools take an explicit
+`machine` argument, so connections and installation records stay separate.
 
 **The Amiga got a new address.**
 Nothing to do: Amigent searches the home network and takes the Amiga with your

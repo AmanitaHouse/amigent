@@ -118,8 +118,33 @@ default_tools_approval_mode = "approve"
 
 Antigravity reads its servers from `~/.gemini/antigravity/mcp_config.json`, in
 the usual `mcpServers` format. Other agents need the command `amigent-server`.
-With several
-Amigas, give each entry `AMIGENT_HOST` with the Amiga's name.
+One MCP server can operate every registered Amiga. The agent calls
+`amiga_machines()` to discover names, stable IDs, addresses and reachability,
+then passes `machine` on each machine-specific tool call. For example:
+
+```python
+amiga_aminet_install(machine="Amiga3000", path="util/misc/example.lha", target="Work:Utilities")
+amiga_aminet_install(machine="Amiga4000", path="util/misc/example.lha", target="Work:Utilities")
+```
+
+Read the package readme and check compatibility on each target first. Wrap
+each machine's installation in `amiga_install_begin` and `amiga_install_end`;
+run any required installer separately. Results identify the target, and each
+machine keeps its own installation and undo records. A failure on one machine
+does not roll back a successful installation on another.
+
+Calls for different machines can run concurrently. Calls for the same machine
+are serialized. Screen caches, connections, background log followers and
+window tracking stay with their machine; there is no shared active-machine
+switch. An omitted `machine` uses `AMIGENT_HOST` if configured, or the only
+registered machine. With several machines and no configured host, the server
+asks for an explicit target even if the viewer has a saved default.
+
+`AMIGENT_POWER_CMD` remains bound to the machine named by `AMIGENT_HOST` when
+multiple machines are registered. It cannot switch another machine's outlet.
+
+After updating Amigent, reconnect the MCP client so it reloads the tool schemas.
+Existing separate MCP server entries with `AMIGENT_HOST` continue to work.
 
 ### When the address changes
 

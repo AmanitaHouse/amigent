@@ -135,5 +135,13 @@
  "pause_15": "15 min.",
  "paused": "Billedet er sat på pause på Amigaen, {time} tilbage. Mus og taster virker stadig.",
  "resume": "Fortsæt",
- "pause_failed": "Pause mislykkedes"
+ "pause_failed": "Pause mislykkedes",
+ "update_available": "Amigent {version} er ude (du har {current}).",
+ "update_whats_new": "Nyheder",
+ "update_now": "Opdater nu",
+ "update_later": "Senere",
+ "update_skip": "Spring denne version over",
+ "update_running": "Amigent opdateres. Vinduet lukker og åbner igen af sig selv.",
+ "update_done": "Amigent er opdateret.",
+ "update_failed": "Opdateringen virkede ikke. Detaljer i update.log i Amigents indstillingsmappe."
 }

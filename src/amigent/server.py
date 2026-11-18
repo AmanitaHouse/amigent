@@ -11,7 +11,8 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
-from . import gdb, journal, memory, probes, secret, system, uptime, watch
+from . import __version__
+from . import gdb, journal, memory, probes, secret, system, update, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
@@ -63,7 +64,9 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,
-  so the user can take it back with amiga_install_undo."""
+  so the user can take it back with amiga_install_undo.
+- When amiga_status says a newer Amigent is out, tell the user once; only
+  after they agree, amiga_update(apply=True) updates this PC and the Amigas."""
 
 mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
 # One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
@@ -138,6 +141,19 @@ def _others_note() -> str:
 
 
 _outdated_told = False
+_update_told = ""  # the version already mentioned in this session
+
+
+def _update_note() -> str:
+    """Once per session and version: a newer Amigent is out. Looks it up in the background."""
+    global _update_told
+    update.refresh_in_background()  # at most once a day it really asks; the answer is for next time
+    found = update.offer()
+    if not found or found["version"] == _update_told:
+        return ""
+    _update_told = found["version"]
+    return (f"Amigent {found['version']} is out (this PC has {found['current']}). Tell the user; "
+            "amiga_update() shows what is new, amiga_update(apply=True) installs it once they agree.")
 
 
 def _outdated_note() -> str:
@@ -285,6 +301,9 @@ def amiga_status() -> str:
     outdated = pc_outdated(getattr(getattr(ctl, "backend", None), "protocol", 0))
     if outdated:
         report["update_pc"] = outdated
+    newer = _update_note()
+    if newer:
+        report["amigent_update"] = newer
     if "text" in info:
         report["recording"] = {"screen_text": info.get("text") == "1",
                                "debug_output": info.get("debug") == "1"}
@@ -2800,9 +2819,62 @@ def amiga_aminet_install(path: str, target: str) -> str:
             + ", ".join(e["name"] + ("/" if e["type"] == "DIR" else "") for e in top[:30]))
 
 
+@mcp.tool()
+def amiga_update(apply: bool = False, skip: bool = False) -> str:
+    """Is a newer Amigent out? With apply=True, update this PC and then every saved Amiga.
+
+    Without apply it only looks (on PyPI) and tells what is new and what an update
+    would do. Use apply=True only after the user said yes. It runs pipx upgrade
+    amigent, then amigent-setup --update for each Amiga in amigas.json; the user
+    restarts the AI app afterwards to get the new tools. skip=True stops offering
+    this version.
+    """
+    state = update.refresh(force=True)
+    found = update.offer(state)
+    if skip:
+        if found:
+            update.skip(found["version"])
+            return f"Amigent {found['version']} will not be offered again."
+        return "nothing to skip"
+    if not update.enabled():
+        return "The update check is off (python -m amigent.update on)."
+    if not found:
+        latest = state.get("latest") or "unknown (PyPI did not answer)"
+        return f"Amigent {__version__} is the newest; on PyPI: {latest}."
+    amigas = [a["name"] for a in machines.load()]
+    kind = update.how_installed()
+    steps = " ".join(update.command(kind)) or "git pull in the checkout"
+    if not apply:
+        return (f"Amigent {found['version']} is out; this PC has {found['current']}.\n"
+                f"{found['notes'] or 'What is new: ' + found['page']}\n\n"
+                f"Updating runs: {steps}, then amigent-setup --update for "
+                f"{', '.join(amigas) or 'no saved Amiga'}. Ask the user first.")
+    if kind == "source":
+        return f"This Amigent runs from a source checkout: {steps}, then amigent-setup --update."
+    said: list[str] = []
+    _close_for_update()
+    ok = update.apply(amigas, say=said.append)
+    if ok:
+        said.append("Done. Restart the AI app now, and the remote desktop if it is open, "
+                    "so they run the new version.")
+    return "\n".join(said)
+
+
+def _close_for_update() -> None:
+    """Our own connections go, so amigent-setup --update has the Amiga to itself."""
+    try:
+        with _exclusive():
+            ctl.close()
+        with _screen_lock():
+            screen.close()
+    except Exception:  # noqa: BLE001 - nothing to close is fine
+        pass
+
+
 def main() -> None:
     if not HOST:
         raise SystemExit("no Amiga known yet: run amigent-setup, or set AMIGENT_HOST")
+    update.refresh_in_background()
     mcp.run()
 
 

@@ -164,6 +164,19 @@ the PC notices a newer amigentd: the agent's next answer starts with a note,
 `amiga_status` lists it under `update_pc`, and the remote desktop shows a
 message.
 
+From 1.5.0 Amigent notices a new release itself, at most once a day: the AI
+agent mentions it once (`amiga_status` lists it under `amigent_update`) and
+updates both halves with `amiga_update(apply=True)` once you agree; the remote
+desktop shows a card with *Update now*, *Later* and *Skip this version*. *Update
+now* closes the remote desktop, updates the PC and every saved Amiga, renews the
+Start menu entry and opens the remote desktop again; what happened is in
+`update.log` next to `amigas.json`. Both work for pipx and pip installations; a
+source checkout is told to `git pull`. The check asks PyPI for the list of
+releases and the GitHub release for its notes, nothing else: no name, no Amiga,
+no identifier goes out. `python -m amigent.update off` (or
+`AMIGENT_NO_UPDATE_CHECK=1`) switches it off, `python -m amigent.update check`
+asks at once.
+
 Either way key, certificate and the start line in `S:User-Startup` (`TLSONLY`
 included) stay, and so does the copy for `amigent-repair` in the scripts folder,
 which gets the new amigentd too. Should the new amigentd not start, the Amiga
@@ -195,6 +208,7 @@ starts the old one again.
 | `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
 | `amiga_break` | Ctrl-C (or D, E, F) for a running command or a job by its number |
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions; after a crash the guru in words and what happened before |
+| `amiga_update` | is a newer Amigent out, and what is new; with `apply=True` (after the user agrees) updates this PC and every saved Amiga |
 | `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
 | `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` and the vectors below $400 (ExecBase at 4) work too |
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
@@ -416,6 +430,7 @@ settings and menu entries; see
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
 | `AMIGENT_GDB` | | `host:port` of WinUAE's GDB server, when not set as `"gdb"` in `amigas.json` |
 | `AMIGENT_WINUAE` | | WinUAE's program, when not set as `"winuae"` in `amigas.json` |
+| `AMIGENT_NO_UPDATE_CHECK` | | `1` stops looking for new releases (also `python -m amigent.update off`) |
 
 An Amiga's entry in `amigas.json` can also hold `"gdb"`, `"winuae"`,
 `"winuae_config"` (its `.uae` file, for `amiga_emulator("launch")`) and

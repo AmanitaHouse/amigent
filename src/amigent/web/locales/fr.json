@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Image en pause sur l'Amiga, encore {time}. La souris et le clavier fonctionnent toujours.",
  "resume": "Reprendre",
- "pause_failed": "Échec de la pause"
+ "pause_failed": "Échec de la pause",
+ "update_available": "Amigent {version} est disponible (vous avez {current}).",
+ "update_whats_new": "Nouveautés",
+ "update_now": "Mettre à jour",
+ "update_later": "Plus tard",
+ "update_skip": "Ignorer cette version",
+ "update_running": "Mise à jour d'Amigent. La fenêtre se ferme et se rouvre d'elle-même.",
+ "update_done": "Amigent est à jour.",
+ "update_failed": "La mise à jour a échoué. Détails dans update.log, dans le dossier de réglages d'Amigent."
 }

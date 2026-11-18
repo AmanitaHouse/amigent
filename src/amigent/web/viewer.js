@@ -75,6 +75,37 @@
     select.value = store.get("lang", "auto");
   }
 
+  // A newer Amigent: shown once per page, until the user answers.
+  let updateShown = "";
+  function showUpdate(info) {
+    if (!info || !info.version || updateShown === info.version) return;
+    updateShown = info.version;
+    $("update-title").textContent = t("update_available", { version: info.version, current: info.current });
+    $("update-page").href = info.page;
+    const list = $("update-notes");
+    list.replaceChildren();
+    for (const line of (info.notes || "").split("\n").filter(Boolean).slice(0, 5)) {
+      const item = document.createElement("li");
+      item.textContent = line.replace(/^- /, "");
+      list.append(item);
+    }
+    $("update").hidden = false;
+  }
+
+  async function answerUpdate(action) {
+    $("update").hidden = true;
+    const reply = await fetch(api("/api/update"), { method: "POST", body: action }).catch(() => null);
+    if (!reply || !reply.ok) {
+      const said = reply ? (await reply.json().catch(() => ({}))).error : "";
+      if (action === "now") toast(said || t("update_failed"), true);
+      return;
+    }
+    if (action === "now") toast(t("update_running"));
+  }
+  for (const action of ["now", "later", "skip"]) {
+    $(`update-${action}`).addEventListener("click", () => answerUpdate(action));
+  }
+
   function toast(text, bad = false) {
     const el = document.createElement("div");
     el.className = "toast" + (bad ? " bad" : "");
@@ -201,12 +232,17 @@
         reason = m.reason || "";
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
+        if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
+        if (m.update) showUpdate(m.update);
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
         showState();
         break;
       case "size":
         setSize(m.w, m.h);
+        break;
+      case "update":
+        showUpdate(m.update);
         break;
       case "amiga":
         showAmiga(m);

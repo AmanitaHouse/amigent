@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Picture paused on the Amiga, {time} left. Mouse and keys still work.",
  "resume": "Resume",
- "pause_failed": "Pause failed"
+ "pause_failed": "Pause failed",
+ "update_available": "Amigent {version} is out (you have {current}).",
+ "update_whats_new": "What's new",
+ "update_now": "Update now",
+ "update_later": "Later",
+ "update_skip": "Skip this version",
+ "update_running": "Updating Amigent. The window closes and opens again by itself.",
+ "update_done": "Amigent is up to date.",
+ "update_failed": "The update did not work. Details in update.log in the Amigent settings folder."
 }

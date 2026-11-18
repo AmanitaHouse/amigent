@@ -135,5 +135,13 @@
  "pause_15": "15 Min.",
  "paused": "Bild auf dem Amiga angehalten, noch {time}. Maus und Tasten gehen weiter.",
  "resume": "Fortsetzen",
- "pause_failed": "Anhalten fehlgeschlagen"
+ "pause_failed": "Anhalten fehlgeschlagen",
+ "update_available": "Amigent {version} ist da (installiert ist {current}).",
+ "update_whats_new": "Was ist neu",
+ "update_now": "Jetzt aktualisieren",
+ "update_later": "Später",
+ "update_skip": "Diese Version überspringen",
+ "update_running": "Amigent wird aktualisiert. Das Fenster schließt sich und geht von selbst wieder auf.",
+ "update_done": "Amigent ist auf dem neuesten Stand.",
+ "update_failed": "Das Update hat nicht geklappt. Einzelheiten in update.log im Amigent-Einstellungsordner."
 }

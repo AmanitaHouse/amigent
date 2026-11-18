@@ -87,6 +87,16 @@ Both halves, the PC and the Amiga. Paste this into your AI agent:
 
 By hand: [Updating](GUIDE.md#updating) in the guide. Updated only the Amiga,
 with *Amigent-Update*? The PC says so from 1.3.0 on; run the prompt anyway.
+From 1.5.0 Amigent notices a new release by itself and offers the update, in
+the agent and in the remote desktop.
+
+**What does Amigent send to the internet?**
+Nothing about you or your Amiga. From 1.5.0 it asks PyPI, at most once a day,
+which Amigent versions there are, and for a newer one GitHub for its release
+notes: plain requests, as a browser makes them, so those sites see the PC's
+address and nothing else. `python -m amigent.update off` or
+`AMIGENT_NO_UPDATE_CHECK=1` stops it. Aminet is asked only when you or the agent
+search it. There is no tracking.
 
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and

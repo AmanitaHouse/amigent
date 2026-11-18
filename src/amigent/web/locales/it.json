@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Immagine in pausa sull'Amiga, mancano {time}. Mouse e tasti funzionano ancora.",
  "resume": "Riprendi",
- "pause_failed": "Pausa non riuscita"
+ "pause_failed": "Pausa non riuscita",
+ "update_available": "È uscito Amigent {version} (hai {current}).",
+ "update_whats_new": "Novità",
+ "update_now": "Aggiorna ora",
+ "update_later": "Più tardi",
+ "update_skip": "Salta questa versione",
+ "update_running": "Aggiornamento di Amigent in corso. La finestra si chiude e si riapre da sola.",
+ "update_done": "Amigent è aggiornato.",
+ "update_failed": "L'aggiornamento non è riuscito. Dettagli in update.log, nella cartella delle impostazioni di Amigent."
 }

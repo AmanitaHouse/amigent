@@ -201,7 +201,8 @@ class _Handler(TokenHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address"):
+        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address",
+                                                       "/api/update"):
             return self._reply(403, b"forbidden", "text/plain")
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -218,6 +219,11 @@ class _Handler(TokenHandler):
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
             return self._json(200, {})
+        if url.path == "/api/update":
+            try:
+                return self._json(200, self.viewer.update_action(data.decode("utf-8", "replace").strip()))
+            except (OSError, ValueError) as e:
+                return self._json(400, {"error": str(e)})
         if url.path == "/api/clipboard":
             try:
                 self.viewer.write_clipboard(data.decode("utf-8", "replace"))

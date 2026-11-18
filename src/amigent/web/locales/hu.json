@@ -135,5 +135,13 @@
  "pause_15": "15 perc",
  "paused": "A kép szünetel az Amigán, még {time}. Az egér és a billentyűk továbbra is működnek.",
  "resume": "Folytatás",
- "pause_failed": "A szüneteltetés nem sikerült"
+ "pause_failed": "A szüneteltetés nem sikerült",
+ "update_available": "Megjelent az Amigent {version} (önnél {current} van).",
+ "update_whats_new": "Újdonságok",
+ "update_now": "Frissítés most",
+ "update_later": "Később",
+ "update_skip": "Ezt a verziót kihagyom",
+ "update_running": "Az Amigent frissül. Az ablak bezárul, majd magától újra megnyílik.",
+ "update_done": "Az Amigent naprakész.",
+ "update_failed": "A frissítés nem sikerült. A részletek az Amigent beállításmappájában, az update.log fájlban vannak."
 }

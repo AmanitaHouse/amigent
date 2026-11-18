@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Obraz na Amige pozastavený, zostáva {time}. Myš a klávesy fungujú ďalej.",
  "resume": "Pokračovať",
- "pause_failed": "Pozastavenie zlyhalo"
+ "pause_failed": "Pozastavenie zlyhalo",
+ "update_available": "Vyšiel Amigent {version} (máte {current}).",
+ "update_whats_new": "Čo je nové",
+ "update_now": "Aktualizovať",
+ "update_later": "Neskôr",
+ "update_skip": "Túto verziu preskočiť",
+ "update_running": "Amigent sa aktualizuje. Okno sa zavrie a samo sa znova otvorí.",
+ "update_done": "Amigent je aktuálny.",
+ "update_failed": "Aktualizácia sa nepodarila. Podrobnosti sú v update.log v priečinku nastavení Amigentu."
 }

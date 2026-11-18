@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Obraz wstrzymany na Amidze, pozostało {time}. Mysz i klawisze działają dalej.",
  "resume": "Wznów",
- "pause_failed": "Nie udało się wstrzymać"
+ "pause_failed": "Nie udało się wstrzymać",
+ "update_available": "Jest Amigent {version} (masz {current}).",
+ "update_whats_new": "Co nowego",
+ "update_now": "Aktualizuj teraz",
+ "update_later": "Później",
+ "update_skip": "Pomiń tę wersję",
+ "update_running": "Trwa aktualizacja Amigenta. Okno zamknie się i otworzy ponownie samo.",
+ "update_done": "Amigent jest aktualny.",
+ "update_failed": "Aktualizacja się nie udała. Szczegóły w update.log w folderze ustawień Amigenta."
 }

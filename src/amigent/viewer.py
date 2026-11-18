@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines
+from . import __version__, machines, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
@@ -117,6 +117,7 @@ class Viewer:
         self.restart = restart
         self.flush_volumes = list(flush_volumes)
         self.remember = remember
+        self.update_done: dict | None = None  # what the last update from this page said, shown once
         self.token = secrets.token_urlsafe(18)
         self.url = ""
         self.httpd: _Server | None = None
@@ -164,6 +165,9 @@ class Viewer:
             pass
         for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
             threading.Thread(target=target, daemon=True).start()
+        if self.remember:  # the program, not a viewer an agent or the fleet opened
+            self.update_done = update.last_run()
+            update.refresh_in_background(then=self._update_found)
         return self.url
 
     # pages
@@ -175,6 +179,7 @@ class Viewer:
                                 "address": machines.address(self.host), "online": self.online,
                                 "reason": self.reason,
                                 "version": __version__, "amiga": self.amiga,
+                                "update": update.offer(), "update_done": self.update_done,
                                 "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
@@ -209,6 +214,31 @@ class Viewer:
                 ws.send(data)
             except OSError:
                 self.leave(ws)
+
+    # a newer Amigent
+
+    def _update_found(self, found: dict | None) -> None:
+        if found:
+            self.event("update", update=found)
+
+    def update_action(self, action: str) -> dict:
+        """The page's answer to "Amigent x is out": later, skip or now."""
+        found = update.offer()
+        if action == "later":
+            return {}
+        if not found:
+            raise ValueError("no newer Amigent to act on")
+        if action == "skip":
+            update.skip(found["version"])
+            return {}
+        if action != "now":
+            raise ValueError("later, skip or now")
+        if update.how_installed() == "source":
+            raise ValueError("this Amigent runs from a source checkout: update it with git pull")
+        update.start_for_viewer(self.host)
+        # the helper waits for this process to go: close the window's link, then quit
+        threading.Timer(1.5, lambda: os._exit(0)).start()
+        return {"restarting": True}
 
     def event(self, kind: str, **fields) -> None:
         self.broadcast(json.dumps({"type": kind, **fields}))

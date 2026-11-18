@@ -3,6 +3,27 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.5.0 (unreleased)
+
+### Updates
+
+- Amigent notices a new release by itself: at most once a day it asks PyPI
+  which versions there are, in the background and with a short timeout, so an
+  offline PC notices nothing. It sends nothing else.
+- The AI agent hears of a new version once per session, in `amiga_status`.
+  `amiga_update()` tells what is new and what an update would do;
+  `amiga_update(apply=True)`, once the user agrees, runs `pipx upgrade amigent`
+  and then `amigent-setup --update` for every saved Amiga, each in a process of
+  its own, and says what to restart. A pip installation works the same way; a
+  source checkout is told to `git pull`.
+- The remote desktop shows a card with the new version, a few lines of what is
+  new, *Update now*, *Later* and *Skip this version*. *Update now* closes it,
+  updates the PC and the Amigas, renews the Start menu entry or the app on the
+  Mac, and opens the remote desktop again, which then says how it went.
+- `python -m amigent.update check|on|off|apply`; `AMIGENT_NO_UPDATE_CHECK=1`
+  switches the check off
+  ([#15](https://github.com/akustikrausch/amigent/issues/15)).
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Kuva keskeytetty Amigassa, {time} jäljellä. Hiiri ja näppäimet toimivat edelleen.",
  "resume": "Jatka",
- "pause_failed": "Keskeytys epäonnistui"
+ "pause_failed": "Keskeytys epäonnistui",
+ "update_available": "Amigent {version} on julkaistu (sinulla on {current}).",
+ "update_whats_new": "Uutta",
+ "update_now": "Päivitä nyt",
+ "update_later": "Myöhemmin",
+ "update_skip": "Ohita tämä versio",
+ "update_running": "Amigentia päivitetään. Ikkuna sulkeutuu ja avautuu uudelleen itsestään.",
+ "update_done": "Amigent on ajan tasalla.",
+ "update_failed": "Päivitys ei onnistunut. Tiedot ovat update.log-tiedostossa Amigentin asetuskansiossa."
 }

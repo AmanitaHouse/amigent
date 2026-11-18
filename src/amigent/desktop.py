@@ -211,6 +211,18 @@ def _install_mac(host: str) -> list[str]:
     return [str(MAC_APP)]
 
 
+def installed() -> bool:
+    """Is Amigent installed as a program here (Installed apps, ~/Applications)?"""
+    if sys.platform == "darwin":
+        return MAC_APP.exists()
+    if not (_wsl() or sys.platform == "win32"):
+        return False
+    try:
+        return _powershell(f"Test-Path '{REGISTRY}'") == "True"
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
 def install(host: str) -> list[str]:
     """Lay down launcher, shortcuts and the Installed apps entry; returns what landed."""
     if sys.platform == "darwin":

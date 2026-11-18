@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Imagen en pausa en el Amiga, quedan {time}. El ratón y las teclas siguen funcionando.",
  "resume": "Reanudar",
- "pause_failed": "No se pudo pausar"
+ "pause_failed": "No se pudo pausar",
+ "update_available": "Ya está Amigent {version} (tienes {current}).",
+ "update_whats_new": "Novedades",
+ "update_now": "Actualizar ahora",
+ "update_later": "Más tarde",
+ "update_skip": "Omitir esta versión",
+ "update_running": "Actualizando Amigent. La ventana se cierra y se vuelve a abrir sola.",
+ "update_done": "Amigent está al día.",
+ "update_failed": "La actualización no funcionó. Detalles en update.log, en la carpeta de ajustes de Amigent."
 }

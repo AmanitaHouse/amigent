@@ -135,5 +135,13 @@
  "pause_15": "15 min",
  "paused": "Bilden är pausad på Amigan, {time} kvar. Mus och tangenter fungerar fortfarande.",
  "resume": "Fortsätt",
- "pause_failed": "Pausen misslyckades"
+ "pause_failed": "Pausen misslyckades",
+ "update_available": "Amigent {version} finns (du har {current}).",
+ "update_whats_new": "Nyheter",
+ "update_now": "Uppdatera nu",
+ "update_later": "Senare",
+ "update_skip": "Hoppa över den här versionen",
+ "update_running": "Amigent uppdateras. Fönstret stängs och öppnas igen av sig självt.",
+ "update_done": "Amigent är uppdaterat.",
+ "update_failed": "Uppdateringen fungerade inte. Detaljer i update.log i Amigents inställningsmapp."
 }

@@ -24,6 +24,16 @@ Versions follow [semver](https://semver.org). The number lives in
   switches the check off
   ([#15](https://github.com/akustikrausch/amigent/issues/15)).
 
+### Repair
+
+- `amigent-setup --update` renews `amigent-repair` and its helper scripts in
+  the Amigent folder. They used to stay as the first installation left them,
+  so a repair after a system update could run a script from many versions ago.
+- `amigent-setup --update --spare FOLDER` keeps a second Amigent folder on
+  another disk: the scripts (repairing from that folder), this amigentd, the
+  key, the certificate and the repair modules. The Amiga remembers it, and
+  every later update renews it too.
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

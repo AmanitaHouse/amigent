@@ -129,3 +129,45 @@ def test_a_home_that_cannot_be_written_does_not_stop_the_update(run, capsys):
         s.AmigaChannel = s_channel
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
     assert "not copied" in capsys.readouterr().out
+
+
+def test_the_repair_scripts_are_renewed_for_their_folder(run, capsys):
+    amiga = Amiga()
+    amiga.files["Work:amigent/amigent-repair"] = b"; a repair script from the first installation\n"
+    assert run(amiga, home="Work:amigent") == 0
+    script = amiga.files["Work:amigent/amigent-repair"].decode("iso-8859-1")
+    assert "Set SRC Work:amigent" in script and "SYS:amigent" not in script
+    assert "Protect Work:amigent/amigent-repair +s" in amiga.commands
+    assert "renewed in Work:amigent: amigent-repair" in capsys.readouterr().out
+
+
+def test_the_scripts_wait_until_the_new_amigentd_runs(run):
+    amiga = Amiga(outcome=b"old")
+    amiga.files["SYS:amigent/amigent-repair"] = b"old script\n"
+    assert run(amiga) == 1
+    assert amiga.files["SYS:amigent/amigent-repair"] == b"old script\n"
+
+
+def test_a_current_amigentd_still_gets_its_scripts_renewed(run):
+    amiga = Amiga(installed=(AMIGA / "bin" / "amigentd").read_bytes())
+    assert run(amiga) == 0
+    assert b"Set SRC SYS:amigent" in amiga.files["SYS:amigent/amigent-repair"]
+
+
+def test_a_spare_folder_repairs_from_itself_and_is_remembered(monkeypatch):
+    monkeypatch.setattr(setup.time, "sleep", lambda s: None)
+    amiga = Amiga()
+    monkeypatch.setattr(setup, "AmigaChannel", channel_for(amiga))
+    assert setup.update("192.0.2.1", "Work:amigent", "Backup:amigent") == 0
+    assert b"Set SRC Backup:amigent" in amiga.files["Backup:amigent/amigent-repair"]
+    assert amiga.files["Backup:amigent/amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert 'Echo >ENVARC:amigent-spare "Backup:amigent"' in amiga.commands
+    assert "Copy >NIL: Work:amigent/amigent.key Backup:amigent/ CLONE QUIET" in amiga.commands
+    assert "Copy >NIL: Work:amigent/repair.d/#? Backup:amigent/repair.d/ CLONE QUIET" in amiga.commands
+    # the next update finds the spare by itself
+    amiga.files["ENVARC:amigent-spare"] = b"Backup:amigent\n"
+    amiga.files["ENVARC:amigent-home"] = b"Work:amigent\n"
+    amiga.files["Backup:amigent/amigent-repair"] = b"stale\n"
+    amiga.files["C:amigentd"] = b"old amigentd"
+    assert setup.update("192.0.2.1", None) == 0
+    assert b"Set SRC Backup:amigent" in amiga.files["Backup:amigent/amigent-repair"]

@@ -118,14 +118,79 @@ WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-
 UPDATE_WAIT = 180.0
 
 
+def _noted(channel, name: str) -> str:
+    """A folder name amigent-setup left in ENVARC: (amigent-home, amigent-spare), or ''."""
+    try:
+        return channel.read_file(f"ENVARC:{name}").decode("iso-8859-1").strip()
+    except AmigaError:
+        return ""
+
+
+def _put_if_new(channel, target: str, data: bytes) -> bool:
+    try:
+        if channel.read_file(target) == data:
+            return False
+    except AmigaError:
+        pass
+    channel.write_file(target, data)
+    return True
+
+
+def update_scripts(channel, folder: str) -> None:
+    """amigent-repair and its helpers as this version has them, for this folder.
+
+    They used to stay as the first installation left them: a repair after a
+    system update then ran a script that knew nothing of what came since.
+    """
+    changed = []
+    for name in SCRIPTS:
+        text = (AMIGA / name).read_text(encoding="iso-8859-1").replace("SYS:amigent", folder)
+        if _put_if_new(channel, f"{folder}/{name}", text.encode("iso-8859-1")):
+            changed.append(name)
+    if "amigent-repair" in changed:
+        channel.exec(f"Protect {folder}/amigent-repair +s")
+    if changed:
+        print(f"renewed in {folder}: {', '.join(changed)}")
+
+
+SPARE_COPIES = ("amigent.key", "amigent-tls.pem", "amigent.tlsonly")
+
+
+def update_spare(channel, home: str, spare: str, amigentd: bytes) -> None:
+    """A second Amigent folder on another disk, for when the first is gone: the same
+    scripts (repairing from there), this amigentd, key, certificate and repair modules."""
+    try:
+        channel.exec(f"MakeDir >NIL: {spare}")
+        update_scripts(channel, spare)
+        if _put_if_new(channel, f"{spare}/amigentd", amigentd):
+            print(f"renewed in {spare}: amigentd")
+        channel.exec(f"Protect >NIL: {spare}/amigentd +rwed")
+        channel.exec(f"Copy >NIL: {home}/amigent-repair.info {spare}/ CLONE QUIET")
+        for name in SPARE_COPIES:
+            channel.exec(f"Copy >NIL: {home}/{name} {spare}/ CLONE QUIET")
+        channel.exec(f"MakeDir >NIL: {spare}/repair.d")
+        channel.exec(f"Copy >NIL: {home}/repair.d/#? {spare}/repair.d/ CLONE QUIET")
+    except AmigaError as e:  # a disk that is away or full must not stop the update
+        print(f"  the spare folder {spare} was not renewed: {e}")
+
+
+def update_folders(channel, home: str | None, spare: str | None, amigentd: bytes) -> None:
+    """Everything next to C:amigentd: the Amigent folder and, if there is one, its spare."""
+    home = home or _noted(channel, "amigent-home") or "SYS:amigent"
+    if spare:
+        channel.exec(f'Echo >ENVARC:amigent-spare "{spare}"')
+    spare = spare or _noted(channel, "amigent-spare")
+    try:
+        update_scripts(channel, home)
+    except AmigaError as e:
+        print(f"  the scripts in {home} were not renewed: {e}")
+    if spare and spare.rstrip("/").lower() != home.rstrip("/").lower():
+        update_spare(channel, home, spare, amigentd)
+
+
 def update_windows(channel, home: str | None) -> None:
     """amigent-status and amigent-monitor into the Amigent folder, where they differ."""
-    if not home:
-        try:
-            home = channel.read_file("ENVARC:amigent-home").decode("iso-8859-1").strip()
-        except AmigaError:
-            home = ""
-    home = home or "SYS:amigent"
+    home = home or _noted(channel, "amigent-home") or "SYS:amigent"
     for name in WINDOWS:
         local = AMIGA / "bin" / name
         if not local.exists():
@@ -146,7 +211,7 @@ def update_windows(channel, home: str | None) -> None:
             return
 
 
-def update(host: str, home: str | None) -> int:
+def update(host: str, home: str | None, spare: str | None = None) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
     try:
@@ -162,6 +227,7 @@ def update(host: str, home: str | None) -> int:
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
         update_windows(channel, home)
         if channel.read_file("C:amigentd") == new:
+            update_folders(channel, home, spare, new)
             print(f"amigentd on {host} is already the one from Amigent {__version__}.")
             channel.close()
             return 0
@@ -192,8 +258,10 @@ def update(host: str, home: str | None) -> int:
                 return 0 if done == b"reboot" else 1
             version = channel.exec("Version C:amigentd").output.strip()
             channel.exec("Delete >NIL: T:amigent-update.done T:amigent-update.rexx QUIET")
+            print()
+            update_folders(channel, home, spare, new)  # only now: the new amigentd has proved itself
             channel.close()
-            print(f"\nDone: {version}, protocol {channel.protocol}.")
+            print(f"Done: {version}, protocol {channel.protocol}.")
             return 0
         except AmigaError:
             channel.close()
@@ -218,11 +286,14 @@ def main() -> int:
     parser.add_argument("--name", help="what to call this Amiga (default: Amiga, or the name it has)")
     parser.add_argument("--allow-plain", action="store_true",
                         help="keep unencrypted connections from other computers even when TLS works")
+    parser.add_argument("--spare", metavar="FOLDER",
+                        help="with --update: keep a second Amigent folder on another disk (scripts, amigentd, "
+                        "key, repair modules), to repair from when the first is gone; remembered")
     parser.add_argument("--update", action="store_true",
                         help="replace the amigentd that already runs with this version's, by network")
     args = parser.parse_args()
     if args.update:
-        return update(machines.address(machines.pick(args.host or "")), args.home)
+        return update(machines.address(machines.pick(args.host or "")), args.home, args.spare)
     args.home = args.home or "SYS:amigent"
     if args.serve:
         from .serve import serve

@@ -8035,7 +8035,10 @@ static BOOL listen_on(UWORD port)
     LONG one = 1, tries;
     BOOL running;
 
-    for (tries = 0; tries < 30 && !broken(); tries++) {
+    /* After an amigentd that served many connections quits, the TCP stack can
+     * keep its port taken (EADDRINUSE, SO_REUSEADDR or not) for about a minute
+     * (seen with AmiNetXDuo): 90 s. */
+    for (tries = 0; tries < 45 && !broken(); tries++) {
         listener = socket(AF_INET, SOCK_STREAM, 0);
         if (listener >= 0) {
             setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));

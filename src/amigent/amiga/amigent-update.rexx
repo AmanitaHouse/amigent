@@ -38,7 +38,8 @@ if show('P', 'AMIGENT') then call finish 'busy', 'The running amigentd did not s
 call swap
 say 'Starting the new amigentd...'
 address command line
-do 15 until show('P', 'AMIGENT'); address command 'Wait 1'; end
+/* the old one's port can stay taken for a minute; the new one tries for 90 s */
+do 100 until show('P', 'AMIGENT'); address command 'Wait 1'; end
 if ~show('P', 'AMIGENT') then do
   address command 'Copy C:amigentd.old C:amigentd QUIET'
   address command line

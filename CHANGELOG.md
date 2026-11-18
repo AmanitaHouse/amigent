@@ -126,6 +126,15 @@ Wishes from measuring window dragging on a real A1200:
   The library calls amigentd declares itself (AmiSSL) and `cmp_longs()` have
   GCC versions; vbcc builds as before. See GUIDE.md, Building amigentd. (#7)
 
+### Updating
+
+- Replacing a running amigentd (Amigent-Update, `amigent-setup --update`)
+  failed when the old one had served many connections: the TCP stack
+  (AmiNetXDuo here) keeps the port taken for about a minute after it quits,
+  while the new amigentd tried for 60 s and the script waited 15 s for it,
+  then put the old one back. The new amigentd now tries for 90 s, the script
+  waits 100 s and `amigent-setup --update` 180 s. (#8)
+
 ### Fixes
 
 - `amiga_status` also recognizes a second kind of AI development bridge on the

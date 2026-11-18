@@ -157,6 +157,7 @@ working as before; the new features need both.
     "The Amiga froze. What was it?"
     "Which AHI driver is really loaded?"
     "Find out whether my program leaks memory."
+    "Windows stutter when I drag them. Find out what holds things up."
 
 ## Made for slow machines and slow wires
 
@@ -209,6 +210,8 @@ All numbers, how they were taken and how to repeat them are in
 - **Developing for the Amiga?** The agent builds and runs your program and
   reads its kprintf and Enforcer output, and keeps a copy of a growing log on
   the PC that survives a crash.
+- **A hang, a stutter, a guru?** The agent tells what a task waits for, who
+  holds a lock, how much CPU each task takes, and what a guru code means.
 - **Running a test or a benchmark?** *Pause the picture* in the remote desktop
   (or `PAUSE` by ARexx) gives the Amiga's CPU back to it for a while; mouse,
   keys and files keep working.

@@ -7,6 +7,7 @@ Usage: make_icon.py repair OUT.info      project icon that runs a script through
        make_icon.py status OUT.info      tool icon for the amigent-status window
        make_icon.py update OUT.info      project icon for Amigent-Update, through IconX
        make_icon.py monitor OUT.info     tool icon for the amigent-monitor window
+       make_icon.py guide OUT.info       project icon for Amigent.guide, through MultiView
 Layout from the icon.library DiskObject structure and the GlowIcon IFF chunks.
 """
 
@@ -42,6 +43,20 @@ def update_pixel(x: int, y: int) -> int:
     head = 5 <= y < 16 and abs(x - 19.5) <= (y - 5) + 0.5
     shaft = 16 <= y < 27 and 16 <= x < 24
     return 2 if head or shaft else 3
+
+
+def guide_pixel(x: int, y: int) -> int:
+    """A white page (2) with a black border (1), a blue title bar and blue lines of text (3)."""
+    if not (6 <= x < 34):
+        return 0
+    if x in (6, 33) or y in (0, HEIGHT - 1):
+        return 1
+    if 3 <= y < 7 and 9 <= x < 31:
+        return 3
+    lines = {10: 28, 13: 24, 16: 30, 19: 20, 22: 27, 25: 23}
+    if y in lines and 10 <= x < lines[y]:
+        return 3
+    return 2
 
 
 def monitor_pixel(x: int, y: int) -> int:
@@ -161,13 +176,15 @@ def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types:
 
 def main() -> None:
     if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status", "update",
-                                                    "monitor"):
+                                                    "monitor", "guide"):
         raise SystemExit(__doc__)
     if sys.argv[1] == "repair":
         data = disk_object(WBPROJECT, planes(repair_pixel), b"C:IconX\0", [], 4096)
     elif sys.argv[1] == "update":
         data = disk_object(WBPROJECT, planes(update_pixel), b"C:IconX\0",
                            ["WINDOW=CON:40/40/600/200/Amigent update/CLOSE"], 8192)
+    elif sys.argv[1] == "guide":
+        data = disk_object(WBPROJECT, planes(guide_pixel), b"SYS:Utilities/MultiView\0", [], 8192)
     elif sys.argv[1] == "drawer":
         rows = amigent_pixels()
         data = disk_object(WBDRAWER, planes(lambda x, y: rows[y][x]), None, [], 0) + glow_icon()

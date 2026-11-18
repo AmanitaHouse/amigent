@@ -4,7 +4,8 @@ Usage: make_release.py HOST
 
 Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
 Writes dist/amigent.lha with an Amigent drawer: amigentd (68020),
-amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe and the licence,
+amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe, Amigent.guide
+and the licence,
 and next to it amigent.readme for Aminet. Aminet wants the version in the
 readme, not in the file name: uploading amigent.lha again replaces the last one.
 The same archive goes to the GitHub release as amigent-<version>.lha.
@@ -13,6 +14,7 @@ The same archive goes to the GitHub release as amigent-<version>.lha.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,9 +172,24 @@ NEW IN THIS VERSION
 - Before and after a program: memory, open libraries, tasks and ports
   compared, so leaks show. Screens compared with a saved picture.
 - New C programs set up and built on the Amiga with vbcc.
+- A hang or a stutter: what a task waits for with the calls on its stack,
+  who holds the layer locks, the CPU load per task measured on the Amiga,
+  and how closely a dragged window follows the mouse, in milliseconds.
+- A "Software Failure" requester is read, explained and answered with
+  Suspend, never Reboot.
 - From the PC, an Amiga in WinUAE 6.1 can be debugged from outside through
   the emulator's GDB server, saved whole before an installation, and its
   custom chips read (Paula, copper, sprites).
+- ZZ9000: the screen is read through the card's own encoder, not over the
+  Zorro bus. A look at a screen where little changed takes 55 ms instead
+  of 0.7 s on a 68060 (firmware 2.9.0, zz9k.library 2).
+- amigentd gives its screen memory back when nobody is watching (767 KB on
+  an A1200), amigent-monitor draws without flicker, and packing no longer
+  slows down a fast line.
+- Restart from the remote desktop also on Kickstart 2.x; updating a busy
+  amigentd no longer fails; amigentd builds with GCC as well as vbcc.
+- Thanks to kaffeine1, midwan, reinauer and AmanitaHouse for their pull
+  requests.
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
 
@@ -197,9 +214,9 @@ INSTALLATION
    puts Amigent into the Start menu (Windows) or Applications (macOS).
 
 A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
-SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY, ALLOWPOKE. amigentd answers ARexx on the
-port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
-TYPE, KEY, BUSY, HELP, QUIT).
+SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY, ALLOWPOKE. amigentd answers
+ARexx on the port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME,
+ACTIVATEWINDOW, TYPE, KEY, BUSY, HELP, QUIT).
 
 
 UPDATING FROM AN EARLIER AMIGENT
@@ -244,6 +261,222 @@ Licence: MIT.
 """
 
 
+# The same help as an AmigaGuide document, for MultiView. Lines stay short: the
+# guide is also read on a 640 pixel Workbench.
+GUIDE_NODES = [
+    ("MAIN", f"Amigent {__version__}", """
+@{b}Amigent@{ub}: a remote desktop for your real Amiga, and an AI agent that
+can work on it, both from a PC or Mac over the home network.
+
+This drawer is the Amiga half. The PC or Mac half is a Python package
+that comes from the internet.
+
+  @{" Installation       " link INSTALL}  the first time
+  @{" Updating           " link UPDATE}  from an earlier Amigent
+  @{" amigentd           " link AMIGENTD}  tool types and Shell arguments
+  @{" ARexx              " link AREXX}  the port AMIGENT
+  @{" amigent-monitor    " link MONITOR}  watch what the agent does
+  @{" amigent-status     " link STATUS}  who is connected
+  @{" What the agent does" link AGENT}  and what is new
+  @{" If it doesn't work " link TROUBLE}  the usual causes
+  @{" Requirements       " link NEEDS}
+  @{" Security           " link SECURITY}
+  @{" Licence            " link LICENCE}
+
+Source, the full guide and the wire protocol:
+https://github.com/akustikrausch/amigent
+"""),
+    ("INSTALL", "Installation", """
+@{b}On the Amiga@{ub}
+
+1. Copy this drawer to the Amiga, for example to RAM:.
+2. Double-click amigentd, or run "amigentd SETUP" in a Shell.
+   On a plain 68000 take amigentd.000 instead.
+
+It now waits for the PC. Nothing is installed yet.
+
+@{b}On the PC or Mac@{ub}
+
+3. Paste this into your AI agent (Claude, Codex or any other MCP
+   client):
+
+     Install Amigent from https://github.com/akustikrausch/amigent
+     for me.
+
+   The agent installs the Python package, finds the Amiga on the
+   network, copies amigentd to C:, adds it to S:User-Startup, gives it
+   a key and sets up the remote desktop as a program.
+
+   Without an AI agent, in a terminal:
+
+     pipx install amigent
+     amigent-setup
+     amigent-viewer --install
+
+After that amigentd starts with the Amiga, and this drawer is no longer
+needed, except for @{"amigent-monitor" link MONITOR} and @{"amigent-status" link STATUS}.
+"""),
+    ("UPDATE", "Updating from an earlier Amigent", """
+Amigent has two halves, amigentd on the Amiga and the program on the PC
+or Mac. Update both. Easiest: paste this into your AI agent:
+
+  Update Amigent for me, both halves: run "pipx upgrade amigent" on
+  this computer, then "amigent-setup --update" for the amigentd on my
+  Amiga. Then tell me to restart you, so you get the new tools.
+
+@{b}By hand, from the PC or Mac@{ub}
+
+  pipx upgrade amigent
+  amigent-setup --update
+
+@{b}By hand, on the Amiga@{ub}
+
+Double-click Amigent-Update in this drawer (it needs ARexx, RexxMast).
+Then run "pipx upgrade amigent" on the PC or Mac.
+
+Afterwards restart the AI app and the remote desktop. Key, certificate
+and the start line in S:User-Startup stay. Should the new amigentd not
+start, the old one starts again; the update waits up to a minute and a
+half for the network port to become free.
+
+One side alone keeps working as before; the new features need both.
+"""),
+    ("AMIGENTD", "amigentd", """
+amigentd is the small service that does the work on the Amiga. Setup
+copies it to C: and starts it from S:User-Startup.
+
+Tool types of the icon, and the same words as Shell arguments:
+
+  @{b}SETUP@{ub}        accept the first installation from the PC
+  @{b}KEY=<file>@{ub}   the key file, default S:amigent.key
+  @{b}PORT=<n>@{ub}     the TCP port, default 6801 (TLS on the next one)
+  @{b}QUIET@{ub}        no output
+  @{b}TLSONLY@{ub}      only encrypted connections from other computers
+  @{b}ALLOWPOKE@{ub}    let the agent write memory (off unless given)
+
+Ctrl-C ends it, and so does QUIT on its @{"ARexx port" link AREXX}.
+
+amigentd.000 is the build for a plain 68000. A Vampire's 68080 runs the
+plain amigentd.
+"""),
+    ("AREXX", "ARexx", """
+amigentd answers on the port @{b}AMIGENT@{ub}:
+
+  STATUS                   one line on its state
+  CLIENTS                  who is connected
+  VERSION                  name, version and date
+  PAUSE <seconds>          stop all screen reading for that long, so a
+                           test or a benchmark has the CPU to itself
+  RESUME                   end the pause
+  ACTIVATEWINDOW <pattern> bring a window to the front
+  TYPE <text>              type into it through your keymap; keys in
+                           angle brackets: <return>, <ctrl c>
+  KEY <name>               press one key
+  BUSY                     whether a menu or a popup holds Intuition up
+  HELP                     this list
+  QUIT                     end amigentd
+
+From a Shell:  rx "address AMIGENT; 'STATUS'; say result"
+"""),
+    ("MONITOR", "amigent-monitor", """
+A window that shows, line by line, what the agent does on this Amiga:
+the tools it calls, commands, files, clicks and keys, next to the data
+rates, totals and free memory.
+
+Tool types: NAME=<your name> for the greeting, WIDTH, HEIGHT, LEFT, TOP,
+FONT, SIZE. The window can be sized and zoomed. Esc or the close gadget
+ends it, C clears the log.
+
+While the agent measures how windows move, the monitor stays still, so
+it doesn't spoil the measurement.
+"""),
+    ("STATUS", "amigent-status", """
+A small window with amigentd's state and its connections, refreshed
+every 2 seconds. Tool type: PORT=<name> of the ARexx port to watch,
+default AMIGENT.
+"""),
+    ("AGENT", "What the agent does", """
+Through the remote desktop you use the Amiga yourself from the PC or
+Mac: live screen, mouse, keyboard, files in both directions, one
+clipboard.
+
+An AI agent (Claude, Codex or any other MCP client) works the same way,
+while you watch: it runs commands, copies files, installs software and
+can take an installation back, clicks through programs, reads the
+screen as text, fetches programs from Aminet, and builds and tests C
+programs on the Amiga.
+
+@{b}New in this version@{ub}
+
+- After a crash it puts the guru in words and knows what ran before.
+- It sees what really runs: libraries, devices and drivers in memory,
+  programs with their hunks, every task with priority and stack.
+- It reads memory as hex, text or 68k code and names any address.
+- Tracepoints in a program you test; several background jobs at once.
+- A hang or a stutter: what a task waits for, who holds the layer
+  locks, the CPU load per task, how a dragged window follows the mouse.
+- On a ZZ9000 the screen is read through the card's own encoder.
+- amigentd gives its screen memory back when nobody is watching.
+
+All tools are listed in the guide on the project page.
+"""),
+    ("TROUBLE", "If it doesn't work", """
+@{b}The PC doesn't find the Amiga@{ub}
+Is the TCP/IP stack running, and does the Amiga have an address? Ping
+it from the PC. Then give the address: amigent-setup <address>.
+
+@{b}"refused the key"@{ub}
+The key on the PC and S:amigent.key on the Amiga differ. Run
+"amigentd SETUP" on the Amiga and amigent-setup on the PC again.
+
+@{b}The remote desktop keeps trying@{ub}
+From 1.4.0 the page and the terminal say why. Small things work but a
+whole screen never arrives: a network driver that drops large packets.
+
+@{b}A new window doesn't open@{ub}
+A menu or a popup is open and holds Intuition up. Press Esc.
+
+@{b}After an update the new tools are missing@{ub}
+Restart the AI app; it reads the list of tools when it starts.
+
+More in the FAQ on the project page.
+"""),
+    ("NEEDS", "Requirements", """
+AmigaOS 2.04 or newer, any CPU from the 68000 on, a network connection
+with a TCP/IP stack that has bsdsocket.library (a plipbox on the
+parallel port is enough). Encrypted connections need OS 3.0 and AmiSSL
+5.1 or newer. Amigent-Update needs ARexx (RexxMast).
+
+On the PC or Mac: Windows, macOS or Linux with Python 3.10 or newer.
+"""),
+    ("SECURITY", "Security", """
+amigentd asks every connection for a key that amigent-setup creates,
+and with AmiSSL it encrypts the connection with TLS, pinned to the
+certificate made for this Amiga. With TLSONLY it takes nothing else
+from other computers.
+
+Keep it in your home network; do not open its port to the internet.
+"""),
+    ("LICENCE", "Licence", """
+MIT, see the file LICENSE in this drawer.
+
+Andreas Wendorf (Akustikrausch)
+https://github.com/akustikrausch/amigent
+"""),
+]
+
+
+def amiga_guide(date: str) -> str:
+    """The AmigaGuide document; date as in a version string, 18.11.2026."""
+    out = ["@database Amigent.guide", f"@$VER: Amigent.guide {__version__} ({date})",
+           "@author Andreas Wendorf", "@remark made by scripts/make_release.py", ""]
+    for name, title, body in GUIDE_NODES:
+        out += [f'@node {name} "{title}"', *([] if name == "MAIN" else ['@toc MAIN']), body.strip("\n"), "@endnode", ""]
+    text = "\n".join(out)
+    assert all(len(line) <= 100 for line in text.splitlines()), "keep guide lines short"
+    return text
+
+
 def aminet_readme() -> str:
     text = AMINET_HEAD + AMINET_BODY
     short = text.splitlines()[0].split(":", 1)[1].strip()
@@ -279,6 +512,8 @@ def main() -> None:
     for name, source in files.items():
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
+    ctl.write_file(f"{folder}/Amigent.guide", amiga_guide(time.strftime("%d.%m.%Y")).encode("iso-8859-1"))
+    ctl.write_file(f"{folder}/Amigent.guide.info", (amiga / "Amigent.guide.info").read_bytes())
     ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
     for name in ("amigentd", "amigentd.000", "amigent-status", "amigent-monitor"):
         if name in files:

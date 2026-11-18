@@ -120,9 +120,12 @@ Wishes from measuring window dragging on a real A1200:
   custom chips as the emulator keeps them: Paula's four channels with sample,
   length, rate and volume, the copper list decoded, sprites and DMA.
 
-### README
+### README and help
 
 - Set up in three steps at the top, and a diagram of how the parts fit.
+- The Amiga archive has an AmigaGuide help, `Amigent.guide`, next to the
+  ReadMe: installation, updating, tool types, ARexx, the monitor, what to
+  check when it doesn't work.
 
 ### Building
 

@@ -63,10 +63,13 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     host is a name or an address. No answer there? One sweep of the local
     network, and the Amiga is picked up again at its new address.
     """
+    host = roster.identity(host)
     address = roster.address(host)  # machines is only rung when the line stays dead
     try:
         return _dial(address, host, port, timeout)
     except (OSError, ssl.SSLError):
+        if not roster.is_id(host):
+            raise  # a one-off address must never change the saved registry
         moved = machines.relocate(host)
         if not moved or moved == address:
             raise
@@ -104,7 +107,7 @@ def make_certificate(host: str) -> tuple[bytes, bytes] | None:
 
 def remember(host: str, certificate: bytes) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = FOLDER / f"tls-{safe(host)}.pem"
+    path = FOLDER / f"tls-{safe(roster.identity(host))}.pem"
     path.write_bytes(certificate)
     return path
 

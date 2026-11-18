@@ -88,7 +88,7 @@ def test_job_numbers_continue_after_those_in_ram(monkeypatch):
         def list_dir(self, path):
             return [{"name": "amigent-job-4.cmd"}, {"name": "amigent-job-9.out"},
                     {"name": "amigent-job-2.cmd"}]
-    monkeypatch.setattr(server, "ctl", Ctl())
+    monkeypatch.setattr(server._session(), "ctl", Ctl())
     monkeypatch.setattr(server, "_with_ctl", lambda f: f())
     monkeypatch.setattr(server._session(), "job_numbers", [])
     assert server._known_jobs() == [2, 4]

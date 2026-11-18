@@ -138,7 +138,9 @@ are serialized. Screen caches, connections, background log followers and
 window tracking stay with their machine; there is no shared active-machine
 switch. An omitted `machine` uses `AMIGENT_HOST` first, then the saved default,
 then the sole registered machine. If several machines have no unique default,
-pass the name or ID explicitly. Single-machine results retain their usual format.
+pass the name or ID explicitly. Default-target calls retain their usual output and JSON format.
+With several machines registered, an explicit target adds its name and address
+to the reply. `amiga_everywhere` runs on all registered machines.
 
 `AMIGENT_POWER_CMD` remains bound to the machine named by `AMIGENT_HOST` when
 multiple machines are registered. It cannot switch another machine's outlet.

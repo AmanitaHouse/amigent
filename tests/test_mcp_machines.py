@@ -286,3 +286,49 @@ with open(sys.argv[1], "a+b") as handle:
             assert locked(sb.lock_file + suffix)
             assert not locked("amigent.lock" + ("" if screen else ".screen"))
     assert not locked("amigent.lock" + suffix)
+
+
+def test_default_reply_is_json_with_two_registered_machines(two, monkeypatch):
+    a, b, sa, sb = two
+    monkeypatch.setattr(sa.ctl, "sysinfo", lambda: {}, raising=False)
+    monkeypatch.setattr(sb.ctl, "sysinfo", lambda: {}, raising=False)
+    reply = asyncio.run(server.mcp.call_tool("amiga_link", {}))
+    content, _ = reply
+    assert json.loads(content[0].text)["mode"] == "auto"
+    explicit = server.amiga_link(machine=b["name"])
+    assert explicit.startswith(f"{b['name']} ({b['host']}):")
+    with pytest.raises(TypeError):
+        server.amiga_exec()
+
+
+def test_jobs_and_emulator_connections_belong_to_the_target(two, monkeypatch):
+    a, b, sa, sb = two
+    monkeypatch.setattr(server, "_known_jobs", lambda: [])
+    monkeypatch.setenv("AMIGENT_GDB", "127.0.0.1:2345")
+    server.sessions.configured = a["id"]
+    monkeypatch.setattr(server.gdb, "Gdb", lambda endpoint: object())
+    with bound(sa):
+        assert server._next_job() == 1
+        conn = server._emulator()
+    with bound(sb):
+        assert server._next_job() == 1
+        with pytest.raises(AmigaError, match="no emulator debugger"):
+            server._emulator()
+        assert server._install_checkpoint("example") == ""
+    rows = roster.load()
+    rows[1]["gdb"] = "127.0.0.1:2346"
+    roster.save(rows)
+    with bound(sb):
+        assert server._emulator() is not conn
+    with bound(sa):
+        assert server._next_job() == 2 and server._emulator() is conn
+
+
+def test_everywhere_uses_both_sessions_without_selecting_a_target(two):
+    a, b, sa, sb = two
+    sa.ctl.barrier = sb.ctl.barrier = threading.Barrier(2)
+    answer = server.amiga_everywhere("Version")
+    assert "2 different results" in answer
+    for entry in (a, b):
+        assert entry["name"] in answer and entry["id"] in answer
+    assert active.get() is None

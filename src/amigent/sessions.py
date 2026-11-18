@@ -132,5 +132,5 @@ class Sessions:
                 pack.policy_for(host, mode=entry.get('compress') if entry else None)
                 self._sessions[host] = session
             name = entry['name'] if entry else target
-            label = f"{name} ({address})" if len(entries) > 1 else ""
+            label = f"{name} ({address})" if machine and len(entries) > 1 else ""
             return session, label

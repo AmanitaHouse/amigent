@@ -413,27 +413,31 @@ def compare_runs(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: float = RUN_TIMEOUT) -> list[dict]:
+def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: float = RUN_TIMEOUT,
+                   *, execute=None) -> list[dict]:
     """One AmigaDOS line on every known Amiga at once, each on a channel of its own."""
     amigas = amigas if amigas is not None else machines.load()
 
-    def one(entry: dict) -> dict:
-        target = entry.get("id", entry["host"])
-        commands = None
+    def run_command(target, command, timeout):
+        machines.address(target)
+        commands = Commands(target)
         try:
-            machines.address(target)
-            commands = Commands(target)
-            result = commands.exec(command, timeout=timeout)
+            return commands.exec(command, timeout=timeout)
+        finally:
+            try:
+                commands.close()
+            except OSError:
+                pass
+
+    run = execute or run_command
+
+    def one(entry: dict) -> dict:
+        try:
+            result = run(entry.get("id", entry["host"]), command, timeout)
             return {"name": entry["name"], "ok": True, "rc": result.rc,
                     "output": result.output[-OUTPUT_LIMIT:]}
         except (OSError, AmigaError, AmigentdError, EOFError) as e:
             return {"name": entry["name"], "ok": False, "error": str(e) or type(e).__name__}
-        finally:
-            try:
-                if commands:
-                    commands.close()
-            except Exception:  # noqa: BLE001
-                pass
 
     if not amigas:
         return []

@@ -1145,7 +1145,14 @@ def amiga_everywhere(command: str, timeout: float = 120) -> str:
     amigas = machines.load()
     if len(amigas) < 1:
         raise AmigaError("no Amigas known; amigent-fleet --add NAME ADDRESS")
-    return fleet.compare_runs(fleet.run_everywhere(command, amigas, timeout))
+
+    def execute(target, command, timeout):
+        session, _ = sessions.resolve(target)
+        with session.calls, bound(session):
+            session.refresh_address()
+            return _with_ctl(lambda: session.ctl.exec(command, timeout=timeout))
+
+    return fleet.compare_runs(fleet.run_everywhere(command, amigas, timeout, execute=execute))
 
 
 GURU_LOGS = ("S:GuruHistory", "S:Guru.log", "ENVARC:GuruHistory")
@@ -1185,9 +1192,16 @@ def amiga_gurus(code: str = "") -> str:
 
 
 
+def _emulator_endpoint():
+    entry = machines.find(_session().host) or {}
+    if entry.get("gdb"):
+        return entry["gdb"]
+    if _process_target():
+        return os.environ.get("AMIGENT_GDB")
+
+
 def _emulator() -> "gdb.Gdb":
-    where = (machines.find(_session().host) or {}).get("gdb") if _session().host else None
-    where = where or os.environ.get("AMIGENT_GDB")
+    where = _emulator_endpoint()
     if not where:
         raise AmigaError("no emulator debugger set: for an Amiga in WinUAE 6.1 on this PC put "
                          '"gdb": "127.0.0.1:2345" into its entry in amigas.json (or AMIGENT_GDB), '
@@ -1222,8 +1236,11 @@ def _launch_emulator(config: str, disk: str = "") -> str:
     old = _session().gdb.get("proc")
     if old and old.poll() is None:
         raise AmigaError(f"the emulator Amigent started runs already (pid {old.pid}); quit it first")
-    where = (machines.find(_session().host) or {}).get("gdb") if _session().host else None
-    where = where or os.environ.get("AMIGENT_GDB") or "127.0.0.1:2345"
+    where = _emulator_endpoint()
+    if not where:
+        if not _process_target():
+            raise AmigaError("Set a gdb endpoint for this machine in amigas.json before launching WinUAE.")
+        where = "127.0.0.1:2345"
     port = gdb.parse_address(where)[1]
     config = config or ((machines.find(_session().host) or {}).get("winuae_config") if _session().host else "") or ""
     if not config:
@@ -2068,12 +2085,15 @@ def amiga_restart() -> str:
     return f"Amiga restarted; it came back without network, so the power was cycled ({attempts}x)"
 
 
-def _power_available():
-    if not power_available():
-        return False
+def _process_target():
+    """Whether this session owns single-host environment settings."""
     if sessions.configured:
         return machines.identity(sessions.configured) == _session().host
     return len(machines.load()) <= 1
+
+
+def _power_available():
+    return power_available() and _process_target()
 
 
 @mcp.tool()
@@ -2637,7 +2657,7 @@ def amiga_install_begin(name: str, folders: str = "", system: bool = True) -> st
 
 def _install_checkpoint(name: str) -> str:
     """With an emulator debugger set, the whole machine as a state file as well."""
-    if not (((machines.find(_session().host) or {}).get("gdb") if _session().host else None) or os.environ.get("AMIGENT_GDB")):
+    if not _emulator_endpoint():
         return ""
     target = _checkpoint_folder() / f"install-{name}.uss"
     try:

@@ -2650,10 +2650,17 @@ static void free_pictures(void)
 }
 
 /* The screen client went away of itself (closed, broke off or fell silent)
- * and no newcomer took its place. */
+ * and no newcomer took its place. ready() also returns failure when a
+ * newcomer has already asked for the screen, and that must not throw away
+ * the picture the newcomer still needs. */
 static void lose_client(void)
 {
+    LONG i;
+
     drop_client();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0 && pend[i].screen)
+            return;
     free_pictures();
 }
 

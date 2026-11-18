@@ -103,6 +103,9 @@ Wishes from measuring window dragging on a real A1200:
   to, and `amigent-viewer` prints each change in the terminal. Before, every
   failure looked like a hang
   ([#4](https://github.com/akustikrausch/amigent/issues/4)).
+- Restart on an Amiga older than OS 3.0 without `C:Reboot`: the viewer
+  flushes the disks and holds Ctrl and both Amiga keys; amigentd sees the
+  three keys down and calls ColdReboot(). Needs the 1.4.0 amigentd. (#14)
 
 ### Emulators
 
@@ -172,6 +175,12 @@ Wishes from measuring window dragging on a real A1200:
   SYSINFO says `zz9000=1` when the last look went through the card. Numbers in
   PERFORMANCE.md. (#6)
 
+### Monitor
+
+- amigent-monitor draws its updates into a bitmap of its own and copies only
+  what changed into the window, so the side panel no longer flickers when it
+  is redrawn. Without the memory for it, it draws directly as before. (#11)
+
 ### Fixes
 
 - `amiga_status` also recognizes a second kind of AI development bridge on the
@@ -191,6 +200,11 @@ Wishes from measuring window dragging on a real A1200:
   only the changes. (#5)
 - QUIT and Ctrl-C free the planar picture (the bitplanes of a chipset screen)
   as well; it was left behind. (#5)
+
+### Thanks
+
+To kaffeine1, midwan, reinauer and AmanitaHouse for the pull requests in this
+release.
 
 ## 1.3.0 (2026-11-09)
 

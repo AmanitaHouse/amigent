@@ -249,6 +249,7 @@ interrupted copy.
   as the Amiga keys), screenshot as PNG, and a restart that writes pending data
   to disk first. On a Workbench older than 3.0 with no `C:Reboot`, that restart
   sends Ctrl and both Amiga keys instead; they have to go down within five seconds.
+  `ColdReboot()` needs exec 36, so Kickstart 1.3 does not reset this way.
 - **Pause the picture.** *Pause the picture* in the panel stops the Amiga
   reading its screen for 1, 5 or 15 minutes, so a test, a benchmark or a demo
   has the CPU and the chip bus to itself. The window keeps the last picture and

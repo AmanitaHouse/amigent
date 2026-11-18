@@ -217,6 +217,22 @@ def test_os2_uses_kickstart_when_sysinfo_has_no_exec():
     assert [op["code"] for op in viewer.inputs.take()] == [0x63, 0x66, 0x67]
 
 
+def test_the_viewer_chord_follows_exec_39_not_the_coldreboot_guard():
+    """Missing C:Reboot sends the chord below exec 39, including 34 and 35.
+
+    ColdReboot() itself needs exec 36, so Kickstart 1.3 does not reset.
+    """
+    from amigent.errors import AmigaError
+
+    missing = AmigaError("object not found", 205)
+    for version in ("34.5", "35.0", "36.16", "38.35"):
+        viewer, seen = _restart_of(missing, {"exec_version": version})
+        assert seen["restart"] == 0, version
+        assert [op["code"] for op in viewer.inputs.take()] == [0x63, 0x66, 0x67], version
+    viewer, seen = _restart_of(missing, {"exec_version": "39.106"})
+    assert seen["restart"] == 1 and viewer.inputs.take() == []
+
+
 def test_os3_without_reboot_still_uses_the_command_path():
     from amigent.errors import AmigaError
 

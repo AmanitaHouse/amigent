@@ -47,9 +47,10 @@ port. Encryption needs OS 3.0 with AmiSSL. On a 1 MB machine the chipset screen
 goes out as bitplanes, which needs no extra memory; the full-colour region tool
 may refuse there for lack of memory. Workbench 2.04 has no `C:Reboot`, so
 `amiga_restart` says so instead of restarting; copy `C:Reboot` over from a newer
-Workbench, or restart by hand. Restart in the remote desktop does send Ctrl and
+Workbench, or restart by hand. Restart in the remote desktop sends Ctrl and
 both Amiga keys when that command is missing and exec is older than 3.0. The
-three have to go down within five seconds, and amigentd calls `ColdReboot()`.
+three have to go down within five seconds. amigentd calls `ColdReboot()` only
+when exec is 36 or newer, so Kickstart 1.3 (exec 34 or 35) does not reset.
 
 **What about PowerPC: AmigaOS 4, MorphOS, or a PPC board?**
 A PowerPC board (WarpOS or PowerUP) on a classic Amiga is fine: amigentd runs on

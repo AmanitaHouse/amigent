@@ -1,7 +1,8 @@
-"""The released reset-chord decision, compiled from amigentd.c and run here.
+"""The reset chord compiled from amigentd.c and driven through do_input.
 
-The harness provides ColdReboot as a counter. It is the host compiler, not
-the Apollo one, and it never links an Amiga reset.
+note_reset_chord, key and do_input are the daemon's own text. The harness
+provides ColdReboot as a counter. It is the host compiler, not the Apollo
+one, and it never links an Amiga reset.
 """
 
 import itertools
@@ -23,16 +24,32 @@ def _host_gcc() -> str:
     return gcc
 
 
-def _decision() -> str:
+def _between(code: str, start: str, end: str) -> str:
+    at = code.index(start)
+    return code[at:code.index(end, at)]
+
+
+def _dispatch() -> str:
+    """The command enum, the chord, key() and do_input(), cut from the daemon."""
     code = SOURCE.read_text(encoding="latin-1")
-    start = code.index("/* 0x63 control, 0x66 left Amiga")
-    end = code.index("static void key(UBYTE code, BOOL down, UWORD qualifier)")
-    part = code[start:end]
-    if "ColdReboot();" not in part or "#define CHORD_MS 5000" not in part:
+    enum_at = code.index("enum {\n    CMD_INFO = 1")
+    enum = code[enum_at:code.index("};", enum_at) + 2]
+    decision = _between(code, "/* 0x63 control, 0x66 left Amiga", "static BOOL type_char")
+    dispatch = _between(code, "static UBYTE do_input(const UBYTE *c)",
+                        "/* Bytes from the screen client")
+    if decision.count("ColdReboot();") != 1 or "#define CHORD_MS 5000" not in decision:
         raise AssertionError("the daemon no longer has the released chord")
-    if "ReadEClock" in part or "drop_client" in part:
-        raise AssertionError("the extracted chord is not the decision alone")
-    return part
+    if "note_reset_chord(code, down);" not in decision:
+        raise AssertionError("key() no longer reports the chord")
+    if "key(x & 0x7F, c[1] & 1, y);" not in dispatch:
+        raise AssertionError("RAWKEY no longer reaches key()")
+    if "ReadEClock" in decision or "ReadEClock" in dispatch or "drop_client" in dispatch:
+        raise AssertionError("the extract picked up more than the input path")
+    if "if (is_input(c[0]))\n        return reply(do_input(c));" not in code:
+        raise AssertionError("command() does not dispatch input through do_input()")
+    if "acks[nacks++] = do_input(in_cmd);" not in code:
+        raise AssertionError("a screen command in flight does not reach do_input()")
+    return enum + "\n" + decision + "\n" + dispatch
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +59,7 @@ def harness(tmp_path_factory):
     src = folder / "chord.c"
     src.write_text(
         (ROOT / "tests/c/chord_harness_prelude.h").read_text(encoding="utf-8")
-        + _decision()
+        + _dispatch()
         + (ROOT / "tests/c/chord_harness_main.c").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
@@ -50,7 +67,10 @@ def harness(tmp_path_factory):
     text = src.read_text(encoding="utf-8")
     assert text.count("ColdReboot();") == 1
     assert text.count("void ColdReboot(void)") == 1
+    assert text.count("note_reset_chord(") == 2  # the daemon's definition and key()
+    assert "do_input(packet)" in text
     assert "reboots++" in text
+    assert "ReadEClock" not in text and "proto/exec.h" not in text
     exe = folder / "chord"
     done = subprocess.run(
         [gcc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O2", "-o", str(exe), str(src)],
@@ -256,3 +276,44 @@ def test_the_harness_binary_is_not_an_amiga_executable(harness):
     assert "m68k" not in source
     assert source.count("void ColdReboot(void)") == 1
     assert source.count("ColdReboot();") == 1
+    main = (ROOT / "tests/c/chord_harness_main.c").read_text(encoding="utf-8")
+    assert "note_reset_chord(" not in main
+
+
+def test_qualifiers_on_other_keys_do_not_reset(harness):
+    # The three Amiga qualifier bits, including all of them together, are not
+    # the chord. Only the raw key codes are.
+    script = "\n".join([
+        "version 37",
+        "time 1000",
+        "qual c8",
+        "down 45",
+        "time 1100",
+        "qual c8",
+        "down 40",
+        "time 1200",
+        "qual 1c8",
+        "down 42",
+        "count",
+    ]) + "\n"
+    assert run(harness, script) == [0]
+
+
+def test_viewer_packets_reset_through_do_input(harness):
+    import struct
+
+    from amigent.amigentd import reset_chord
+    from amigent.screenfeed import commands
+
+    lines = ["version 37"]
+    ms = 1000
+    for op in reset_chord():
+        for cmd in commands(op, 640, 256):
+            packet = struct.pack(">BBHHHH", cmd[0], cmd[1], cmd[2], cmd[3], 0, 0)
+            assert len(packet) == 10
+            lines.append(f"time {ms}")
+            lines.append("packet " + packet.hex())
+            ms += 50
+    lines += ["count", "events"]
+    # Three input events are posted, and the third completes one reset.
+    assert run(harness, "\n".join(lines) + "\n") == [1, 3]

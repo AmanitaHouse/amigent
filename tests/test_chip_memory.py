@@ -337,8 +337,8 @@ console.log(JSON.stringify({
 
 def test_packaged_apollo_executable_is_the_tested_one():
     data = APOLLO_BIN.read_bytes()
-    assert len(data) == 108300
-    assert hashlib.sha256(data).hexdigest() == "f8f54dbd6d7302786a9de450abdd97f4dd3c84b711c3f77939263a4d6d8db6d4"
+    assert len(data) == 108464
+    assert hashlib.sha256(data).hexdigest() == "f2377a1542310b88f9fa7d42313cfa61ae90dc51e95c8448f98968918c4e7dc0"
 
 
 def test_viewer_assets_are_package_data():

@@ -91,7 +91,7 @@ def test_sdist_list_has_native_sources_and_not_the_wheel_extras():
 
 
 APPROVED = {
-    "amigentd.apollo": (108300, "f8f54dbd6d7302786a9de450abdd97f4dd3c84b711c3f77939263a4d6d8db6d4"),
+    "amigentd.apollo": (108464, "f2377a1542310b88f9fa7d42313cfa61ae90dc51e95c8448f98968918c4e7dc0"),
     "amigent-monitor": (22604, "bcadce2fbae29c2c5b25db398739d50e2a07dd388c9690b5033130d92bb79acf"),
 }
 CLASSIC = {

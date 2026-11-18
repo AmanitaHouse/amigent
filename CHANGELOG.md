@@ -120,6 +120,12 @@ Wishes from measuring window dragging on a real A1200:
 
 - Set up in three steps at the top, and a diagram of how the parts fit.
 
+### Building
+
+- amigentd also builds with GCC (`m68k-amigaos-gcc -noixemul`), next to vbcc.
+  The library calls amigentd declares itself (AmiSSL) and `cmp_longs()` have
+  GCC versions; vbcc builds as before. See GUIDE.md, Building amigentd. (#7)
+
 ### Fixes
 
 - `amiga_status` also recognizes a second kind of AI development bridge on the

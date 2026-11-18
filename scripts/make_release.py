@@ -153,32 +153,40 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-- Scripts on the Amiga can bring a window to the front and type into it
-  through the ARexx port: ACTIVATEWINDOW, TYPE and KEY.
-- A drive that isn't there makes a command fail at once instead of opening
-  an "insert volume" requester that waits for someone at the Amiga.
-- Games and programs on 256-colour graphics card screens come through in
-  their real colours in the remote desktop and in screenshots.
-- After a lost connection the AI agent learns whether the Amiga started
-  again and which guru code it kept.
-- An open menu or a popup left open on the desktop, which holds back every
-  new window, is noticed; the AI agent closes the popup before it starts a
-  program.
-- The AI agent reads the text on the screen instead of taking a picture
-  where text is enough, and waits on the Amiga for a window or a text.
-- Data travel packed when the Amiga packs faster than its network carries,
-  such as a PiStorm behind a plipbox: several times as fast.
-- amigent-monitor, a window on the Amiga, shows line by line what the AI
-  agent does, with the traffic of the link; it fits an A500 screen too and
-  can be sized.
-- The AI agent moves and sizes windows by mouse movement, as a hand would,
-  so drag bars, size gadgets and programs that follow the mouse react.
-- Other AI agent bridges on the same Amiga, such as amimcp, are noticed and
-  reported before the first click; nothing of theirs is touched.
-- Installations can be taken back; Aminet archives install from the PC,
-  disk images (.adf, .adz) included.
-- kprintf and Enforcer output reach the AI agent (start amigentd with
-  NOTEXT or NODEBUG to leave the recording out).
+AmanitaHouse fork prerelease 1.3.1rc1. Not an upstream 1.4.0 release, and
+not a replacement for the published 1.3.0 packages. This release does not
+fix the outstanding audio-acquisition deficit. The reset-chord change from
+upstream PR #14 is not in this release.
+
+- Replacing a running amigentd waits longer for the old TCP port. The
+  packaged amigentd.apollo tries for 90 seconds. Amigent-Update waits 100
+  seconds, and amigent-setup --update waits 180 seconds. The packaged
+  amigentd and amigentd.000 are earlier binaries and do not have that
+  retry. An ordinary update was run on ApolloOS V4-SA. A long wait, and a
+  rollback when the new daemon never appears, were not.
+- The packaged amigentd.apollo returns the memory of its screen pictures
+  when the screen client leaves and no other client takes over. On
+  ApolloOS V4-SA that was one connect, disconnect, reconnect and takeover,
+  not a long run. The packaged amigentd and amigentd.000 still keep those
+  pictures until they quit.
+- Packing is timed per screen, and the faster of packed or unpacked is
+  used. A slow screen no longer leaves command packing on. A packing mode
+  stays while another Amigent process for the same Amiga is running. The
+  live decision and the mode handoff were run on ApolloOS V4-SA. A forced
+  refusal for lack of memory was not.
+- amigent-monitor draws each update in a backing bitmap and copies the
+  changed rectangle into the window. If that bitmap cannot be allocated,
+  it draws into the window as before. That failure was not forced. The
+  window was shown on ApolloOS V4-SA. AmigaOS 2 and AmigaOS 3 were not
+  run, so this monitor build is untested there. Install and update copy
+  this one file on every machine.
+
+Phase 8D recorded one client-side TLS record-layer failure while this
+daemon was installed. The client did not open a plaintext session. A
+second reported bad record mac is not in the preserved records of that
+run. No daemon crash was recorded, and a candidate-specific TLS
+regression was not established. This release does not show that TLS
+reliability matches the known-good daemon.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS

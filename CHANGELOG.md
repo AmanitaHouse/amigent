@@ -1,9 +1,45 @@
 # changelog
 
-Versions follow [semver](https://semver.org). The number lives in
-`src/amigent/__init__.py`, everything else reads it from there.
+Versions follow [semver](https://semver.org). Package metadata uses the
+PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc1`.
+The number lives in `src/amigent/__init__.py`, and everything else reads
+it from there.
 
-## Unreleased
+## 1.3.1rc1 (2026-11-19)
+
+AmanitaHouse fork prerelease. The package version is `1.3.1rc1`. This is
+not an upstream 1.4.0 release, and it does not replace the published 1.3.0
+packages. The packaged Apollo daemon and monitor are the executables Phase
+8D ran. Their `$VER` strings still say 1.3.0, because those files were not
+rebuilt. This release does not fix the outstanding audio-acquisition
+deficit. The reset-chord change from upstream PR #14 is not in this release.
+
+Phase 8D checked the five changes below on one ApolloOS V4-SA: an ordinary
+update, one screen connect, disconnect, reconnect and takeover, the live
+packing decision, a packing-mode handoff, and the monitor window.
+
+What that run leaves open:
+
+- AmigaOS 2 and AmigaOS 3 compatibility of this monitor build is untested.
+  The code uses a friend bitmap on OS 3 and chip bitplanes on OS 2. The
+  window was shown on ApolloOS.
+- The packaged `amigentd` and `amigentd.000` are the earlier binaries. They
+  do not contain the 90-second port retry or the screen-picture release.
+- A long port-release wait, and an update that has to put the old daemon
+  back because the new one never appears, were not exercised.
+- A forced packing refusal for lack of memory, and a failed allocation of
+  the monitor's backing bitmap, were not exercised.
+- Screen-buffer lifetime was checked for that one connect, disconnect,
+  reconnect and takeover, not over a long run.
+
+Phase 8D recorded one client-side TLS record-layer failure
+(`RECORD_LAYER_FAILURE` from `monitor_once()`, raised as
+`TlsHandshakeFailed`) while the candidate daemon was installed. The client
+closed the socket and did not open a plaintext session. A second reported
+`bad record mac` is in the Phase 8D narrative and is not in the preserved
+session records of that run. No daemon crash was recorded. A
+candidate-specific TLS regression was not established, and this release
+does not show that TLS reliability matches the known-good daemon.
 
 ### Updating
 
@@ -16,6 +52,8 @@ Versions follow [semver](https://semver.org). The number lives in
   `amigentd.apollo`. The packaged `amigentd` and `amigentd.000` are earlier
   binaries and do not have it. The longer waits in the script and in setup
   apply on every machine, whichever of those binaries the installer copies.
+  The ordinary update was run on ApolloOS V4-SA. The long wait and the
+  rollback path were not.
 
 ### Fixes
 
@@ -28,13 +66,16 @@ Versions follow [semver](https://semver.org). The number lives in
   gets only the changes. QUIT and Ctrl-C also free the planar picture, which
   used to be left behind. Those native frees are in the packaged
   `amigentd.apollo`. The packaged `amigentd` and `amigentd.000` are earlier
-  binaries and still keep the pictures until they quit.
+  binaries and still keep the pictures until they quit. On ApolloOS V4-SA this
+  was one connect, disconnect, reconnect and takeover.
 - amigent-monitor composes each update in a backing bitmap and copies the
   changed rectangle into the window, so clearing the sidebar is not shown.
   OS 3 and RTG use a friend bitmap; OS 2 uses chip bitplanes. If that
   allocation fails, it draws straight into the window as before. The packaged
   `amigent-monitor` is this build. Install and update copy that one file on
-  every machine.
+  every machine. The window was shown on ApolloOS V4-SA. AmigaOS 2 and
+  AmigaOS 3 were not run, and a failed backing-bitmap allocation was not
+  forced.
 
 ### Packing
 
@@ -44,13 +85,16 @@ Versions follow [semver](https://semver.org). The number lives in
   every line measurement. A save now keeps the mode link.json has, and a
   running process follows it from its next save, unless its mode came from
   `AMIGENT_COMPRESS` or amigas.json. Switching packing off because the Amiga
-  refused it for lack of memory stays until someone chooses a mode.
+  refused it for lack of memory stays until someone chooses a mode. That
+  refusal was not forced on hardware. The mode handoff was run on ApolloOS
+  V4-SA.
 - Screens are timed on their own, packed and unpacked, and the faster way is
   used. A screen no longer counts as a line sample, so a slow screen cannot
   switch packing on for good: the other way is tried once, then one screen in
   thirty. A packed command reply can still raise the line estimate, and it
   cannot start one or lower it. The time for that reply runs from when the
-  request went out, so packing done before the answer is counted.
+  request went out, so packing done before the answer is counted. The live
+  decision was run on ApolloOS V4-SA.
 - Mode and line estimates share one save. It follows a mode another process
   stored, then replaces link.json whole. A screen measurement does not write
   the file, so it cannot put a stale startup mode back, and packing switched

@@ -155,7 +155,9 @@ def test_release_files_selects_the_packaged_apollo_daemon_and_monitor():
     assert "amigentd.080" not in files
     for name in (*APPROVED, *CLASSIC):
         _assert_native(files[name].read_bytes(), name)
-    module.aminet_readme()
+    readme = module.aminet_readme()
+    assert "\nVersion:      1.3.1rc1\n" in readme
+    assert module.__version__ == "1.3.1rc1"
 
 
 def test_release_files_reads_the_package_directory_not_build(tmp_path):
@@ -193,6 +195,16 @@ def _archive_names(path: Path) -> dict[str, bytes]:
         return found
 
 
+def _declared_version(names: dict[str, bytes]) -> str:
+    metas = [data for name, data in names.items()
+             if name.endswith("/METADATA") or name.endswith("/PKG-INFO")]
+    assert len(metas) == 1, [name for name in names if name.endswith("METADATA") or name.endswith("PKG-INFO")]
+    for line in metas[0].decode("utf-8").splitlines():
+        if line.startswith("Version:"):
+            return line.split(":", 1)[1].strip()
+    raise AssertionError("package metadata has no Version field")
+
+
 def _native_member(names: dict[str, bytes], filename: str) -> bytes:
     matches = [data for name, data in names.items() if name.endswith(f"amiga/bin/{filename}")]
     assert len(matches) == 1, filename
@@ -227,13 +239,14 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
         members = _archive_names(archive)
         for name in (*APPROVED, *CLASSIC):
             _assert_native(_native_member(members, name), name)
+        assert _declared_version(members) == "1.3.1rc1"
         if archive.suffix == ".whl":
             assert not any("/native/" in name or name.startswith("native/") for name in members)
-            assert archive.name.startswith("amigent-1.3.0-")
+            assert archive.name.startswith("amigent-1.3.1rc1-")
         else:
             assert any(name.endswith("src/native/amiga/daemon/amigentd.c") for name in members)
             assert any(name.endswith("src/native/amiga/tools/amigent-monitor.c") for name in members)
-            assert archive.name.startswith("amigent-1.3.0.")
+            assert archive.name.startswith("amigent-1.3.1rc1.")
         joined = "\n".join(members)
         for banned in EXCLUDED:
             assert banned not in joined, (archive.name, banned)
@@ -265,6 +278,8 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
          "print(len(plain), hashlib.sha256(plain).hexdigest())\n"
          "import os\n"
          "from pathlib import Path\n"
+         "from amigent import __version__\n"
+         "print(__version__)\n"
          "print(Path(AMIGA).resolve() == Path(os.environ['AMIGENT_EXPECT']).resolve())\n"],
         capture_output=True, text=True, env=env)
     assert probe.returncode == 0, probe.stderr
@@ -273,7 +288,8 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
     assert lines[1] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
     assert lines[2] == f"{CLASSIC['amigentd'][0]} {CLASSIC['amigentd'][1]}"
     assert lines[3] == f"{CLASSIC['amigentd.000'][0]} {CLASSIC['amigentd.000'][1]}"
-    assert lines[4] == "True"
+    assert lines[4] == "1.3.1rc1"
+    assert lines[5] == "True"
 
 
 def test_editable_install_reads_the_corrected_source_tree(tmp_path):
@@ -305,7 +321,9 @@ def test_editable_install_reads_the_corrected_source_tree(tmp_path):
          "monitor = AMIGA / 'bin' / 'amigent-monitor'\n"
          "print(apollo.resolve())\n"
          "print(len(apollo.read_bytes()), hashlib.sha256(apollo.read_bytes()).hexdigest())\n"
-         "print(len(monitor.read_bytes()), hashlib.sha256(monitor.read_bytes()).hexdigest())\n"],
+         "print(len(monitor.read_bytes()), hashlib.sha256(monitor.read_bytes()).hexdigest())\n"
+         "from amigent import __version__\n"
+         "print(__version__)\n"],
         cwd=tmp_path, env=env, capture_output=True, text=True)
     assert probe.returncode == 0, probe.stderr
     lines = probe.stdout.splitlines()
@@ -313,6 +331,7 @@ def test_editable_install_reads_the_corrected_source_tree(tmp_path):
     assert Path(lines[0]) == expected
     assert lines[1] == f"{APPROVED['amigentd.apollo'][0]} {APPROVED['amigentd.apollo'][1]}"
     assert lines[2] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
+    assert lines[3] == "1.3.1rc1"
 
 
 def test_build_log_redirection_stays_inside_one_bash_argument():

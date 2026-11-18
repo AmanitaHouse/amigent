@@ -3,7 +3,7 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
-## 1.4.0 (unreleased)
+## 1.4.0 (2026-11-18)
 
 ### After a crash
 

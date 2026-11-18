@@ -53,8 +53,9 @@ class Policy:
         self.path = path or _file()
         stored = self._stored()
         self.chosen = stored.get("mode") or ""  # set by hand with set_mode, kept
-        self.mode = (mode or os.environ.get("AMIGENT_COMPRESS") or stored.get("mode") or "auto")
-        self.mode = self.mode.strip().lower()
+        given = mode or os.environ.get("AMIGENT_COMPRESS")
+        self._given = bool(given)  # by the caller or the environment: link.json doesn't change it
+        self.mode = (given or stored.get("mode") or "auto").strip().lower()
         if self.mode not in MODES:
             self.mode = "auto"
         self.rates: dict[str, int] = {}
@@ -70,8 +71,9 @@ class Policy:
         mode = mode.strip().lower()
         if mode not in MODES:
             raise ValueError(f"packing is one of {', '.join(MODES)}")
-        self.mode = self.chosen = mode
-        self._save()
+        with _saving:  # a save under way must not read the old mode, then write it back
+            self.mode = self.chosen = mode
+            self._save(chose=True)
 
     # what the Amiga said
 
@@ -174,18 +176,38 @@ class Policy:
         except (OSError, ValueError, AttributeError):
             return {}
 
-    def _save(self) -> None:
-        try:
+    def _save(self, chose: bool = False) -> None:
+        with _saving:
             try:
-                everything = json.loads(self.path.read_text())
-            except (OSError, ValueError):
-                everything = {}
-            everything[self.name] = {"kbs": round(self.line_kbs or 0, 1), "mode": self.chosen,
-                                     "at": int(time.time())}
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(everything))
-        except OSError:
-            pass  # only the next session's first guess is lost
+                try:
+                    everything = json.loads(self.path.read_text())
+                except (OSError, ValueError):
+                    everything = {}
+                if not isinstance(everything, dict):
+                    everything = {}
+                if not chose:
+                    # Another process (the remote desktop, another session) may have set
+                    # the mode since this one read it: keep it, and go by it here too.
+                    theirs = everything.get(self.name)
+                    if isinstance(theirs, dict) and isinstance(theirs.get("mode", ""), str):
+                        self._follow(theirs.get("mode", "").strip().lower())
+                everything[self.name] = {"kbs": round(self.line_kbs or 0, 1), "mode": self.chosen,
+                                         "at": int(time.time())}
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text(json.dumps(everything))
+            except OSError:
+                pass  # only the next session's first guess is lost
+
+    def _follow(self, chosen: str) -> None:
+        """The mode link.json has now, set with set_mode by whoever it was."""
+        if chosen == self.chosen or (chosen and chosen not in MODES):
+            return  # nobody chose anew: this process's mode stays, also "off" for lack of memory
+        self.chosen = chosen
+        if not self._given:
+            self.mode = chosen or "auto"
+
+
+_saving = threading.RLock()  # set_mode and saves, from the screen and command threads
 
 
 _policies: dict[str, Policy] = {}

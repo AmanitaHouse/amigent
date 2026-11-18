@@ -237,6 +237,36 @@ def test_line_is_measured_and_kept(tmp_path):
     assert round(pack.Policy("B", "10.0.0.3", path=tmp_path / "l.json").line_kbs) == 32
 
 
+def test_a_mode_chosen_elsewhere_survives_and_is_followed(tmp_path):
+    """Two sessions on one Amiga: the one that didn't choose must not write its old
+    mode back over the new one, and goes by the new one from its next save on."""
+    path = tmp_path / "l.json"
+    pack.Policy("A", "10.0.0.2", path=path).set_mode("best")
+    agent, viewer = (pack.Policy("A", "10.0.0.2", path=path) for _ in range(2))
+    viewer.set_mode("auto")
+    agent.note(64 * 1024, 0.1)  # a measurement: agent saves
+    assert json.loads(path.read_text())["A"]["mode"] == "auto"
+    assert agent.mode == "auto"
+    fixed = pack.Policy("A", "10.0.0.2", mode="off", path=path)  # AMIGENT_COMPRESS, say
+    viewer.set_mode("best")
+    fixed.note(64 * 1024, 0.1)
+    assert fixed.mode == "off" and json.loads(path.read_text())["A"]["mode"] == "best"
+
+
+def test_off_for_lack_of_memory_stays_until_someone_chooses(tmp_path):
+    """The channel switches packing off when the Amiga has no memory for it; a save
+    must not switch it back on just because link.json still says what it said."""
+    path = tmp_path / "l.json"
+    p = pack.Policy("A", "10.0.0.2", path=path)
+    p.note(64 * 1024, 0.1)
+    p.mode = "off"  # what AmigaChannel._sync_packing does when COMPRESS is refused
+    p.note(64 * 1024, 0.1)
+    assert p.mode == "off"
+    pack.Policy("A", "10.0.0.2", path=path).set_mode("fast")  # a choice by hand
+    p.note(64 * 1024, 0.1)
+    assert p.mode == "fast"
+
+
 def test_unknown_rates_never_pack(tmp_path):
     p = pack.Policy("C", "127.0.0.1", path=tmp_path / "l.json")
     assert p.level() == 0 and p.line() == pack.LOCAL_LINE

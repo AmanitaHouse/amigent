@@ -27,6 +27,16 @@ Versions follow [semver](https://semver.org). The number lives in
   gets only the changes. QUIT and Ctrl-C also free the planar picture, which
   used to be left behind.
 
+### Packing
+
+- A packing mode set with `amiga_link` (or `set_mode`) stays when another
+  amigent process for the same Amiga is still running. Each process used to
+  keep the mode it read at its start and write it back into link.json with
+  every line measurement. A save now keeps the mode link.json has, and a
+  running process follows it from its next save, unless its mode came from
+  `AMIGENT_COMPRESS` or amigas.json. Switching packing off because the Amiga
+  refused it for lack of memory stays until someone chooses a mode.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

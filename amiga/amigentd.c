@@ -826,6 +826,584 @@ static void read_rgb(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE
     }
 }
 
+/* ---- ZZ9000 ------------------------------------------------------------- */
+
+/* A ZZ9000 keeps its graphics card screen in the card's memory, so every read
+ * of it crosses the Zorro bus: a 1280x720 Workbench took a 68060 over a second
+ * to look at, changed or not. The ARM on the card has a console encoder
+ * (zz9k.library, service 0x8200, written for AmiNetXDuo's web console) that
+ * compares the screen with what it told its client last time and answers with
+ * the tiles that changed: PackBits, XOR with the old tile, or a scroll. amigentd
+ * keeps what it was told in mirror, at one or two bytes a pixel, and puts what
+ * changed into cur. A quiet screen then costs a few calls to the card instead
+ * of reading it. On anything unexpected the screen is read the usual way and
+ * the next pass asks the card for the whole picture again.
+ *
+ * The encoder serves one client at a time. If AmiNetXDuo's console takes it,
+ * the next answer is a whole picture, which this handles like any other. */
+
+struct Library *ZZ9KBase;
+
+#define ZZ_SERVICE 0x8200UL  /* the console encoder, and its one opcode */
+#define ZZ_CODEC 0x0600UL    /* the codec service; its first opcode inflates */
+#define ZZ_CODEC_ZLIB (1UL << 17)  /* service flag: zlib streams */
+#define ZZ_ZLIB 2            /* ZZ9K_COMPRESSION_ZLIB */
+#define ZZ_EXPECT_END 1      /* decompress flag: the input is the whole stream */
+#define ZZ_FB_HANDLE 0x80000000UL  /* ZZ9K_SURFACE_HANDLE_FRAMEBUFFER: whatever the card shows */
+#define ZZ_SURF_INDEX8 4     /* SDK surface formats */
+#define ZZ_SURF_BGRA8888 7
+#define ZZ_RFB_CLUT8 1       /* encoder formats */
+#define ZZ_RFB_RGB565 2
+#define ZZ_TILE_W 32         /* encoder tile: bytes */
+#define ZZ_TILE_H 16         /* rows */
+#define ZZ_ENC_FLAGS 0x7FUL  /* PackBits, XOR, changed planes, best of, scroll, only after a busy frame, runs of 2 */
+#define ZZ_RESET 1           /* request flag: start from black */
+#define ZZ_KEYFRAME 1        /* answer flag: this started from black */
+#define ZZ_DEFLATED 1        /* message flag: the ops are zlib */
+#define ZZ_OK 0              /* ZZ9K_STATUS_OK */
+#define ZZ_QUEUED 1          /* ZZ9K_STATUS_QUEUED */
+#define ZZ_WAIT_MS 2000      /* an answer later than this: the card is left alone */
+#define ZZ_GIVE_UP 3         /* failed passes in a row before the card is left alone */
+#define ZZ_SHARE_MS 30000    /* another client of the encoder twice this close: leave it the card this long */
+#define ZZ_BAND 15           /* tile rows a call at most: every call holds up the card's other work */
+
+/* zz9k.library's own structures, from the ZZ9000 SDK's zz9k/host.h, abi.h and
+ * library.h. */
+struct zz_entry {
+    ULONG request_id;
+    UWORD opcode, status, flags, payload_len;
+    ULONG user_cookie;
+    UBYTE payload[48];
+};
+struct zz_shared {
+    ULONG handle;
+    APTR data;
+    ULONG length;
+};
+struct zz_surface {
+    ULONG handle, arm_addr;
+    APTR data;
+    ULONG width, height, pitch, format, flags, length;
+};
+struct zz_service {
+    ULONG service_id, version, caps, flags, opcode_base, opcode_count, max_inline;
+    char name[22];
+};
+struct zz_async {
+    struct Message message;
+    struct zz_entry request, reply;
+    ULONG request_id;
+    LONG status;
+    UBYTE completed, queued;
+    APTR callback, user_data;
+    struct MsgPort *reply_port;
+    APTR next;
+    UBYTE spare[16];  /* room, should the library's alignment differ from ours */
+};
+
+LONG __ZZ9KQueryService(__reg("a6") struct Library *, __reg("d0") ULONG id,
+                        __reg("a0") struct zz_service *info) = "\tjsr\t-36(a6)";
+LONG __ZZ9KAllocShared(__reg("a6") struct Library *, __reg("d0") ULONG length, __reg("d1") ULONG align,
+                       __reg("d2") ULONG flags, __reg("a0") struct zz_shared *buf) = "\tjsr\t-72(a6)";
+LONG __ZZ9KFreeShared(__reg("a6") struct Library *, __reg("d0") ULONG handle) = "\tjsr\t-78(a6)";
+LONG __ZZ9KMapFramebufferSurface(__reg("a6") struct Library *,
+                                 __reg("a0") struct zz_surface *surface) = "\tjsr\t-114(a6)";
+LONG __ZZ9KCallAsyncMsg(__reg("a6") struct Library *, __reg("a0") struct zz_async *async,
+                        __reg("a1") struct zz_entry *req, __reg("a2") struct MsgPort *port) = "\tjsr\t-132(a6)";
+LONG __ZZ9KCancelAsync(__reg("a6") struct Library *, __reg("a0") struct zz_async *async) = "\tjsr\t-144(a6)";
+#define ZZ9KQueryService(id, info) __ZZ9KQueryService(ZZ9KBase, (id), (info))
+#define ZZ9KAllocShared(length, align, flags, buf) __ZZ9KAllocShared(ZZ9KBase, (length), (align), (flags), (buf))
+#define ZZ9KFreeShared(handle) __ZZ9KFreeShared(ZZ9KBase, (handle))
+#define ZZ9KMapFramebufferSurface(surface) __ZZ9KMapFramebufferSurface(ZZ9KBase, (surface))
+#define ZZ9KCallAsyncMsg(async, req, port) __ZZ9KCallAsyncMsg(ZZ9KBase, (async), (req), (port))
+#define ZZ9KCancelAsync(async) __ZZ9KCancelAsync(ZZ9KBase, (async))
+
+#define LBMI_BASEADDRESS 0x84001007
+
+static struct {
+    struct zz_shared out;   /* where the card writes its answer; handle 0 when there is none */
+    struct zz_shared plain; /* and inflates it */
+    struct zz_async async;  /* the request in flight */
+    UBYTE *mirror;          /* the screen as the card told it: rows of bpr bytes */
+    UBYTE *ops;             /* an answer copied out */
+    UBYTE *tile;            /* one tile unpacked */
+    ULONG *table;           /* CLUT8: the palette as RGB32 */
+    ULONG cap;              /* bytes in out, plain and ops */
+    UWORD w, h, bpr, tiles_x, tiles_y, band, seq;
+    UBYTE format, bpp;      /* encoder format and its bytes a pixel */
+    BOOL reset;             /* the next pass starts from black */
+    BOOL live;              /* this look's tiles come from the card */
+    BOOL shown;             /* the last look at the screen went through the card, for SYSINFO */
+    struct Screen *scr;     /* the screen the last pass looked at */
+    UBYTE fails;
+    ULONG foreign_ms;       /* when another client of the encoder last took a turn */
+    ULONG off_until;        /* the card is left to it until then; 0 for not */
+    ULONG ms;               /* when the last good pass started; 0 for none */
+    UBYTE pal[256];         /* CLUT8: each pen as RGB332 */
+    UBYTE *lut;             /* RGB565 to RGB332, 64 KB */
+    UBYTE *cur;             /* the cur the mirror was put into; NULL once anything else wrote there */
+} zz;
+
+static ULONG zz_get16(const UBYTE *p) { return (ULONG)p[0] << 8 | p[1]; }
+static ULONG zz_get32(const UBYTE *p) { return zz_get16(p) << 16 | zz_get16(p + 2); }
+
+/* zz9k.library and a firmware with the console encoder and zlib, or nothing. */
+static void zz_open(void)
+{
+    struct zz_service s, c;
+    ULONG i;
+
+    if (!CyberGfxBase || !(ZZ9KBase = OpenLibrary("zz9k.library", 2)))
+        return;
+    memset(&s, 0, sizeof(s));
+    memset(&c, 0, sizeof(c));
+    if (ZZ9KQueryService(ZZ_SERVICE, &s) || s.opcode_base != ZZ_SERVICE || !s.opcode_count ||
+        ZZ9KQueryService(ZZ_CODEC, &c) || !(c.flags & ZZ_CODEC_ZLIB) ||
+        !(zz.lut = AllocVec(0x10000, MEMF_ANY))) {
+        CloseLibrary(ZZ9KBase);
+        ZZ9KBase = NULL;
+        return;
+    }
+    for (i = 0; i < 0x10000; i++)  /* rgb332() of the RGB888 the card made the RGB565 of */
+        zz.lut[i] = (UBYTE)(i >> 13 | (i >> 5 & 0x38) | (i << 3 & 0xC0));
+}
+
+/* Buffers for another geometry: all gone. */
+static void zz_free(void)
+{
+    if (zz.out.handle)
+        ZZ9KFreeShared(zz.out.handle);
+    if (zz.plain.handle)
+        ZZ9KFreeShared(zz.plain.handle);
+    FreeVec(zz.mirror);
+    FreeVec(zz.ops);
+    FreeVec(zz.tile);
+    FreeVec(zz.table);
+    zz.out.handle = zz.plain.handle = 0;
+    zz.mirror = zz.ops = zz.tile = NULL;
+    zz.table = NULL;
+    zz.w = zz.h = 0;
+}
+
+static void zz_close(void)
+{
+    if (ZZ9KBase) {
+        zz_free();
+        FreeVec(zz.lut);
+        CloseLibrary(ZZ9KBase);
+        ZZ9KBase = NULL;
+    }
+}
+
+/* One request to the card. The answer comes through the card's interrupt: the
+ * library's own wait polls once a tick, which put 30 ms on every call. FALSE on
+ * an error; after ZZ_WAIT_MS without an answer the card is left alone for good,
+ * its buffers and the port kept, since the answer may still come. */
+static BOOL zz_call(struct zz_entry *req, struct zz_entry *reply)
+{
+    struct MsgPort *port = CreateMsgPort();
+    BOOL got = FALSE;
+
+    if (!port)
+        return FALSE;
+    memset(&zz.async, 0, sizeof(zz.async));
+    if (ZZ9KCallAsyncMsg(&zz.async, req, port) != ZZ_QUEUED) {
+        DeleteMsgPort(port);
+        return FALSE;
+    }
+    while (!(got = GetMsg(port) != NULL) && wait_ms(ZZ_WAIT_MS, 1UL << port->mp_SigBit))
+        ;
+    if (!got) {
+        ZZ9KCancelAsync(&zz.async);
+        zz.fails = ZZ_GIVE_UP;
+        return FALSE;
+    }
+    DeleteMsgPort(port);
+    *reply = zz.async.reply;
+    return zz.async.status == 0;
+}
+
+static void zz_request(struct zz_entry *req, ULONG opcode)
+{
+    memset(req, 0, sizeof(*req));
+    req->opcode = opcode;
+    req->payload_len = 48;
+}
+
+/* Is the card showing scr, in a format the encoder serves? Then the buffers fit
+ * it. A new geometry starts a new session on the card, from black. */
+static BOOL zz_fit(struct Screen *scr)
+{
+    struct zz_surface fb;
+    struct TagItem tags[2];
+    ULONG base = 0, bpr, size = 0;
+    APTR lock;
+    UBYTE format, bpp;
+    UWORD band;
+
+    if (!is_rtg(scr))
+        return FALSE;
+    tags[0].ti_Tag = LBMI_BASEADDRESS;
+    tags[0].ti_Data = (ULONG)&base;
+    tags[1].ti_Tag = TAG_DONE;
+    if (!(lock = LockBitMapTagList(scr->RastPort.BitMap, tags)))
+        return FALSE;
+    UnLockBitMap(lock);
+    /* The framebuffer handle names whatever the card shows when it is used. */
+    memset(&fb, 0, sizeof(fb));
+    if (ZZ9KMapFramebufferSurface(&fb) || !base || (ULONG)fb.data != base ||
+        fb.width != (ULONG)scr->Width || fb.height != (ULONG)scr->Height)
+        return FALSE;
+    if (fb.format == ZZ_SURF_BGRA8888) {  /* the card makes RGB565 of it */
+        format = ZZ_RFB_RGB565;
+        bpp = 2;
+        bpr = fb.width * 2;
+    } else if (fb.format == ZZ_SURF_INDEX8) {
+        format = ZZ_RFB_CLUT8;
+        bpp = 1;
+        bpr = fb.pitch;
+    } else
+        return FALSE;
+    if (bpr > 0xFFFF || fb.handle != ZZ_FB_HANDLE)
+        return FALSE;
+    if (zz.mirror && zz.w == fb.width && zz.h == fb.height && zz.bpr == bpr && zz.format == format)
+        return TRUE;
+    zz_free();
+    zz.tiles_x = (bpr + ZZ_TILE_W - 1) / ZZ_TILE_W;
+    zz.tiles_y = (fb.height + ZZ_TILE_H - 1) / ZZ_TILE_H;
+    if (!(zz.mirror = AllocVec(bpr * fb.height, MEMF_ANY | MEMF_CLEAR)) ||
+        !(zz.tile = AllocVec(ZZ_TILE_W * ZZ_TILE_H, MEMF_ANY)) ||
+        !(zz.table = AllocVec(256 * 3 * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR))) {
+        zz_free();
+        return FALSE;
+    }
+    /* Bands of tile rows keep each call short, so the card's other work (the
+     * network, the blitter) never waits long; fewer rows if memory is short. */
+    for (band = ZZ_BAND; band; band /= 2) {
+        size = band * zz.tiles_x * (ZZ_TILE_W * ZZ_TILE_H + 6) + 32;  /* every tile raw, plus a scroll */
+        if (ZZ9KAllocShared(size, 16, 0, &zz.out) == ZZ_OK)
+            break;
+        zz.out.handle = 0;  /* refused: fewer rows */
+    }
+    if (band && ZZ9KAllocShared(size, 16, 0, &zz.plain) != ZZ_OK)
+        zz.plain.handle = 0;
+    if (!band || !zz.plain.handle || !(zz.ops = AllocVec(size, MEMF_ANY))) {
+        zz_free();
+        return FALSE;
+    }
+    zz.cap = size;
+    zz.band = band;
+    zz.w = fb.width;
+    zz.h = fb.height;
+    zz.bpr = bpr;
+    zz.format = format;
+    zz.bpp = bpp;
+    zz.reset = TRUE;
+    zz.cur = NULL;
+    return TRUE;
+}
+
+/* Puts the mirror's pixels x..x+w (bytes), rows y..y+h into cur, and marks the
+ * tiles there as changed: the next look checks them against ref. */
+static void zz_show(ULONG x, ULONG y, ULONG w, ULONG h)
+{
+    ULONG px0 = x / zz.bpp, px1 = (x + w + zz.bpp - 1) / zz.bpp, r, i, tx, ty, bpr = zz.bpr;
+    const UBYTE *m0 = zz.mirror + y * bpr + px0 * zz.bpp, *lut = zz.lut, *pal = zz.pal;
+    UBYTE *c0 = cur + y * ref_w + px0;
+
+    if (px1 > zz.w)
+        px1 = zz.w;
+    if (px0 >= px1)
+        return;
+    /* Locals throughout: a store through c could change zz.lut for all a
+     * compiler knows, and it would load it again for every pixel. */
+    for (r = h; r; r--, m0 += bpr, c0 += ref_w) {
+        UBYTE *c = c0;
+        if (zz.format == ZZ_RFB_RGB565) {
+            const UWORD *m = (const UWORD *)m0;
+            for (i = px1 - px0; i; i--)
+                *c++ = lut[*m++];
+        } else {
+            const UBYTE *m = m0;
+            for (i = px1 - px0; i; i--)
+                *c++ = pal[*m++];
+        }
+    }
+    for (ty = y / TILE; ty * TILE < y + h; ty++)
+        for (tx = px0 / TILE; tx * TILE < px1; tx++)
+            stamp[ty * cols + tx] = 0;
+}
+
+/* PackBits of unit 1 or 2 bytes into exactly size bytes; FALSE on bad data. */
+static BOOL zz_unpack(const UBYTE *in, ULONG n, UBYTE *out, ULONG size)
+{
+    const UBYTE *end = in + n;
+    UBYTE *o = out, *oend = out + size;
+    ULONG unit = zz.bpp, c, k;
+
+    while (in < end) {
+        c = *in++;
+        if (c < 128) {
+            k = (c + 1) * unit;
+            if ((ULONG)(end - in) < k || (ULONG)(oend - o) < k)
+                return FALSE;
+            memcpy(o, in, k);
+            in += k;
+            o += k;
+        } else if (c > 128) {
+            k = 257 - c;
+            if ((ULONG)(end - in) < unit || (ULONG)(oend - o) < k * unit)
+                return FALSE;
+            if (unit == 1)
+                memset(o, *in, k);
+            else {
+                UWORD v, *q = (UWORD *)o;  /* o is even: units of 2 */
+                memcpy(&v, in, 2);  /* in may be odd */
+                for (c = k; c; c--)
+                    *q++ = v;
+            }
+            o += k * unit;
+            in += unit;
+        }
+    }
+    return o == oend;
+}
+
+/* The ops of one answer into the mirror, and from there into cur. Format: the
+ * ZZ9000 firmware's rfb/rfb_encode.h. FALSE on anything malformed. */
+static BOOL zz_apply(const UBYTE *p, ULONG n)
+{
+    const UBYTE *end = p + n;
+    ULONG op, x0, w, y0, h, r, idx, top, tw, th, size, code, len;
+    LONG dy;
+    UBYTE *at;
+
+    while (p < end) {
+        op = *p++;
+        if (op == 0)  /* the end */
+            return p == end;
+        if (op == 1) {  /* a scroll: rows y0.. take the rows dy further down */
+            if (end - p < 10)
+                return FALSE;
+            x0 = zz_get16(p);
+            w = zz_get16(p + 2);
+            y0 = zz_get16(p + 4);
+            h = zz_get16(p + 6);
+            dy = (WORD)zz_get16(p + 8);
+            p += 10;
+            if (x0 + w > zz.bpr || y0 + h > zz.h || (LONG)y0 + dy < 0 || (LONG)(y0 + h) + dy > zz.h)
+                return FALSE;
+            if (dy > 0)
+                for (r = 0; r < h; r++)
+                    memmove(zz.mirror + (y0 + r) * zz.bpr + x0, zz.mirror + (y0 + r + dy) * zz.bpr + x0, w);
+            else
+                for (r = h; r; r--)
+                    memmove(zz.mirror + (y0 + r - 1) * zz.bpr + x0,
+                            zz.mirror + (ULONG)((LONG)(y0 + r - 1) + dy) * zz.bpr + x0, w);
+            zz_show(x0, y0, w, h);
+        } else if (op == 3) {  /* one tile of a chunky screen */
+            if (end - p < 3)
+                return FALSE;
+            idx = zz_get16(p);
+            code = p[2];
+            p += 3;
+            if (idx / zz.tiles_x >= zz.tiles_y)
+                return FALSE;
+            x0 = idx % zz.tiles_x * ZZ_TILE_W;
+            top = idx / zz.tiles_x * ZZ_TILE_H;
+            tw = zz.bpr - x0 < ZZ_TILE_W ? zz.bpr - x0 : ZZ_TILE_W;
+            th = zz.h - top < ZZ_TILE_H ? zz.h - top : ZZ_TILE_H;
+            size = tw * th;
+            at = zz.mirror + top * zz.bpr + x0;
+            if (code == 0) {  /* raw */
+                if ((ULONG)(end - p) < size)
+                    return FALSE;
+                for (r = 0; r < th; r++)
+                    memcpy(at + r * zz.bpr, p + r * tw, tw);
+                p += size;
+            } else if (code == 1 || code == 2) {  /* PackBits, of the tile or of its XOR with the old one */
+                if (end - p < 2)
+                    return FALSE;
+                len = zz_get16(p);
+                p += 2;
+                if ((ULONG)(end - p) < len || !zz_unpack(p, len, zz.tile, size))
+                    return FALSE;
+                p += len;
+                for (r = 0; r < th; r++) {
+                    UBYTE *d = at + r * zz.bpr;
+                    const UBYTE *s = zz.tile + r * tw;
+                    if (code == 1)
+                        memcpy(d, s, tw);
+                    else if (!(((ULONG)d | tw) & 3))  /* the tile buffer is long aligned */
+                        for (len = tw >> 2; len; len--)
+                            *(ULONG *)d ^= *(const ULONG *)s, d += 4, s += 4;
+                    else
+                        for (len = tw; len; len--)
+                            *d++ ^= *s++;
+                }
+            } else
+                return FALSE;
+            zz_show(x0, top, tw, th);
+        } else
+            return FALSE;
+    }
+    return FALSE;  /* no end */
+}
+
+/* All of the mirror into cur: after another screen, a new cur or palette. */
+static void zz_show_all(void)
+{
+    zz_show(0, 0, zz.bpr, zz.h);
+    zz.cur = cur;
+}
+
+/* The card starts over from black: mirror and cur are black, every tile due. */
+static void zz_blank(void)
+{
+    LONG r;
+
+    memset(zz.mirror, 0, zz.bpr * zz.h);
+    for (r = 0; r < zz.h; r++)
+        memset(cur + r * ref_w, zz.format == ZZ_RFB_RGB565 ? 0 : zz.pal[0], zz.w);
+    memset(stamp, 0, cols * rows * sizeof(ULONG));
+    zz.cur = cur;
+}
+
+/* Another client of the encoder (AmiNetXDuo's web console) had a turn, so the
+ * card started over from black for one of us. Twice within ZZ_SHARE_MS: leave
+ * it the card for that long instead of both starting over on every look. */
+static void zz_foreign(void)
+{
+    ULONG ms = now_ms();
+
+    if (zz.foreign_ms && ms - zz.foreign_ms < ZZ_SHARE_MS)
+        zz.off_until = (ms + ZZ_SHARE_MS) | 1;
+    zz.foreign_ms = ms;
+}
+
+/* One look at the whole screen through the card. FALSE when the mirror can't
+ * be trusted any more. */
+static BOOL zz_pass(void)
+{
+    struct zz_entry req, rep;
+    ULONG n;
+    UWORD ty, ty1, seq;
+    UBYTE head[4];
+
+    for (ty = 0; ty < zz.tiles_y; ty = ty1) {
+        ty1 = ty + zz.band < zz.tiles_y ? ty + zz.band : zz.tiles_y;
+        zz_request(&req, ZZ_SERVICE);
+        be32(req.payload, ZZ_FB_HANDLE);
+        be32(req.payload + 4, zz.out.handle);
+        be32(req.payload + 8, zz.cap);
+        be32(req.payload + 12, ZZ_ENC_FLAGS);
+        be16(req.payload + 16, zz.w);
+        be16(req.payload + 18, zz.h);
+        be16(req.payload + 20, zz.bpr);
+        be16(req.payload + 22, ty);
+        be16(req.payload + 24, ty1);
+        be16(req.payload + 26, !ty && zz.reset ? ZZ_RESET : 0);
+        req.payload[30] = zz.bpp * 8;
+        req.payload[31] = ZZ_TILE_W;
+        req.payload[32] = ZZ_TILE_H;
+        req.payload[33] = zz.format;
+        if (!zz_call(&req, &rep) || (n = zz_get32(rep.payload)) < 5 || n > zz.cap)
+            return FALSE;
+        CopyMem(zz.out.data, head, 4);
+        if (head[0] != 1)  /* encoder version */
+            return FALSE;
+        seq = zz_get16(head + 2);
+        if (zz_get16(rep.payload + 6) & ZZ_KEYFRAME) {  /* from black, asked for or not */
+            if (ty) {  /* the bands before this one would stay black: start over */
+                zz_foreign();
+                return FALSE;
+            }
+            if (!zz.reset)
+                zz_foreign();
+            zz_blank();
+            zz.reset = FALSE;
+        } else if (zz.reset || seq != (UWORD)(zz.seq + 1)) {
+            zz_foreign();
+            return FALSE;  /* someone else got an answer in between */
+        }
+        zz.seq = seq;
+        n -= 4;
+        if (head[1] & ZZ_DEFLATED) {
+            /* The card packs its answer with zlib, for AmiNetXDuo's network.
+             * Here it crosses the Zorro bus, faster than a 68k inflates:
+             * the card unpacks it again into plain. */
+            zz_request(&req, ZZ_CODEC);
+            be32(req.payload, zz.out.handle);
+            be32(req.payload + 4, 4);
+            be32(req.payload + 8, n);
+            be32(req.payload + 12, zz.plain.handle);
+            be32(req.payload + 20, zz.cap);
+            be32(req.payload + 24, ZZ_ZLIB);
+            be32(req.payload + 28, ZZ_EXPECT_END);
+            if (!zz_call(&req, &rep) || (n = zz_get32(rep.payload + 4)) > zz.cap)
+                return FALSE;
+            CopyMem(zz.plain.data, zz.ops, n);
+        } else
+            CopyMem((UBYTE *)zz.out.data + 4, zz.ops, n);
+        if (!zz_apply(zz.ops, n))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/* Brings cur up to date through the card when it shows scr; FALSE when the
+ * screen has to be read the usual way. Callers hold LockIBase and picture. */
+static BOOL zz_sync(struct Screen *scr, BOOL force)
+{
+    ULONG ms = now_ms(), i;
+    struct Screen *last = zz.scr;
+    BOOL again;
+
+    /* Until this look goes through the card, the last pass answers for no
+     * screen: whatever was read the usual way in between may have changed it. */
+    zz.live = zz.shown = FALSE;
+    zz.scr = NULL;
+    if (zz.off_until && (LONG)(ms - zz.off_until) < 0)
+        return FALSE;
+    zz.off_until = 0;
+    if (!ZZ9KBase || zz.fails >= ZZ_GIVE_UP || !zz_fit(scr))
+        return FALSE;
+    if (zz.format == ZZ_RFB_CLUT8) {  /* a new palette changes every pixel and no tile */
+        UBYTE pal[256];
+        ULONG colours = scr->ViewPort.ColorMap ? scr->ViewPort.ColorMap->Count : 0;
+        if (colours > 256)
+            colours = 256;
+        if (colours)
+            get_rgb32(scr->ViewPort.ColorMap, 0, colours, zz.table);
+        for (i = 0; i < 256; i++)
+            pal[i] = rgb332(zz.table[3 * i] >> 24, zz.table[3 * i + 1] >> 24, zz.table[3 * i + 2] >> 24);
+        if (memcmp(pal, zz.pal, 256)) {
+            memcpy(zz.pal, pal, 256);
+            zz.cur = NULL;
+        }
+    }
+    /* A pass answers for the screen as long as a tile read then would (stale()),
+     * and only for the screen it looked at: another one of the same size in
+     * front starts over in front(), and so does this. */
+    again = force || zz.reset || !zz.ms || scr != last || ms - zz.ms > MAX_AGE_MS ||
+            (input_ms && (LONG)(zz.ms - input_ms) < SETTLE_MS);
+    if (again) {
+        if (!zz_pass()) {
+            zz.reset = TRUE;
+            zz.ms = 0;
+            zz.fails++;
+            return FALSE;
+        }
+        zz.fails = 0;
+        zz.ms = ms;
+    }
+    if (zz.cur != cur)
+        zz_show_all();
+    zz.live = zz.shown = TRUE;
+    zz.scr = scr;
+    return TRUE;
+}
+
 /* Does the tile at x, y differ between cur and ref? Long words where they line up. */
 static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
 {
@@ -846,19 +1424,21 @@ static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
     return FALSE;
 }
 
-/* Reads tiles tx0..tx1 of tile row ty from the screen into cur, as RGB332. */
+/* Reads tiles tx0..tx1 of tile row ty from the screen into cur, as RGB332;
+ * through the card, zz_sync() has put them there already. */
 static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 {
     LONG y0 = ty * TILE, x, n, i, t0;
     LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
     ULONG ms = now_ms();
 
-    for (t0 = tx0; t0 <= tx1; t0 += RGB_TILES) {  /* a couple of tiles at a time */
+    for (t0 = tx0; t0 <= tx1 && !zz.live; t0 += RGB_TILES) {  /* a couple of tiles at a time */
         LONG x0 = t0 * TILE, t1 = t0 + RGB_TILES - 1 < tx1 ? t0 + RGB_TILES - 1 : tx1;
         LONG cw = ((t1 + 1) * TILE < ref_w ? (t1 + 1) * TILE : ref_w) - x0;
         UBYTE *src = rgb;
 
         read_rgb(scr, x0, y0, cw, th, rgb);
+        zz.cur = NULL;  /* cur holds what the card's mirror doesn't */
         for (n = 0; n < th; n++) {
             UBYTE *dst = cur + (y0 + n) * ref_w + x0;
             for (i = 0; i < cw; i++, src += 3)
@@ -867,11 +1447,15 @@ static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
     }
     for (x = tx0; x <= tx1; x++) {
         UBYTE *v = valid + ty * cols + x;
-        if (differs(x * TILE, y0, (x + 1) * TILE < ref_w ? TILE : ref_w - x * TILE, th))
+        /* Through the card, a tile it did not change kept its stamp: still as
+         * different from ref as last time, so no compare of 4 KB. */
+        if (zz.live && stamp[ty * cols + x])
+            ;
+        else if (differs(x * TILE, y0, (x + 1) * TILE < ref_w ? TILE : ref_w - x * TILE, th))
             *v |= DIFF;
         else
             *v &= ~DIFF;
-        stamp[ty * cols + x] = ms;
+        stamp[ty * cols + x] = zz.live ? zz.ms : ms;  /* through the card: when it looked */
         if (want[ty * cols + x]) {
             want[ty * cols + x] = 0;
             wanted--;
@@ -896,6 +1480,7 @@ static BOOL grab(BOOL force, LONG x0, LONG y0, LONG x1, LONG y1, LONG *w, LONG *
 
     if (!(scr = front(&lock)))
         return FALSE;
+    zz_sync(scr, force);
     *w = ref_w;
     *h = ref_h;
     if (x1 > ref_w) x1 = ref_w;
@@ -918,7 +1503,8 @@ static BOOL grab(BOOL force, LONG x0, LONG y0, LONG x1, LONG y1, LONG *w, LONG *
     return TRUE;
 }
 
-/* One step of background reading: up to eight wanted tiles of one tile row. */
+/* One step of background reading: up to eight wanted tiles of one tile row, or
+ * through the card all of them. */
 static void refresh(void)
 {
     struct Screen *scr;
@@ -927,15 +1513,20 @@ static void refresh(void)
 
     if (!wanted || !(scr = front(&lock)))
         return;
-    for (t = 0; t < cols * rows && !want[t]; t++)
-        ;
-    if (t < cols * rows) {
+    zz_sync(scr, TRUE);  /* the reader is there to look again */
+    for (t = 0; t < cols * rows; t = t - tx0 + cols) {
+        for (; t < cols * rows && !want[t]; t++)
+            ;
+        if (t == cols * rows)
+            break;
         tx0 = t % cols;
         for (tx1 = cols - 1; !want[t - tx0 + tx1]; tx1--)
             ;
-        if (tx1 > tx0 + 7)  /* small steps keep everyone else waiting only briefly */
+        if (tx1 > tx0 + 7 && !zz.live)  /* small steps keep everyone else waiting only briefly */
             tx1 = tx0 + 7;
         read_tiles(scr, t / cols, tx0, tx1);
+        if (!zz.live)
+            break;
     }
     UnlockIBase(lock);
 }
@@ -1489,6 +2080,8 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
             Signal(reader, SIGBREAKF_CTRL_F);
         return ok;
     }
+    zz.shown = FALSE;  /* a chipset screen, not through the card: the next look */
+    zz.scr = NULL;     /* through it takes a new pass */
     /* Skipping and XOR need the client to hold pref: same connection, or the
      * CLIENT id it was made for. Anyone else gets everything. */
     known = pconn == conn_serial || (client_id && powner == client_id);
@@ -3622,6 +4215,7 @@ static BOOL c_sysinfo(struct link *l)
         t_str(&t, (const UBYTE *)self_path, FALSE);
         t_chr(&t, '\n');
     }
+    t_pair(&t, "zz9000", zz.shown);  /* the last look went through a ZZ9000's encoder */
     t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
     t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
@@ -8256,6 +8850,7 @@ int main(int argc, char **argv)
     }
     os39 = GfxBase->LibNode.lib_Version >= 39;
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
+    zz_open();  /* a ZZ9000 looks at its own screen */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;
     timer_port = CreateMsgPort();
@@ -8379,6 +8974,7 @@ out:
     if (timer_port)
         DeleteMsgPort(timer_port);
     if (SocketBase) CloseLibrary(SocketBase);
+    zz_close();
     if (CyberGfxBase) CloseLibrary(CyberGfxBase);
     if (KeymapBase) CloseLibrary(KeymapBase);
     if (GfxBase) CloseLibrary((struct Library *)GfxBase);

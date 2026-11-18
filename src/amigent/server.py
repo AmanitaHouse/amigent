@@ -435,7 +435,10 @@ def _end_broken_script(job: int, process: str) -> str:
         if not isinstance(done, AmigaError) or not isinstance(rc, AmigaError):
             return ""  # its last line ended by itself
         listed = "" if isinstance(status, AmigaError) else status.output
-        if not re.search(rf"^\s*\S+\s+{process}:", listed, re.M):  # "Process 4:", in any language
+        # "Process 4: Loaded as command: Wait", in any language. A freed number goes to
+        # the next Shell at once, and that is this Status itself.
+        line = re.search(rf"^\s*\S+\s+{process}:.*$", listed, re.M)
+        if not line or line.group(0).rstrip().lower().endswith("status"):
             _with_ctl(lambda: ctl.write_file(_job_file(job, "done"), b"20\n"))
             return " and Ctrl-D to its script, which ended"
         time.sleep(0.5)

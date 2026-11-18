@@ -34,11 +34,29 @@ RAWKEYS = {
     "space": 0x40, "backspace": 0x41, "tab": 0x42, "enter": 0x43, "return": 0x44,
     "esc": 0x45, "escape": 0x45, "delete": 0x46, "up": 0x4C, "down": 0x4D,
     "right": 0x4E, "left": 0x4F, "help": 0x5F,
+    "ctrl": 0x63, "lamiga": 0x66, "ramiga": 0x67,
     **{f"f{i}": 0x50 + i - 1 for i in range(1, 11)},
 }
 QUALIFIERS = {
     "shift": 0x01, "ctrl": 0x08, "alt": 0x10, "lamiga": 0x40, "ramiga": 0x80,
 }
+
+
+def reset_chord() -> list[dict]:
+    """Ctrl, then Left Amiga, then Right Amiga, each left down.
+
+    Together those keys are the Amiga's reset. There is no key-up: the
+    machine goes away while they are held. The qualifier on each key is
+    every chord key already down, as a real keyboard reports it.
+    """
+    qualifier = 0
+    ops = []
+    for name in ("ctrl", "lamiga", "ramiga"):
+        qualifier |= QUALIFIERS[name]
+        ops.append({"t": "key", "code": RAWKEYS[name], "down": True, "q": qualifier})
+    return ops
+
+
 BUTTONS = {"left": 1, "right": 2, "middle": 4}
 
 _LUT = {

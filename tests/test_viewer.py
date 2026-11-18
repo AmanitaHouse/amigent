@@ -155,13 +155,100 @@ def test_every_language_has_every_text():
 
 
 def test_describe_system():
-    from amigent.viewer import describe_system
+    from amigent.viewer import describe_system, exec_before_os3
 
     facts = describe_system("Kickstart 47.115, Workbench 47.5\n",
                             "System: 68040 68882   (INST: Cache Burst) (DATA: Cache Burst)\n")
     assert facts == {"os": "AmigaOS 3.2", "kickstart": "47.115", "workbench": "47.5",
                      "cpu": "68040", "fpu": "68882"}
     assert describe_system("", "")["os"] == ""
+    assert exec_before_os3("37.175") and not exec_before_os3("39.106")
+    assert not exec_before_os3("") and not exec_before_os3("Apollo")
+
+
+def _restart_of(stat, info, online=True, kickstart=""):
+    from amigent.errors import AmigaError
+
+    viewer = Viewer("127.0.0.1", screen_port=1)
+    viewer.online = online
+    viewer.amiga = {"kickstart": kickstart}
+    viewer.flush_volumes = ["SYS:"]
+    seen = {"restart": 0, "flush": None, "ring": 0, "toasts": []}
+
+    class Ctl:
+        def stat(self, path):
+            assert path == "C:Reboot"
+            if isinstance(stat, AmigaError):
+                raise stat
+            return {"type": "file"}
+
+        def sysinfo(self):
+            return info
+
+        def flush(self, volumes):
+            seen["flush"] = list(volumes)
+
+    viewer.ctl = Ctl()
+    viewer._ctl = lambda fn: fn()
+    viewer.restart = lambda: seen.__setitem__("restart", seen["restart"] + 1)
+    viewer.feed.ring = lambda: seen.__setitem__("ring", seen["ring"] + 1)
+    viewer.event = lambda kind, **fields: seen["toasts"].append((kind, fields))
+    viewer._restart()
+    return viewer, seen
+
+
+def test_os2_without_reboot_submits_the_reset_chord():
+    from amigent.amigentd import reset_chord
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "37.175"},
+                               kickstart="40.68")
+    assert seen["restart"] == 0
+    assert seen["flush"] == ["SYS:"] and seen["ring"] == 1
+    assert viewer.inputs.take() == reset_chord()
+    assert seen["toasts"] == [("toast", {"key": "restarting"})]
+
+
+def test_os2_uses_kickstart_when_sysinfo_has_no_exec():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {}, kickstart="37.175")
+    assert seen["restart"] == 0 and seen["ring"] == 1
+    assert [op["code"] for op in viewer.inputs.take()] == [0x63, 0x66, 0x67]
+
+
+def test_os3_without_reboot_still_uses_the_command_path():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "40.68"},
+                               kickstart="37.175")
+    assert seen["restart"] == 1 and seen["flush"] is None and seen["ring"] == 0
+    assert viewer.inputs.take() == []
+
+
+def test_reboot_present_on_os2_is_still_the_command():
+    viewer, seen = _restart_of({"type": "file"}, {"exec_version": "37.175"})
+    assert seen["restart"] == 1 and seen["ring"] == 0
+    assert viewer.inputs.take() == []
+
+
+def test_reset_chord_waits_until_the_amiga_is_connected():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "37.175"},
+                               online=False)
+    assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+    assert viewer.inputs.take() == []
+    assert seen["toasts"][-1] == ("toast", {"key": "restart_failed", "text": "the Amiga is not connected"})
+
+
+def test_a_lost_connection_is_not_a_missing_reboot():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("connection closed"), {"exec_version": "37.175"})
+    assert seen["ring"] == 0 and seen["restart"] == 0
+    assert viewer.inputs.take() == []
+    assert seen["toasts"][-1][1]["key"] == "restart_failed"
 
 
 def test_mac_app_bundle(monkeypatch, tmp_path):

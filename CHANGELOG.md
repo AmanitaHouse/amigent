@@ -5,6 +5,20 @@ PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc1`.
 The number lives in `src/amigent/__init__.py`, and everything else reads
 it from there.
 
+## Unreleased
+
+The reset chord from upstream 1.4.0 is ported on this branch. The tag is
+`v1.4.0` and the source commit is `4fea38f602f84ddad2d5215fbc9d2742605d892c`.
+The package version stays `1.3.1rc1`. This is not a release, the packaged
+`amigentd.apollo` is not replaced, and no Amiga has been reset with it.
+
+Ctrl, Left Amiga and Right Amiga have to go down within five seconds of one
+another. amigentd then calls `ColdReboot()` when exec is 36 or newer. A key
+that went down earlier, including one whose release never arrived because a
+client broke off, does not complete that chord. The remote desktop sends the
+three keys when `C:Reboot` is missing and exec is older than 39. `amiga_restart`
+still requires `C:Reboot`.
+
 ## 1.3.1rc1 (2026-11-19)
 
 AmanitaHouse fork prerelease. The package version is `1.3.1rc1`. This is

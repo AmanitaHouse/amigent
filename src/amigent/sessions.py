@@ -49,9 +49,9 @@ class MachineSession:
         for follower in self.followers.values():
             follower.stop()
         self.followers.clear()
-        with locks.exclusive(self.lock_file):
+        with locks.machine(self.lock_file):
             self.ctl.close()
-        with locks.exclusive(self.lock_file + ".screen"):
+        with locks.machine(self.lock_file, screen=True):
             self.screen.close()
         self.job_numbers.clear()
         self.self_path.clear()
@@ -115,9 +115,11 @@ class Sessions:
         entries = machines.load()
         target = machine or self.configured
         if not target:
-            if len(entries) != 1:
+            defaults = [e for e in entries if e.get('default')]
+            choices = defaults or entries
+            if len(choices) != 1:
                 raise AmigaError('Specify machine by saved name or ID; use amiga_machines to list them.')
-            target = entries[0]['id']
+            target = choices[0]['id']
         entry = machines.find(target)
         if not entry and (machine or not self.configured):
             raise AmigaError(f'No saved Amiga named {target!r}; use amiga_machines to list them.')
@@ -129,4 +131,6 @@ class Sessions:
                 session = MachineSession(host, self.ctl_port, self.screen_port)
                 pack.policy_for(host, mode=entry.get('compress') if entry else None)
                 self._sessions[host] = session
-            return session, entry['name'] if entry else target, address
+            name = entry['name'] if entry else target
+            label = f"{name} ({address})" if len(entries) > 1 else ""
+            return session, label

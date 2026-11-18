@@ -40,8 +40,8 @@ def inventory_folder() -> Path:
 
 INSTRUCTIONS = """Amigent operates registered Amigas.
 - Use amiga_machines to list saved names, IDs, addresses and reachability.
-- Pass machine explicitly on every machine-specific call when several Amigas
-  are present. For requests involving several machines, repeat the workflow
+- An omitted machine uses AMIGENT_HOST, the saved default, or the sole Amiga.
+  For requests involving several machines, pass machine explicitly and repeat the workflow
   for each named machine, keeping installation records and results separate.
 - A failure on one machine does not imply success or failure on another.
 - Aminet search and readme tools are shared; check compatibility for each
@@ -209,21 +209,24 @@ def _tool_noted(*args, **kwargs):
             machine = kwargs.pop("machine", "")
             if active.get() is not None and not machine:
                 return noted(*args, **kwargs)  # nested operations inherit their caller
-            session, name, address = sessions.resolve(machine)
-            label = f"{name} ({address})"
+            session, label = sessions.resolve(machine)
             with session.calls, bound(session):
                 try:
                     session.refresh_address()
                     result = noted(*args, **kwargs)
                 except Exception as e:
+                    if not label:
+                        raise
                     raise AmigaError(f"{label}: {e}", getattr(e, "code", None)) from e
+            if not label:
+                return result
             if isinstance(result, str):
                 return f"{label}:\n{result}"
             return [label, *result] if isinstance(result, list) else result
 
         run.__signature__ = signature
         if targeted:
-            run.__doc__ = (fn.__doc__ or "") + "\n\nmachine: saved Amiga name or ID from amiga_machines; required with multiple machines unless AMIGENT_HOST is configured."
+            run.__doc__ = (fn.__doc__ or "") + "\n\nmachine: saved Amiga name or ID from amiga_machines; defaults to AMIGENT_HOST, the saved default, or the sole registered machine."
 
         @functools.wraps(run)
         async def dispatch(*args, **kwargs):
@@ -258,14 +261,14 @@ def amiga_machines() -> str:
         return json.dumps(list(pool.map(status, entries)), indent=1)
 
 
-def _exclusive(name: str | None = None):
+def _exclusive():
     """Serialise access across all amigent processes and threads on this PC."""
-    return locks.exclusive(name or _session().lock_file)
+    return locks.machine(_session().lock_file)
 
 
 def _screen_lock():
     """The screen service has its own lock, so the viewer keeps running during commands."""
-    return _exclusive(_session().lock_file + ".screen")
+    return locks.machine(_session().lock_file, screen=True)
 
 
 def _with_ctl(fn):

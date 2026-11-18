@@ -78,6 +78,13 @@ def test_actual_mcp_dispatch_runs_two_machines_concurrently(two):
 
 def test_omitted_unknown_and_conflicting_targets_do_not_execute(two):
     a, b, sa, sb = two
+    assert a['id'] in server.amiga_exec('Version')
+    roster.edit(b['id'], make_default=True)
+    assert b['id'] in server.amiga_exec('Version')
+    rows = roster.load()
+    for entry in rows:
+        entry.pop('default', None)
+    roster.save(rows)
     with pytest.raises(AmigaError, match='Specify machine'):
         server.amiga_exec('Version')
     with pytest.raises(AmigaError, match='No saved Amiga'):
@@ -231,3 +238,51 @@ def test_parallel_link_settings_preserve_both_machines(two, private_config):
     with ThreadPoolExecutor(2) as pool:
         list(pool.map(save, policies))
     assert set(json.loads(path.read_text())) == {a['id'], b['id']}
+
+
+
+def test_single_machine_keeps_json_lists_and_errors(two, monkeypatch):
+    a, b, sa, _ = two
+    roster.forget(b["id"])
+    monkeypatch.setattr(sa.ctl, "sysinfo", lambda: {}, raising=False)
+    reply = asyncio.run(server.mcp.call_tool("amiga_link", {}))
+    content, _ = reply
+    assert json.loads(content[0].text)["mode"] == "auto"
+    monkeypatch.setattr(server, "_paused_note", lambda: "screen paused")
+    assert server.amiga_screenshot(machine=a["name"]) == ["screen paused"]
+    with pytest.raises(TypeError, match="required positional"):
+        server.amiga_exec()
+
+
+@pytest.mark.parametrize("screen", [False, True])
+def test_machine_locks_exclude_legacy_processes(two, tmp_path, monkeypatch, screen):
+    import os
+    import subprocess
+    import sys
+    from amigent import locks
+
+    if os.name == "nt":
+        pytest.skip("this probe uses POSIX nonblocking flock")
+    _, _, sa, sb = two
+    monkeypatch.setattr(locks, "path", lambda name: tmp_path / name)
+    probe = """
+import fcntl, sys
+with open(sys.argv[1], "a+b") as handle:
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit(1)
+"""
+    suffix = ".screen" if screen else ""
+    def locked(filename):
+        result = subprocess.run([sys.executable, "-c", probe, tmp_path / filename])
+        assert result.returncode in (0, 1)
+        return result.returncode == 1
+
+    with locks.machine(sa.lock_file, screen=screen):
+        with locks.machine(sb.lock_file, screen=screen):
+            assert locked("amigent.lock" + suffix)
+            assert locked(sa.lock_file + suffix)
+            assert locked(sb.lock_file + suffix)
+            assert not locked("amigent.lock" + ("" if screen else ".screen"))
+    assert not locked("amigent.lock" + suffix)

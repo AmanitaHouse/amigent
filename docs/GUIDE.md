@@ -136,9 +136,9 @@ does not roll back a successful installation on another.
 Calls for different machines can run concurrently. Calls for the same machine
 are serialized. Screen caches, connections, background log followers and
 window tracking stay with their machine; there is no shared active-machine
-switch. An omitted `machine` uses `AMIGENT_HOST` if configured, or the only
-registered machine. With several machines and no configured host, the server
-asks for an explicit target even if the viewer has a saved default.
+switch. An omitted `machine` uses `AMIGENT_HOST` first, then the saved default,
+then the sole registered machine. If several machines have no unique default,
+pass the name or ID explicitly. Single-machine results retain their usual format.
 
 `AMIGENT_POWER_CMD` remains bound to the machine named by `AMIGENT_HOST` when
 multiple machines are registered. It cannot switch another machine's outlet.

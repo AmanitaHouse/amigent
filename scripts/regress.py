@@ -112,13 +112,15 @@ class Run:
         bad = self.s.amiga_job("Search NOSUCHVOLUME: x", wait=60)
         assert "ended with rc" in bad, bad
         started = time.monotonic()
-        said = self.s.amiga_job("List SYS:C ALL >NIL:\nWait 30", wait=1)
+        said = self.s.amiga_job("List SYS:C ALL >NIL:\nWait 30\nEcho not-reached", wait=1)
         number = int(said.split()[1])
         said = self.s.amiga_break(job=number)
         assert "sent Ctrl-C" in said, said
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            if "ended with rc" in self.s.amiga_job_output(number):
+            output = self.s.amiga_job_output(number)
+            if "ended with rc" in output:
+                assert "not-reached" not in output, output  # the whole script stopped, not one line
                 listed = self.s.amiga_jobs(clear_finished=True)
                 assert f"{number:4}" in listed, listed
                 return (f"numbered jobs, return codes, break of job {number} after "

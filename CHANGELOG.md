@@ -187,6 +187,9 @@ Wishes from measuring window dragging on a real A1200:
 
 ### Fixes
 
+- `amiga_break(job=n)` stops a job of several lines as a whole. Ctrl-C alone
+  only ended the line that ran, and on a slow Amiga the job went on with the
+  next one.
 - `amiga_status` also recognizes a second kind of AI development bridge on the
   Amiga, by its message port, task, TCP port, files and S:User-Startup line,
   and says so before the first click, as for the others.

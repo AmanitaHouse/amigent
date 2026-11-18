@@ -424,12 +424,31 @@ def amiga_start(command: str, unique: bool = False) -> str:
     return f"{before}started: {command}{hints}"
 
 
+def _end_broken_script(job: int, process: str) -> str:
+    """After Ctrl-C and Ctrl-D for a job's script: the script never gets to the line
+    that writes its return code, so that is done here once its Shell is gone."""
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        done, rc, status = _with_ctl(lambda: perform(ctl, [
+            Request.read_file(_job_file(job, "done")), Request.read_file(_job_file(job, "rc")),
+            Request.exec("Status")]))
+        if not isinstance(done, AmigaError) or not isinstance(rc, AmigaError):
+            return ""  # its last line ended by itself
+        listed = "" if isinstance(status, AmigaError) else status.output
+        if not re.search(rf"^\s*\S+\s+{process}:", listed, re.M):  # "Process 4:", in any language
+            _with_ctl(lambda: ctl.write_file(_job_file(job, "done"), b"20\n"))
+            return " and Ctrl-D to its script, which ended"
+        time.sleep(0.5)
+    return " and Ctrl-D to its script; the line that runs has not ended yet"
+
+
 @mcp.tool()
 def amiga_break(command: str = "", signal: str = "C", job: int = 0) -> str:
     """Send Ctrl-C (or D, E, F) to a running command, like pressing it in its Shell.
 
     command is the program's name as Status shows it, e.g. 'List' or 'Wait';
-    job is a number from amiga_job. Without either, the command last started by
+    job is a number from amiga_job (a job of several lines is stopped as a
+    whole). Without either, the command last started by
     amiga_job or amiga_start is meant. A plain amiga_exec cannot be broken this
     way: it blocks the daemon until it returns, so long work belongs in amiga_job.
     """
@@ -440,8 +459,16 @@ def amiga_break(command: str = "", signal: str = "C", job: int = 0) -> str:
         m = re.search(r"\[CLI (\d+)\]", said)
         if not m:
             raise AmigaError(f"job {job}: no process number recorded ({said.strip() or 'empty'})")
-        _with_ctl(lambda: ctl.exec(f"Break {m.group(1)} {signal.upper()}"))
-        return f"sent Ctrl-{signal.upper()} to job {job} (process {m.group(1)})"
+        script = False
+        if signal.upper() == "C":
+            try:  # a job of several lines is a script: Ctrl-C alone only ends the line that runs
+                _with_ctl(lambda: ctl.stat(_job_file(job, "lines")))
+                script = True
+            except AmigaError:
+                pass
+        _with_ctl(lambda: ctl.exec(f"Break {m.group(1)} {'C D' if script else signal.upper()}"))
+        said = f"sent Ctrl-{signal.upper()} to job {job} (process {m.group(1)})"
+        return said + _end_broken_script(job, m.group(1)) if script else said
     name = command or last_started
     if not name:
         raise AmigaError("nothing started yet; give the command's name")

@@ -3,6 +3,19 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Fixes
+
+- amigentd gives the memory of its screen pictures back when the screen client
+  closes, breaks off, or is dropped after 120 seconds of silence and no other
+  client takes its place. Until now they stayed until amigentd quit: two copies
+  of a chipset screen's bitplanes, two bytes a pixel for a graphics-card screen
+  or the classic frame, and the tile packer. The next picture starts from
+  scratch, and CLIENT answers 1. A client that takes over from another still
+  gets only the changes. QUIT and Ctrl-C also free the planar picture, which
+  used to be left behind.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

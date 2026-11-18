@@ -3,6 +3,19 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Packing
+
+- Screens are timed on their own, packed and unpacked, and the faster way is
+  used. A screen no longer counts as a line sample, so a slow screen cannot
+  switch packing on for good: the other way is tried once, then one screen in
+  thirty. A packed command reply can still raise the line estimate, and it
+  cannot start one or lower it. The time for that reply runs from when the
+  request went out, so packing done before the answer is counted. link.json
+  is replaced whole, under a lock, when the screen and command connections
+  save it at once.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

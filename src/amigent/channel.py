@@ -244,6 +244,7 @@ class AmigaChannel(VolumeFlush):
         self.protocol = 0
         self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
         self.zlevel = 0  # what COMPRESS last set on this connection
+        self._asked = 0.0  # when the request whose answer comes next went out
 
     # link
 
@@ -327,6 +328,7 @@ class AmigaChannel(VolumeFlush):
             if len(packed) < len(payload) * 0.9:
                 arg, w, h, payload = arg | 2, len(packed) >> 16, len(packed) & 0xFFFF, packed
         head = struct.pack(">BBHHHH", req.cmd, arg, len(raw), req.y, w, h)
+        self._asked = time.monotonic()  # before any byte of its answer can come
         self._send(head + raw + payload)  # one segment, not three: plip pays per packet
 
     def _body(self, size: int) -> bytes:
@@ -336,7 +338,9 @@ class AmigaChannel(VolumeFlush):
             data, wire = unpack_frames(self._exact, size)
         else:
             data, wire = self._exact(size), size
-        if self.policy and not self.zlevel:  # packed, the Amiga's CPU may be what is measured
+        if self.policy and self.zlevel:  # it waited on the Amiga's packing too: a floor
+            self.policy.note(wire, time.monotonic() - self._asked, at_least=True)
+        elif self.policy:
             self.policy.note(wire, time.monotonic() - start)
         return data
 
@@ -392,6 +396,7 @@ class AmigaChannel(VolumeFlush):
         if not self._sock:
             self.connect()
         results: list = [None] * len(requests)
+        asked = [0.0] * len(requests)
         sent = got = 0
         try:
             self._sync_packing()
@@ -399,8 +404,10 @@ class AmigaChannel(VolumeFlush):
                 while sent < len(requests) and sent - got < window:
                     self._sock.settimeout(self.timeout)
                     self._put(requests[sent])
+                    asked[sent] = self._asked
                     sent += 1
                 self._sock.settimeout(max(requests[got].wait, self.timeout))
+                self._asked = asked[got]  # its answer is the one that comes now
                 try:
                     self._status()
                     results[got] = requests[got].read(self)

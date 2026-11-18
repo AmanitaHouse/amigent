@@ -28,6 +28,7 @@ UNKNOWN_LINE = 100.0  # KB/s to assume before anything was measured: a typical A
 LOCAL_LINE = 20000.0  # KB/s for an emulator on this PC
 MIN_SAMPLE = 8192  # bytes; smaller replies say more about latency than about the line
 ALPHA = 0.3  # weight of a new measurement
+EXPLORE = 30  # screens between tries of the way that lost, in case it pays now
 
 
 def _file() -> Path:
@@ -54,6 +55,8 @@ class Policy:
         except (TypeError, ValueError):
             self.line_kbs = None
         self._lock = threading.Lock()
+        self._screens: dict[bool, float | None] = {False: None, True: None}  # KB/s unpacked, packed
+        self._since_try = EXPLORE  # screens since the losing way was tried: due at once
 
     def set_mode(self, mode: str) -> None:
         """auto, off, fast or best; kept for this Amiga from now on."""
@@ -79,13 +82,25 @@ class Policy:
 
     # the line
 
-    def note(self, nbytes: int, seconds: float) -> None:
-        """nbytes came in over seconds, counted from the first byte of a reply."""
+    def note(self, nbytes: int, seconds: float, at_least: bool = False) -> None:
+        """nbytes of a reply came in over seconds.
+
+        at_least: the reply came packed, so it waited on the Amiga's packing
+        too, and seconds run from when the request went out: it shows only
+        that the line carries at least that much. It can raise the estimate,
+        never lower it, and never start one."""
         if nbytes < MIN_SAMPLE or seconds <= 0.01:
             return
         kbs = nbytes / 1024 / seconds
         with self._lock:
-            self.line_kbs = kbs if self.line_kbs is None else (1 - ALPHA) * self.line_kbs + ALPHA * kbs
+            if self.line_kbs is None:
+                if at_least:
+                    return
+                self.line_kbs = kbs
+            elif at_least and kbs <= self.line_kbs:
+                return
+            else:
+                self.line_kbs = (1 - ALPHA) * self.line_kbs + ALPHA * kbs
         self._save()
 
     def line(self) -> float:
@@ -109,6 +124,43 @@ class Policy:
         if self.rates.get("deflate_fast", 0) >= FAST_FACTOR * line:
             return 1
         return 0
+
+    # Screens are measured, not modelled: a screen comes as fast as the Amiga
+    # turns it into tiles, so its pace says little about the line. What counts
+    # is how fast the tile bytes (as unpacked) arrive each way; the faster way
+    # wins. The other way gets one screen in EXPLORE (the first right after the
+    # first measurement), whether or not that screen is big enough to measure.
+
+    def frame_level(self) -> int:
+        """0, 1 or 2 for the next screen."""
+        model = self.level()
+        if self.mode != "auto" or not self.known:
+            return model
+        packed = model or (1 if self.rates.get("deflate_fast") else 0)
+        if not packed:
+            return 0
+        with self._lock:
+            plain, squeezed = self._screens[False], self._screens[True]
+            if plain is None and squeezed is None:
+                return packed if model else 0
+            if plain is None or squeezed is None:
+                pack_it = squeezed is not None  # the way measured so far
+            else:
+                pack_it = squeezed > plain
+            self._since_try += 1
+            if self._since_try > EXPLORE:
+                self._since_try = 1
+                pack_it = not pack_it
+        return packed if pack_it else 0
+
+    def note_frame(self, raw: int, seconds: float, packed: bool) -> None:
+        """A screen of raw tile bytes (as unpacked) took seconds, packed or not."""
+        if raw < MIN_SAMPLE or seconds <= 0.01:
+            return
+        kbs = raw / 1024 / seconds
+        with self._lock:
+            old = self._screens[packed]
+            self._screens[packed] = kbs if old is None else (1 - ALPHA) * old + ALPHA * kbs
 
     def upload(self) -> bool:
         """Pack what goes to the Amiga: unpacking is its part then."""
@@ -140,7 +192,7 @@ class Policy:
             return {}
 
     def _save(self, chose: bool = False) -> None:
-        with _saving:
+        with _saving:  # the screen and command connections note from different threads
             try:
                 try:
                     everything = json.loads(self.path.read_text())
@@ -157,7 +209,9 @@ class Policy:
                 everything[self.name] = {"kbs": round(self.line_kbs or 0, 1), "mode": self.chosen,
                                          "at": int(time.time())}
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.path.write_text(json.dumps(everything))
+                part = self.path.with_name(f"{self.path.name}.{os.getpid()}.part")  # one per process
+                part.write_text(json.dumps(everything))
+                os.replace(part, self.path)  # a reader never sees half a file
             except OSError:
                 pass  # only the next session's first guess is lost
 

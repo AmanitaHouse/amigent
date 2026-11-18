@@ -3,6 +3,16 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+### Fixes
+
+- amigent-monitor composes each update in a backing bitmap and copies the
+  changed rectangle into the window, so clearing the sidebar is not shown.
+  OS 3 and RTG use a friend bitmap; OS 2 uses chip bitplanes. If that
+  allocation fails, it draws straight into the window as before. The packaged
+  monitor binary is unchanged until it is rebuilt from this source.
+
 ## 1.3.0 (2026-11-09)
 
 ### Text instead of pictures

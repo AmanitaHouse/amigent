@@ -3148,6 +3148,9 @@ static void free_pictures(void)
 {
     ObtainSemaphore(&picture);
     free_frame();
+    zz_free();  /* the ZZ9000 mirror too; the next look starts the card over */
+    zz.reset = TRUE;
+    zz.cur = NULL;  /* a new cur may get the old address */
     ReleaseSemaphore(&picture);
     free_planar();
     z_free(frame_z);

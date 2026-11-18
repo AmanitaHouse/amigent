@@ -42,6 +42,10 @@ Versions follow [semver](https://semver.org). The number lives in
   thirty. A packed command reply can still raise the line estimate, and it
   cannot start one or lower it. The time for that reply runs from when the
   request went out, so packing done before the answer is counted.
+- Mode and line estimates share one save. It follows a mode another process
+  stored, then replaces link.json whole. A screen measurement does not write
+  the file, so it cannot put a stale startup mode back, and packing switched
+  off for lack of memory stays off until someone chooses.
 
 ## 1.3.0 (2026-11-09)
 

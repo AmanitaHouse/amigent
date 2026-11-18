@@ -2,6 +2,7 @@
 installations that can be undone, Aminet, and several steps in one call."""
 
 import json
+import os
 import shutil
 import socket
 import struct
@@ -354,6 +355,43 @@ def test_small_screens_do_not_keep_the_losing_way_on(tmp_path):
         p.note_frame(2048, 0.05, bool(level))  # too small to count
         ways.append(level)
     assert ways.count(1) == 2
+
+
+def test_screens_keep_another_process_mode_and_a_memory_fallback(tmp_path):
+    """Screen timing and a later line sample share the mode save.
+
+    A session that still holds the mode from its start must not write that
+    over a choice another process saved, not even while it measures screens.
+    Packing switched off because COMPRESS was refused stays off across those
+    screens. A packed reply still cannot invent or lower the line estimate.
+    """
+    path = tmp_path / "both.json"
+    stale = pack.Policy("A", "10.0.0.2", path=path)
+    stale.learn({"deflate_fast": "350", "deflate_best": "140", "inflate": "500"})
+    stale.line_kbs = 1800.0
+    pack.Policy("A", "10.0.0.2", path=path).set_mode("off")
+    level = stale.frame_level()
+    stale.note_frame(200 * 1024, 200 / 235, bool(level))
+    assert json.loads(path.read_text())["A"]["mode"] == "off"
+    assert stale.line_kbs == 1800.0
+    stale.note(64 * 1024, 0.1)
+    assert stale.mode == "off"
+    assert json.loads(path.read_text())["A"]["mode"] == "off"
+    assert not path.with_name(f"{path.name}.{os.getpid()}.part").exists()
+
+    fresh = pack.Policy("B", "10.0.0.3", path=path)
+    fresh.learn({"deflate_fast": "350", "deflate_best": "140", "inflate": "500"})
+    fresh.note(64 * 1024, 1.0)
+    fresh.mode = "off"  # AmigaChannel._sync_packing after COMPRESS is refused
+    fresh.note_frame(200 * 1024, 1.0, False)
+    held = fresh.line_kbs
+    fresh.note_floor(64 * 1024, 4.0)  # slower than the line: the CPU waited
+    assert fresh.line_kbs == held
+    fresh.note(64 * 1024, 1.0)
+    assert fresh.mode == "off"
+    bare = pack.Policy("C", "10.0.0.4", path=path)
+    bare.note_floor(1024 * 1024, 1.0)
+    assert bare.line_kbs is None
 
 
 def test_a_screen_counts_the_time_before_its_header(tmp_path, monkeypatch):

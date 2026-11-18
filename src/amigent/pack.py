@@ -235,7 +235,9 @@ class Policy:
                 everything[self.name] = {"kbs": round(self.line_kbs or 0, 1), "mode": self.chosen,
                                          "at": int(time.time())}
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.path.write_text(json.dumps(everything))
+                part = self.path.with_name(f"{self.path.name}.{os.getpid()}.part")
+                part.write_text(json.dumps(everything))
+                os.replace(part, self.path)  # a reader never sees half a file
             except OSError:
                 pass  # only the next session's first guess is lost
 

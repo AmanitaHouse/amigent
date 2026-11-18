@@ -388,6 +388,25 @@ static void set_buttons(UWORD mask)
     }
 }
 
+/* 0x63 control, 0x66 left Amiga, 0x67 right Amiga. The keyboard pulls reset
+ * when all three are down. A chord posted through input.device never reaches
+ * that circuit, so the chord calls ColdReboot, the same reset C:Reboot runs.
+ * Kickstart 2.04 has it. */
+static void note_reset_chord(UBYTE code, BOOL down)
+{
+    static UBYTE held;
+    UBYTE bit = code == 0x63 ? 1 : code == 0x66 ? 2 : code == 0x67 ? 4 : 0;
+
+    if (!bit)
+        return;
+    if (down)
+        held |= bit;
+    else
+        held &= (UBYTE)~bit;
+    if (held == 7 && SysBase->LibNode.lib_Version >= 36)
+        ColdReboot();
+}
+
 static void key(UBYTE code, BOOL down, UWORD qualifier)
 {
     struct InputEvent ev;
@@ -408,6 +427,7 @@ static void key(UBYTE code, BOOL down, UWORD qualifier)
         prev_code[0] = code;
         prev_qual[0] = qualifier;
     }
+    note_reset_chord(code, down);
 }
 
 static BOOL type_char(UWORD ch, UWORD extra)

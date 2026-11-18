@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from amigent.amigentd import Amigentd, Pipeline, decode_tile, tile_fits, unpack_tile
+from amigent.amigentd import Amigentd, Pipeline, decode_tile, reset_chord, tile_fits, unpack_tile
 from amigent.screenfeed import Feed, InputQueue, Planner, chunks, commands
 from slowlink import FakeAmiga, SlowLink, mark_colour, mark_rgb, pack
 
@@ -42,6 +42,14 @@ def test_take_waits_at_a_move_while_one_is_on_its_way():
     q.put({"t": "buttons", "mask": 1})
     assert [op["t"] for op in q.take(hold_moves=True)] == ["char"]
     assert [op["t"] for op in q.take()] == ["move", "buttons"]
+
+
+def test_reset_chord_is_three_keys_held_down():
+    ops = reset_chord()
+    assert [op["code"] for op in ops] == [0x63, 0x66, 0x67]
+    assert [op["q"] for op in ops] == [0x08, 0x48, 0xC8]
+    cmds = [cmd for op in ops for cmd in commands(op, 640, 256)]
+    assert cmds == [(5, 1, 0x63, 0x08), (5, 1, 0x66, 0x48), (5, 1, 0x67, 0xC8)]
 
 
 def test_page_ops_become_amigentd_commands():

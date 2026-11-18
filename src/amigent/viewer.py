@@ -31,9 +31,9 @@ from pathlib import Path
 
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
-from .amigentd import Amigentd
+from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
-from .system import OS_NAMES, describe_system, native_ppc, ppc_software  # noqa: F401 - tests import them from here
+from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -417,9 +417,39 @@ class Viewer:
                    h=self.screen.height, paused=left)
         self.feed.ring()  # a resume wants a fresh look now, not in five seconds
 
+    def _exec_version(self) -> str:
+        """The exec the daemon is running, as '37.175'. Kickstart from Version if SYSINFO has none."""
+        info = self._ctl(self.ctl.sysinfo)
+        version = str(info.get("exec_version") or "")
+        return version or str(self.amiga.get("kickstart") or "")
+
+    def _reboot_missing(self) -> bool:
+        """True when C:Reboot is absent. A dead connection is raised, not treated as missing."""
+        try:
+            self._ctl(lambda: self.ctl.stat("C:Reboot"))
+        except AmigaError as exc:
+            if exc.code is None:
+                raise
+            return True
+        return False
+
+    def _submit_reset_chord(self) -> None:
+        """Ctrl and both Amiga keys, down together, on the screen connection."""
+        for op in reset_chord():
+            self.inputs.put(op)
+        self.feed.ring()
+
     def _restart(self) -> None:
         self.event("toast", key="restarting")
         try:
+            # Workbench 3.0 added C:Reboot. An older system still resets from
+            # the keyboard chord, which is what the viewer sends instead.
+            if self._reboot_missing() and exec_before_os3(self._exec_version()):
+                if not self.online:
+                    raise AmigaError("the Amiga is not connected")
+                self._ctl(lambda: self.ctl.flush(self.flush_volumes))
+                self._submit_reset_chord()
+                return
             if self.restart:
                 self.restart()
             else:

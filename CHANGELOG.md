@@ -26,6 +26,11 @@ Versions follow [semver](https://semver.org). The number lives in
   scratch, and CLIENT answers 1. A client that takes over from another still
   gets only the changes. QUIT and Ctrl-C also free the planar picture, which
   used to be left behind.
+- amigent-monitor composes each update in a backing bitmap and copies the
+  changed rectangle into the window, so clearing the sidebar is not shown.
+  OS 3 and RTG use a friend bitmap; OS 2 uses chip bitplanes. If that
+  allocation fails, it draws straight into the window as before. The packaged
+  monitor binary is unchanged until it is rebuilt from this source.
 
 ### Packing
 

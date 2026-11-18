@@ -4,10 +4,14 @@ Usage: make_release.py HOST
 
 Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
 Writes dist/amigent.lha with an Amigent drawer: amigentd (68020),
-amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe and the licence,
-and next to it amigent.readme for Aminet. Aminet wants the version in the
-readme, not in the file name: uploading amigent.lha again replaces the last one.
-The same archive goes to the GitHub release as amigent-<version>.lha.
+amigentd.000 (68000) if that packaged file is present, amigentd.apollo when
+that packaged file is present, amigent-monitor when present, the icon,
+Amigent-Update, ReadMe and the licence, and next to it amigent.readme for
+Aminet. Aminet wants the version in the readme, not in the file name:
+uploading amigent.lha again replaces the last one. The same archive goes to
+the GitHub release as amigent-<version>.lha. The drawer's programs are the
+files in src/amigent/amiga/bin, the same ones a wheel and a source
+distribution install.
 """
 
 from __future__ import annotations
@@ -34,7 +38,8 @@ On the Amiga
 
 1. Copy this drawer to the Amiga, for example to RAM:.
 2. Double-click amigentd, or run "amigentd SETUP" in a Shell.
-   On a plain 68000 take amigentd.000 instead.
+   On a plain 68000 take amigentd.000 instead. On ApolloOS take
+   amigentd.apollo. AmigaOS on a Vampire keeps amigentd.
 
 On the PC or Mac
 
@@ -76,8 +81,9 @@ the old one starts again. One side alone keeps working as before, the new
 features need both. From 1.3.0 on the PC tells you when the Amiga is ahead.
 
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
-any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
-TCP/IP stack with bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
+any CPU from the 68000 on (AmigaOS on a Vampire's 68080 runs the plain
+amigentd; ApolloOS runs amigentd.apollo), a TCP/IP stack with
+bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
 
 Tool types of the icon: SETUP (accept the first install from the PC),
 KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
@@ -197,7 +203,8 @@ INSTALLATION
 4. For the remote desktop alone, no AI agent needed: amigent-viewer --install
    puts Amigent into the Start menu (Windows) or Applications (macOS).
 
-A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
+AmigaOS on a Vampire's 68080 runs the plain amigentd. ApolloOS runs
+amigentd.apollo from this drawer. Tool types and Shell arguments:
 SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY. amigentd answers ARexx on the
 port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
 TYPE, KEY, BUSY, HELP, QUIT).
@@ -253,6 +260,35 @@ def aminet_readme() -> str:
     return text
 
 
+def release_files(bin_dir: Path | None = None, root: Path | None = None) -> dict[str, Path]:
+    """Programs for the Aminet drawer.
+
+    ``bin_dir`` is the packaged ``amiga/bin`` tree. A wheel and a source
+    distribution install that same tree, so the archive cannot point at
+    ``build/`` or at a second copy of the binaries.
+    """
+    bin_dir = BIN if bin_dir is None else bin_dir
+    root = ROOT if root is None else root
+    files = {"amigentd": bin_dir / "amigentd", "amigentd.info": bin_dir / "amigentd.info",
+             "LICENSE": root / "LICENSE"}
+    if (bin_dir / "amigent-status").exists():
+        files["amigent-status"] = bin_dir / "amigent-status"
+        files["amigent-status.info"] = bin_dir / "amigent-status.info"
+    if (bin_dir / "amigent-monitor").exists():
+        files["amigent-monitor"] = bin_dir / "amigent-monitor"
+        files["amigent-monitor.info"] = bin_dir / "amigent-monitor.info"
+    if (bin_dir / "amigentd.000").exists():
+        files["amigentd.000"] = bin_dir / "amigentd.000"
+        files["amigentd.000.info"] = bin_dir / "amigentd.info"
+    if (bin_dir / "amigentd.apollo").exists():
+        files["amigentd.apollo"] = bin_dir / "amigentd.apollo"
+        files["amigentd.apollo.info"] = bin_dir / "amigentd.info"
+    amiga = root / "src" / "amigent" / "amiga"
+    for name in ("Amigent-Update", "Amigent-Update.info", "amigent-update.rexx"):
+        files[name] = amiga / name
+    return files
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
@@ -263,25 +299,12 @@ def main() -> None:
     ctl.exec(f"Delete >NIL: {stage} ALL QUIET")
     ctl.makedir(stage)
     ctl.makedir(folder)
-    files = {"amigentd": BIN / "amigentd", "amigentd.info": BIN / "amigentd.info",
-             "LICENSE": ROOT / "LICENSE"}
-    if (BIN / "amigent-status").exists():
-        files["amigent-status"] = BIN / "amigent-status"
-        files["amigent-status.info"] = BIN / "amigent-status.info"
-    if (BIN / "amigent-monitor").exists():
-        files["amigent-monitor"] = BIN / "amigent-monitor"
-        files["amigent-monitor.info"] = BIN / "amigent-monitor.info"
-    if (BIN / "amigentd.000").exists():
-        files["amigentd.000"] = BIN / "amigentd.000"
-        files["amigentd.000.info"] = BIN / "amigentd.info"
-    amiga = ROOT / "src" / "amigent" / "amiga"
-    for name in ("Amigent-Update", "Amigent-Update.info", "amigent-update.rexx"):
-        files[name] = amiga / name
+    files = release_files()
     for name, source in files.items():
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
     ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
-    for name in ("amigentd", "amigentd.000", "amigent-status", "amigent-monitor"):
+    for name in ("amigentd", "amigentd.000", "amigentd.apollo", "amigent-status", "amigent-monitor"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
     archive = "amigent.lha"

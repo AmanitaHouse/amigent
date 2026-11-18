@@ -412,10 +412,18 @@ builds `amigentd.apollo` with ApolloCrossDev's gcc and vasmm68k_mot. Set
 `APOLLOCROSSDEV` to the ApolloCrossDev checkout; the makefile uses
 `$APOLLOCROSSDEV/Compilers/GCC-6.50-Stable`. The default target writes
 `build/apollo/` and does not copy anything into `src/amigent/amiga/bin/`.
-`make -f src/native/amiga/Makefile.apollo install` does that copy. A clean
-compile here reproduced the preserved 108076-byte product baseline. It has
-not been run on Apollo hardware, so it is not a release-approved V4 build.
-`scripts/make_release.py` packs the archive with LhA on the Amiga. Tests for
+`make -f src/native/amiga/Makefile.apollo install` does that copy. A wheel,
+a source distribution, `amigent-setup`, and `scripts/make_release.py` all
+read the files already in `src/amigent/amiga/bin/`. The `amigentd.apollo`
+there includes the native port-release retry and the screen-buffer release,
+and that is the ApolloOS executable that was run on a V4. `amigentd` and
+`amigentd.000` in that directory are earlier binaries and do not include
+those native changes. A fresh `make` into `build/apollo/` does not replace
+them. A clean compile that reproduces the older 108076-byte baseline is a
+different file from the packaged Apollo executable, and it has not by
+itself been run on Apollo hardware. `scripts/make_release.py` packs the
+archive with LhA on the Amiga from those packaged files, including
+`amigentd.apollo` and `amigent-monitor` when they are present. Tests for
 the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
 
 A source distribution contains the maintained Python package, the tests, the

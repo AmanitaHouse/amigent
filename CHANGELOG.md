@@ -12,9 +12,10 @@ Versions follow [semver](https://semver.org). The number lives in
   the port taken for about a minute after it quits, while the new amigentd
   tried for 60 s and the script waited 15 s, then put the old one back. The
   new amigentd tries for 90 s, the script waits 100 s, and
-  `amigent-setup --update` waits 180 s. The packaged daemon binaries are
-  unchanged, so the 90 s retry arrives with the next build of them; the
-  longer waits in the script and in setup work with any amigentd.
+  `amigent-setup --update` waits 180 s. That 90 s retry is in the packaged
+  `amigentd.apollo`. The packaged `amigentd` and `amigentd.000` are earlier
+  binaries and do not have it. The longer waits in the script and in setup
+  apply on every machine, whichever of those binaries the installer copies.
 
 ### Fixes
 
@@ -25,12 +26,15 @@ Versions follow [semver](https://semver.org). The number lives in
   or the classic frame, and the tile packer. The next picture starts from
   scratch, and CLIENT answers 1. A client that takes over from another still
   gets only the changes. QUIT and Ctrl-C also free the planar picture, which
-  used to be left behind.
+  used to be left behind. Those native frees are in the packaged
+  `amigentd.apollo`. The packaged `amigentd` and `amigentd.000` are earlier
+  binaries and still keep the pictures until they quit.
 - amigent-monitor composes each update in a backing bitmap and copies the
   changed rectangle into the window, so clearing the sidebar is not shown.
   OS 3 and RTG use a friend bitmap; OS 2 uses chip bitplanes. If that
   allocation fails, it draws straight into the window as before. The packaged
-  monitor binary is unchanged until it is rebuilt from this source.
+  `amigent-monitor` is this build. Install and update copy that one file on
+  every machine.
 
 ### Packing
 

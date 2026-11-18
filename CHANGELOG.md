@@ -135,6 +135,16 @@ Wishes from measuring window dragging on a real A1200:
   then put the old one back. The new amigentd now tries for 90 s, the script
   waits 100 s and `amigent-setup --update` 180 s. (#8)
 
+### Packing
+
+- A packing mode set with `amiga_link` (or `set_mode`) did not stay when
+  another amigent process ran for the same Amiga, such as a second session or
+  the remote desktop: each one kept the mode it had read at its start and
+  wrote it back into link.json with every line measurement, so `best` set
+  earlier came back minutes after `auto` replaced it. Saving now keeps the
+  mode link.json has, and a running process goes by it from its next save
+  on, unless its mode came from `AMIGENT_COMPRESS` or amigas.json. (#10)
+
 ### Fixes
 
 - `amiga_status` also recognizes a second kind of AI development bridge on the

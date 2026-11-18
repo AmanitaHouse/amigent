@@ -105,7 +105,8 @@ Wishes from measuring window dragging on a real A1200:
   ([#4](https://github.com/akustikrausch/amigent/issues/4)).
 - Restart on an Amiga older than OS 3.0 without `C:Reboot`: the viewer
   flushes the disks and holds Ctrl and both Amiga keys; amigentd sees the
-  three keys down and calls ColdReboot(). Needs the 1.4.0 amigentd. (#14)
+  three keys down within five seconds and calls ColdReboot(). Needs the 1.4.0
+  amigentd. (#14)
 
 ### Emulators
 

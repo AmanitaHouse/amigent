@@ -418,6 +418,9 @@ real mouse and keyboard.
 - BUTTON sends the whole mask, not a change. The service presses and releases
   whatever differs from the last mask.
 - RAWKEY passes rawkey and qualifier as they are, see `devices/inputevent.h`.
+  From 1.4.0, Ctrl and both Amiga keys (`0x63`, `0x66`, `0x67`) pressed within
+  five seconds and all still down restart the Amiga with `ColdReboot()`, as
+  the keyboard would (Kickstart 2.0 and newer); flush the disks first.
 - CHAR turns the character into keys through the system keymap, dead keys
   included, and adds `y` to each key's qualifier. Answers `1` if the keymap has no
   way to type it.

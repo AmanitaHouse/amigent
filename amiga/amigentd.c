@@ -397,22 +397,33 @@ static void set_buttons(UWORD mask)
     }
 }
 
+static ULONG now_ms(void);
+
 /* 0x63 control, 0x66 left Amiga, 0x67 right Amiga. The keyboard pulls reset
  * when all three are down. A chord posted through input.device never reaches
  * that circuit, so the chord calls ColdReboot, the same reset C:Reboot runs.
- * Kickstart 2.04 has it. */
+ * Kickstart 2.04 has it. The three have to go down within CHORD_MS: a key
+ * whose release never came (a client that broke off) must not turn two keys
+ * pressed much later into a reset. */
+#define CHORD_MS 5000
 static void note_reset_chord(UBYTE code, BOOL down)
 {
-    static UBYTE held;
-    UBYTE bit = code == 0x63 ? 1 : code == 0x66 ? 2 : code == 0x67 ? 4 : 0;
+    static ULONG at[3];  /* when each went down, 0 while it is up */
+    LONG i = code == 0x63 ? 0 : code == 0x66 ? 1 : code == 0x67 ? 2 : -1;
+    ULONG ms;
 
-    if (!bit)
+    if (i < 0)
         return;
-    if (down)
-        held |= bit;
-    else
-        held &= (UBYTE)~bit;
-    if (held == 7 && SysBase->LibNode.lib_Version >= 36)
+    if (!down) {
+        at[i] = 0;
+        return;
+    }
+    ms = now_ms() | 1;  /* never 0: that means up */
+    at[i] = ms;
+    for (i = 0; i < 3; i++)
+        if (!at[i] || ms - at[i] > CHORD_MS)
+            return;
+    if (SysBase->LibNode.lib_Version >= 36)
         ColdReboot();
 }
 
@@ -901,6 +912,7 @@ struct zz_async {
     UBYTE spare[16];  /* room, should the library's alignment differ from ours */
 };
 
+#ifdef __VBCC__
 LONG __ZZ9KQueryService(__reg("a6") struct Library *, __reg("d0") ULONG id,
                         __reg("a0") struct zz_service *info) = "\tjsr\t-36(a6)";
 LONG __ZZ9KAllocShared(__reg("a6") struct Library *, __reg("d0") ULONG length, __reg("d1") ULONG align,
@@ -917,8 +929,23 @@ LONG __ZZ9KCancelAsync(__reg("a6") struct Library *, __reg("a0") struct zz_async
 #define ZZ9KMapFramebufferSurface(surface) __ZZ9KMapFramebufferSurface(ZZ9KBase, (surface))
 #define ZZ9KCallAsyncMsg(async, req, port) __ZZ9KCallAsyncMsg(ZZ9KBase, (async), (req), (port))
 #define ZZ9KCancelAsync(async) __ZZ9KCancelAsync(ZZ9KBase, (async))
+#else
+#define ZZ9KQueryService(id, info) LP2(36, LONG, ZZ9KQueryService, ULONG, (id), d0, \
+    struct zz_service *, (info), a0, struct Library *, ZZ9KBase)
+#define ZZ9KAllocShared(length, align, flags, buf) LP4(72, LONG, ZZ9KAllocShared, ULONG, (length), d0, \
+    ULONG, (align), d1, ULONG, (flags), d2, struct zz_shared *, (buf), a0, struct Library *, ZZ9KBase)
+#define ZZ9KFreeShared(handle) LP1(78, LONG, ZZ9KFreeShared, ULONG, (handle), d0, struct Library *, ZZ9KBase)
+#define ZZ9KMapFramebufferSurface(surface) LP1(114, LONG, ZZ9KMapFramebufferSurface, \
+    struct zz_surface *, (surface), a0, struct Library *, ZZ9KBase)
+#define ZZ9KCallAsyncMsg(async, req, port) LP3(132, LONG, ZZ9KCallAsyncMsg, struct zz_async *, (async), a0, \
+    struct zz_entry *, (req), a1, struct MsgPort *, (port), a2, struct Library *, ZZ9KBase)
+#define ZZ9KCancelAsync(async) LP1(144, LONG, ZZ9KCancelAsync, struct zz_async *, (async), a0, \
+    struct Library *, ZZ9KBase)
+#endif
 
+#ifndef LBMI_BASEADDRESS
 #define LBMI_BASEADDRESS 0x84001007
+#endif
 
 static struct {
     struct zz_shared out;   /* where the card writes its answer; handle 0 when there is none */
@@ -3148,7 +3175,8 @@ static void free_pictures(void)
 {
     ObtainSemaphore(&picture);
     free_frame();
-    zz_free();  /* the ZZ9000 mirror too; the next look starts the card over */
+    if (zz.fails < ZZ_GIVE_UP)  /* after a timeout the card may still write to its buffers */
+        zz_free();  /* the ZZ9000 mirror too; the next look starts the card over */
     zz.reset = TRUE;
     zz.cur = NULL;  /* a new cur may get the old address */
     ReleaseSemaphore(&picture);
@@ -6765,8 +6793,19 @@ static ULONG trace_count;
 static UBYTE cpu_cache;  /* 0 none, 1 68020/030, 2 68040/060 */
 
 /* Clear the caches from supervisor mode, where CacheClearU() is no help. */
+#ifdef __VBCC__
 void sv_flush030(void) = "\tdc.w\t$4e7a,$0002\n\tdc.w\t$0040,$0808\n\tdc.w\t$4e7b,$0002";
 void sv_flush040(void) = "\tdc.w\t$f4f8";
+#else
+static inline void sv_flush030(void)
+{
+    __asm__ volatile(".word 0x4e7a,0x0002\n\t.word 0x0040,0x0808\n\t.word 0x4e7b,0x0002" : : : "d0", "cc");
+}
+static inline void sv_flush040(void)
+{
+    __asm__ volatile(".word 0xf4f8");
+}
+#endif
 
 static void flush_caches(void)
 {

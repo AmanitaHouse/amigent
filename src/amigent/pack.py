@@ -210,8 +210,12 @@ class Policy:
                                          "at": int(time.time())}
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 part = self.path.with_name(f"{self.path.name}.{os.getpid()}.part")  # one per process
-                part.write_text(json.dumps(everything))
-                os.replace(part, self.path)  # a reader never sees half a file
+                try:
+                    part.write_text(json.dumps(everything))
+                    os.replace(part, self.path)  # a reader never sees half a file
+                except OSError:
+                    part.unlink(missing_ok=True)  # Windows: another process had link.json open
+                    raise
             except OSError:
                 pass  # only the next session's first guess is lost
 

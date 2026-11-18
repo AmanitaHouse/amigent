@@ -319,6 +319,17 @@ def test_shared_historical_pin_requires_verified_machine_pin(private_config, mon
     assert tls.pinned(a["id"]).read_bytes() == b"verified"
 
 
+def test_pin_restored_after_migration_still_requires_proof(private_config):
+    legacy(private_config, [{"name": "A", "host": "192.0.2.1", "seen": ["192.0.2.9"]},
+                            {"name": "B", "host": "192.0.2.2", "seen": ["192.0.2.9"]}])
+    a, b = roster.load()
+    roster.forget(b["id"])
+    assert not tls.wanted(a["id"])
+    (private_config / "tls-192.0.2.9.pem").write_text("restored")
+    with pytest.raises(roster.RegistryError, match="Ambiguous TLS pin"):
+        tls.wanted(a["id"])
+
+
 def test_invalid_registry_keeps_mcp_available(private_config):
     import asyncio
     import os

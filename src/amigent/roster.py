@@ -104,6 +104,12 @@ def _shared_stems(entry, amigas):
     return {paths.safe(v) for v in _all_stems(entry)} & others
 
 
+def _blocked_pins(entry, amigas):
+    stems = _shared_stems(entry, amigas) | set(entry.get("shared_legacy_stems", []))
+    restored = {v for v in stems if (paths.FOLDER / f"tls-{v}.pem").exists()}
+    return restored | set(entry.get("unclaimed_pins", []))
+
+
 def _legacy_stems(entry, amigas):
     """Never borrow credentials from an address/name shared by two entries."""
     values = _all_stems(entry)
@@ -119,10 +125,11 @@ def _legacy_stems(entry, amigas):
 
 def _migrate_assets(entry, amigas, *, history=True):
     ident = entry["id"]
+    blocked = _blocked_pins(entry, amigas)
     allowed = list(_legacy_stems(entry, amigas))
     for old in allowed:
         for prefix, suffix in (("key-", ""), ("tls-", ".pem")):
-            if prefix == "tls-" and paths.safe(old) in entry.get("unclaimed_pins", []):
+            if prefix == "tls-" and paths.safe(old) in blocked:
                 continue
             _copy_missing(paths.FOLDER / f"{prefix}{paths.safe(old)}{suffix}",
                           paths.FOLDER / f"{prefix}{ident}{suffix}")
@@ -179,7 +186,7 @@ def load() -> list[dict]:
             if any(not isinstance(i, str) or not is_id(i) for i in ids) or len(set(ids)) != len(ids):
                 raise ValueError("invalid or duplicate machine IDs")
             for a in amigas:
-                for field in ("seen", "previous_names", "unclaimed_pins"):
+                for field in ("seen", "previous_names", "unclaimed_pins", "shared_legacy_stems"):
                     values = a.get(field, [])
                     if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
                         raise ValueError(f"{field} must be a list of strings")
@@ -204,7 +211,8 @@ def load() -> list[dict]:
             common_owner = _legacy_id(original[0]["name"]) if len(original) == 1 else None
             for entry in pending:
                 shared = _shared_stems(entry, amigas)
-                entry["unclaimed_pins"] = sorted(v for v in shared if (paths.FOLDER / f"tls-{v}.pem").exists())
+                entry["shared_legacy_stems"] = sorted(shared)
+                entry["unclaimed_pins"] = sorted(_blocked_pins(entry, amigas))
                 _migrate_assets(entry, amigas)
                 if entry["id"] == common_owner:
                     _copy_missing(paths.FOLDER / "key", paths.FOLDER / f"key-{common_owner}")
@@ -277,6 +285,15 @@ def address(host: str) -> str:
     return host
 
 
+def pin_conflicts(host: str) -> tuple[str, set[str]]:
+    """Pins with multiple possible owners, including pins restored after migration."""
+    amigas = load()
+    entry = _find(str(host), amigas)
+    if not entry or not entry.get("legacy_credentials"):
+        return "", set()
+    return entry["id"], _blocked_pins(entry, amigas)
+
+
 def stems(host: str) -> list[str]:
     amigas = load()
     entry = _find(str(host), amigas)
@@ -331,7 +348,7 @@ def remember(name: str, host: str, make_default: bool = False) -> dict:
         # Setup may have saved credentials by address before registration.
         # Never adopt a removed machine's name-based history for a new ID.
         for prefix, suffix in (("key-", ""), ("tls-", ".pem")):
-            if prefix == "tls-" and paths.safe(host) in entry.get("unclaimed_pins", []):
+            if prefix == "tls-" and paths.safe(host) in _blocked_pins(entry, amigas):
                 continue
             _copy_missing(paths.FOLDER / f"{prefix}{paths.safe(host)}{suffix}",
                           paths.FOLDER / f"{prefix}{entry['id']}{suffix}")

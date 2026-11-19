@@ -15,11 +15,17 @@ The package version stays `1.3.1rc1`. This is not a release. The packaged
 No Amiga has been reset with it.
 
 Ctrl, Left Amiga and Right Amiga have to go down within five seconds of one
-another. amigentd then calls `ColdReboot()` when exec is 36 or newer. Exec 34
-and 35 do not reset. A key that went down earlier, including one whose release
+another. amigentd then calls `ColdReboot()` when exec is 36 or newer. On exec
+34 and 35 the same three key-downs are still delivered and `ColdReboot()` is
+not called. Nothing in the chord sends the matching key-ups, so those keys
+would stay down. A key that went down earlier, including one whose release
 never arrived because a client broke off, does not complete that chord. The
-remote desktop sends the three keys when `C:Reboot` is missing and exec is
-older than 39. `amiga_restart` still requires `C:Reboot`.
+remote desktop sends the three keys only when `C:Reboot` is missing and exec
+is 36, 37 or 38, after the disks are flushed. That is the released upstream
+1.4.0 fallback. Exec below 36 is a deliberate difference from upstream 1.4.0:
+the viewer sends no reset-chord keys and reports the restart as unsupported.
+Exec 39 and newer, and any system that has `C:Reboot`, still use the command.
+`amiga_restart` still requires `C:Reboot`.
 
 ## 1.3.1rc1 (2026-11-19)
 

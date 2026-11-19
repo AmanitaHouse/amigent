@@ -262,9 +262,12 @@ def test_other_keys_and_a_repeated_ctrl_are_not_a_chord(harness):
     assert run(harness, repeat) == [0, 0]
 
 
-def test_exec_older_than_36_does_not_reset(harness):
-    assert run(harness, chord((1000, 1100, 1200), version=35)) == [0]
-    assert run(harness, chord((1000, 1100, 1200), version=34)) == [0]
+def test_exec_older_than_36_posts_the_keys_and_does_not_reset(harness):
+    # key() posts the event before the version check. The viewer's chord
+    # never sends a key-up, so exec 34 and 35 receive the downs and stay up.
+    for version in (34, 35):
+        script = chord((1000, 1100, 1200), version=version) + "events\n"
+        assert run(harness, script) == [0, 3], version
     assert run(harness, chord((1000, 1100, 1200), version=36)) == [1]
     assert run(harness, chord((1000, 1100, 1200), version=37)) == [1]
 
@@ -297,6 +300,27 @@ def test_qualifiers_on_other_keys_do_not_reset(harness):
         "count",
     ]) + "\n"
     assert run(harness, script) == [0]
+
+
+def test_viewer_packets_on_exec_34_and_35_are_posted_and_do_not_reset(harness):
+    import struct
+
+    from amigent.amigentd import reset_chord
+    from amigent.screenfeed import commands
+
+    for version in (34, 35):
+        lines = [f"version {version}"]
+        ms = 1000
+        for op in reset_chord():
+            for cmd in commands(op, 640, 256):
+                packet = struct.pack(">BBHHHH", cmd[0], cmd[1], cmd[2], cmd[3], 0, 0)
+                assert len(packet) == 10
+                lines.append(f"time {ms}")
+                lines.append("packet " + packet.hex())
+                ms += 50
+        lines += ["count", "events"]
+        # The three downs are delivered. ColdReboot() does not run.
+        assert run(harness, "\n".join(lines) + "\n") == [0, 3], version
 
 
 def test_viewer_packets_reset_through_do_input(harness):

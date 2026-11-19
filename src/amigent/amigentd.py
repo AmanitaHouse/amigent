@@ -48,6 +48,10 @@ def reset_chord() -> list[dict]:
     Together those keys are the Amiga's reset. There is no key-up: the
     machine goes away while they are held. The qualifier on each key is
     every chord key already down, as a real keyboard reports it.
+
+    The viewer sends this only for exec 36, 37 and 38 when C:Reboot is
+    missing. Upstream 1.4.0 also sends it below exec 36. Those downs are
+    posted and ColdReboot() is not called, so this fork does not send them.
     """
     qualifier = 0
     ops = []

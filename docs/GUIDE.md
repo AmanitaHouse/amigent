@@ -247,9 +247,11 @@ interrupted copy.
 - **Text.** *Type text* sends a block of text; Ctrl+V sends the PC's clipboard.
 - **View.** Fit to window or 1:1, full screen (where the Windows or Cmd keys act
   as the Amiga keys), screenshot as PNG, and a restart that writes pending data
-  to disk first. On a Workbench older than 3.0 with no `C:Reboot`, that restart
+  to disk first. On exec 36, 37 or 38 with no `C:Reboot`, that restart
   sends Ctrl and both Amiga keys instead; they have to go down within five seconds.
-  `ColdReboot()` needs exec 36, so Kickstart 1.3 does not reset this way.
+  Exec below 36 cannot `ColdReboot()`. Upstream 1.4.0 would still send the
+  three keys, which stay down and do not reset. This viewer sends none and
+  reports the restart as unsupported.
 - **Pause the picture.** *Pause the picture* in the panel stops the Amiga
   reading its screen for 1, 5 or 15 minutes, so a test, a benchmark or a demo
   has the CPU and the chip bus to itself. The window keeps the last picture and

@@ -422,7 +422,11 @@ real mouse and keyboard.
   From 1.4.0, Ctrl and both Amiga keys (`0x63`, `0x66`, `0x67`) pressed within
   five seconds and all still down restart the Amiga with `ColdReboot()`, as
   the keyboard would (Kickstart 2.0 and newer); flush the disks first.
-  Exec 34 and 35 do not reset.
+  Exec below 36 does not call `ColdReboot()`. A client that sends only the
+  key-downs, as upstream 1.4.0's viewer does, still delivers those events,
+  and they are not released. This viewer's restart sends the chord only for
+  exec 36, 37 and 38 when `C:Reboot` is missing, and reports exec below 36
+  as an unsupported operation.
 - CHAR turns the character into keys through the system keymap, dead keys
   included, and adds `y` to each key's qualifier. Answers `1` if the keymap has no
   way to type it.

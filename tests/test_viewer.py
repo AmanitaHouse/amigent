@@ -155,7 +155,7 @@ def test_every_language_has_every_text():
 
 
 def test_describe_system():
-    from amigent.viewer import describe_system, exec_before_os3
+    from amigent.viewer import describe_system, exec_before_os3, exec_coldreboot
 
     facts = describe_system("Kickstart 47.115, Workbench 47.5\n",
                             "System: 68040 68882   (INST: Cache Burst) (DATA: Cache Burst)\n")
@@ -164,9 +164,12 @@ def test_describe_system():
     assert describe_system("", "")["os"] == ""
     assert exec_before_os3("37.175") and not exec_before_os3("39.106")
     assert not exec_before_os3("") and not exec_before_os3("Apollo")
+    assert exec_coldreboot("36.16") and exec_coldreboot("39.106")
+    assert not exec_coldreboot("34.5") and not exec_coldreboot("35.0")
+    assert not exec_coldreboot("") and not exec_coldreboot("Apollo")
 
 
-def _restart_of(stat, info, online=True, kickstart=""):
+def _restart_of(stat, info, online=True, kickstart="", flush_error=None):
     from amigent.errors import AmigaError
 
     viewer = Viewer("127.0.0.1", screen_port=1)
@@ -186,6 +189,8 @@ def _restart_of(stat, info, online=True, kickstart=""):
             return info
 
         def flush(self, volumes):
+            if flush_error is not None:
+                raise flush_error
             seen["flush"] = list(volumes)
 
     viewer.ctl = Ctl()
@@ -217,20 +222,107 @@ def test_os2_uses_kickstart_when_sysinfo_has_no_exec():
     assert [op["code"] for op in viewer.inputs.take()] == [0x63, 0x66, 0x67]
 
 
-def test_the_viewer_chord_follows_exec_39_not_the_coldreboot_guard():
-    """Missing C:Reboot sends the chord below exec 39, including 34 and 35.
-
-    ColdReboot() itself needs exec 36, so Kickstart 1.3 does not reset.
-    """
+def test_exec_below_36_without_reboot_sends_no_chord():
+    """Exec 34 and 35 would keep the unreleased downs, and would not reset."""
     from amigent.errors import AmigaError
 
     missing = AmigaError("object not found", 205)
-    for version in ("34.5", "35.0", "36.16", "38.35"):
+    for version in ("33.4", "34.5", "35.0"):
         viewer, seen = _restart_of(missing, {"exec_version": version})
-        assert seen["restart"] == 0, version
-        assert [op["code"] for op in viewer.inputs.take()] == [0x63, 0x66, 0x67], version
-    viewer, seen = _restart_of(missing, {"exec_version": "39.106"})
-    assert seen["restart"] == 1 and viewer.inputs.take() == []
+        assert seen["restart"] == 0 and seen["flush"] is None and seen["ring"] == 0, version
+        assert viewer.inputs.take() == [], version
+        failed = seen["toasts"][-1]
+        assert failed == ("toast", {"key": "restart_failed",
+                                    "text": f"unsupported operation: exec {version} cannot "
+                                            "ColdReboot() and has no C:Reboot"}), version
+
+
+def test_kickstart_below_36_without_reboot_sends_no_chord():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {}, kickstart="34.5")
+    assert seen["restart"] == 0 and seen["flush"] is None and seen["ring"] == 0
+    assert viewer.inputs.take() == []
+    assert "unsupported operation" in seen["toasts"][-1][1]["text"]
+    assert "34.5" in seen["toasts"][-1][1]["text"]
+
+
+def test_exec_36_through_38_keeps_the_three_key_chord():
+    from amigent.amigentd import reset_chord
+    from amigent.errors import AmigaError
+
+    missing = AmigaError("object not found", 205)
+    chord = reset_chord()
+    assert [op["code"] for op in chord] == [0x63, 0x66, 0x67]
+    assert [op["down"] for op in chord] == [True, True, True]
+    for version in ("36.16", "37.175", "38.35"):
+        viewer, seen = _restart_of(missing, {"exec_version": version})
+        assert seen["restart"] == 0 and seen["flush"] == ["SYS:"] and seen["ring"] == 1, version
+        assert viewer.inputs.take() == chord, version
+        assert seen["toasts"] == [("toast", {"key": "restarting"})], version
+
+
+def test_exec_39_and_newer_stay_on_the_command_path():
+    from amigent.errors import AmigaError
+
+    missing = AmigaError("object not found", 205)
+    for version in ("39.106", "40.68", "47.115"):
+        viewer, seen = _restart_of(missing, {"exec_version": version})
+        assert seen["restart"] == 1 and seen["flush"] is None and seen["ring"] == 0, version
+        assert viewer.inputs.take() == [], version
+    for version in ("39.106", "34.5", "37.175"):
+        viewer, seen = _restart_of({"type": "file"}, {"exec_version": version})
+        assert seen["restart"] == 1 and seen["ring"] == 0, version
+        assert viewer.inputs.take() == [], version
+
+
+def test_unavailable_screen_sends_no_reset_keys():
+    from amigent.errors import AmigaError
+
+    missing = AmigaError("object not found", 205)
+    for version in ("34.5", "35.0", "36.16", "37.175", "38.35"):
+        viewer, seen = _restart_of(missing, {"exec_version": version}, online=False)
+        queued = viewer.inputs.take()
+        assert queued == [], version
+        assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0, version
+        failed = seen["toasts"][-1][1]
+        assert failed["key"] == "restart_failed", version
+        if version.startswith(("34.", "35.")):
+            assert failed["text"].startswith("unsupported operation"), version
+        else:
+            assert failed["text"] == "the Amiga is not connected", version
+
+
+def test_a_flush_error_does_not_queue_a_partial_chord():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "37.175"},
+                               flush_error=OSError("disk"))
+    assert viewer.inputs.take() == []
+    assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+    assert seen["toasts"][-1][1]["key"] == "restart_failed"
+
+
+def test_shortcuts_and_remote_keys_bypass_the_reset_guard():
+    from amigent.errors import AmigaError
+    from amigent.screenfeed import commands
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "34.5"})
+    assert viewer.inputs.take() == []
+    ops = (
+        {"t": "combo", "k": "lamiga+n"},
+        {"t": "key", "code": 0x45, "down": True, "q": 0},
+        {"t": "char", "c": "a"},
+        {"t": "text", "s": "Hi"},
+        {"t": "key", "code": 0x63, "down": True, "q": 0x08},
+        {"t": "key", "code": 0x63, "down": False, "q": 0},
+    )
+    for op in ops:
+        viewer.submit(op)
+    assert viewer.inputs.take() == list(ops)
+    assert seen["restart"] == 0
+    assert commands({"t": "combo", "k": "lamiga+n"}, 640, 256) == [(7, 0, ord("n"), 0x40)]
+    assert commands({"t": "combo", "k": "ctrl+c"}, 640, 256) == [(7, 0, ord("c"), 0x08)]
 
 
 def test_os3_without_reboot_still_uses_the_command_path():

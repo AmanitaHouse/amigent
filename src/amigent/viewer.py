@@ -29,10 +29,10 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, net
+from . import __version__, machines, net, tls
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import Commands, apollo_commands, audio_uses_tls, pc_outdated
+from .channel import PLAIN_CLOSED_TEXT, Commands, apollo_commands, audio_uses_tls, pc_outdated
 from .system import OS_NAMES, describe_system, exec_before_os3, exec_coldreboot, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -41,6 +41,70 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
                         _Handler, _Server)
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
+
+# Shown as themselves. Anything else that fails the link stays the generic
+# "not answering" line, so a greeting, a path or an OS detail is not printed.
+KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
+KEY_REFUSED = ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+               "must match S:amigent.key on the Amiga")
+CLOSED_BY_DAEMON = "connection closed by amigentd"
+STOPPED_ANSWERING = "amigentd stopped answering."
+UNEXPECTED_GREETING = "The Amiga sent an unexpected greeting."
+DID_NOT_ANSWER = "The Amiga did not answer in time."
+CONNECTION_REFUSED = "The Amiga refused the connection."
+CANNOT_BE_REACHED = "The Amiga cannot be reached on the network."
+CONNECTION_CLOSED = "The connection to the Amiga was closed."
+ADDRESS_UNRESOLVED = "The Amiga's address could not be resolved."
+KNOWN_CONNECTION_REASONS = (
+    KEY_WANTED, KEY_REFUSED, CLOSED_BY_DAEMON, STOPPED_ANSWERING, UNEXPECTED_GREETING,
+    DID_NOT_ANSWER, CONNECTION_REFUSED, CANNOT_BE_REACHED, CONNECTION_CLOSED, ADDRESS_UNRESOLVED,
+)
+
+
+def connection_reason(text: str) -> str:
+    """A connection or disconnection reason safe to show, or '' when it is not.
+
+    TLS sentences pass through unchanged so the page can keep its translations.
+    A known failure becomes one fixed sentence. An empty or unrecognised text,
+    including a greeting or an error that names a path, becomes no reason.
+    """
+    raw = text or ""
+    if "not retried in the clear" in raw:
+        return tls.TLS_HANDSHAKE_TEXT
+    if "TLS port is not available" in raw:
+        return tls.TLS_UNAVAILABLE_TEXT
+    if "only encrypted connections" in raw:
+        return PLAIN_CLOSED_TEXT
+    if "wants a key" in raw:
+        return KEY_WANTED
+    if "refused the key" in raw:
+        return KEY_REFUSED
+    if CLOSED_BY_DAEMON in raw:
+        return CLOSED_BY_DAEMON
+    if "stopped answering" in raw:
+        return STOPPED_ANSWERING
+    if "unexpected greeting" in raw:
+        return UNEXPECTED_GREETING
+    if "not answering" not in raw:
+        return ""
+    low = raw.lower()
+    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
+                                    "semaphore timeout")):
+        return DID_NOT_ANSWER
+    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
+        return CONNECTION_REFUSED
+    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
+                                    "winerror 10065", "winerror 10051")):
+        return CANNOT_BE_REACHED
+    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
+                                    "broken pipe", "winerror 10054", "winerror 10053")):
+        return CONNECTION_CLOSED
+    if any(part in low for part in ("name or service not known", "nodename nor servname",
+                                    "getaddrinfo", "no such host", "winerror 11001")):
+        return ADDRESS_UNRESOLVED
+    return ""
+
+
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
@@ -350,11 +414,23 @@ class Viewer:
         self.feed.ring()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
-        reason = "" if online else (reason or "")
-        if online != self.online or reason != self.offline_reason:
+        shown = "" if online else connection_reason(reason)
+        if online != self.online or shown != self.offline_reason:
             self.online = online
-            self.offline_reason = reason
-            self.event("online", online=online, reason=reason)
+            self.offline_reason = shown
+            self.event("online", online=online, reason=shown)
+            self._report_link(online, shown)
+
+    def _report_link(self, online: bool, reason: str) -> None:
+        """The terminal that started the viewer. The page gets the same reason."""
+        host = getattr(self, "host", "") or ""
+        name = machines.name_of(host) if host else "the Amiga"
+        stamp = time.strftime("%H:%M:%S")
+        if online:
+            print(f"{stamp} connected to {name}", file=sys.stderr, flush=True)
+        else:
+            print(f"{stamp} the Amiga does not answer: {reason or 'no reason given'}",
+                  file=sys.stderr, flush=True)
 
     def _stats(self) -> None:
         seconds = 0
@@ -767,7 +843,9 @@ def main() -> None:
         remember=True,
     )
     url = viewer.start(args.port)
-    print(f"Amigent viewer: {url}\nCtrl+C to stop.", flush=True)
+    address = machines.address(host) or host
+    print(f"Amigent viewer: {url}\nConnecting to {machines.name_of(host)} at {address}, "
+          f"screen port {viewer.screen.port}; Ctrl+C to stop.", flush=True)
     if not args.no_window:
         open_window(url)
     try:

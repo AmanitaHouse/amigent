@@ -119,11 +119,27 @@
 
   let offlineReason = "";
 
+  // Fixed sentences from the viewer. Exact match only: the text is inserted
+  // with textContent, and anything else stays the generic offline line.
+  const KNOWN_LINK_REASONS = [
+    "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY",
+    "amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ must match S:amigent.key on the Amiga",
+    "connection closed by amigentd",
+    "amigentd stopped answering.",
+    "The Amiga sent an unexpected greeting.",
+    "The Amiga did not answer in time.",
+    "The Amiga refused the connection.",
+    "The Amiga cannot be reached on the network.",
+    "The connection to the Amiga was closed.",
+    "The Amiga's address could not be resolved.",
+  ];
+
   function offlineMessage() {
     const reason = offlineReason || "";
     if (reason.includes("TLS port is not available") || reason.includes("not retried in the clear"))
       return t("tls_unavailable");
     if (reason.includes("only encrypted connections")) return t("tls_required");
+    if (KNOWN_LINK_REASONS.includes(reason)) return reason;
     return t("offline");
   }
 

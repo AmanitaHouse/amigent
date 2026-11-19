@@ -1039,9 +1039,16 @@ int main(int argc, char **argv)
             add_line(m->kind, m->text);
             FreeVec(m);
         }
-        /* Everything is drawn with the layer locked and for the size the
-         * window has now; after a new size the whole inner box is cleared
-         * and drawn again, then the frame, in case something reached it. */
+        /* The layer is locked, and a frame presented, only when a line, a
+         * size, a refresh, the side panel or the cursor has to be drawn.
+         * An idle tick leaves Intuition's layer alone. Everything that is
+         * drawn is drawn with the layer locked and for the size the window
+         * has now; after a new size the whole inner box is cleared and drawn
+         * again, then the frame, in case something reached it. */
+        if (!(full || changed || ticks % 5 == 0
+              || cursor_on != ((ticks / 3) & 1)
+              || win->Width != cur_w || win->Height != cur_h))
+            continue;
         resized = lock_for_drawing();
         if (resized || full)
             draw_all();

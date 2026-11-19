@@ -49,12 +49,17 @@ check_var_ident() {
 
 check_commit_ident() {
     c=$1
-    an=$(git log -1 --format='%an' "$c" 2>/dev/null) || guard_fail "cannot read the author of $c. Fail closed."
-    ae=$(git log -1 --format='%ae' "$c" 2>/dev/null) || guard_fail "cannot read the author email of $c. Fail closed."
-    cn=$(git log -1 --format='%cn' "$c" 2>/dev/null) || guard_fail "cannot read the committer of $c. Fail closed."
-    ce=$(git log -1 --format='%ce' "$c" 2>/dev/null) || guard_fail "cannot read the committer email of $c. Fail closed."
+    # Read the commit object header. git log can apply a mailmap and hide the stored identity.
+    raw=$(git cat-file commit "$c" 2>/dev/null) || guard_fail "cannot read commit $c. Fail closed."
+    header=$(printf '%s\n' "$raw" | awk 'NF==0 {exit} {print}')
+    author_line=$(printf '%s\n' "$header" | sed -n 's/^author //p' | head -n 1)
+    committer_line=$(printf '%s\n' "$header" | sed -n 's/^committer //p' | head -n 1)
+    an=$(parse_name "$author_line")
+    ae=$(parse_email "$author_line")
+    cn=$(parse_name "$committer_line")
+    ce=$(parse_email "$committer_line")
     if [ -z "$an" ] || [ -z "$ae" ] || [ -z "$cn" ] || [ -z "$ce" ]; then
-        guard_fail "commit $c has an empty author or committer. Fail closed."
+        guard_fail "commit $c has an empty or unreadable author or committer. Fail closed."
     fi
     if [ "$an" != "$expected_name" ] || [ "$ae" != "$expected_email" ] || [ "$cn" != "$expected_name" ] || [ "$ce" != "$expected_email" ]; then
         printf '%s\n' "amigent identity guard: push rejected for $c" >&2

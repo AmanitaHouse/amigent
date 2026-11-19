@@ -91,8 +91,8 @@ def test_sdist_list_has_native_sources_and_not_the_wheel_extras():
 
 
 APPROVED = {
-    "amigentd.apollo": (108464, "f2377a1542310b88f9fa7d42313cfa61ae90dc51e95c8448f98968918c4e7dc0"),
-    "amigent-monitor": (22604, "bcadce2fbae29c2c5b25db398739d50e2a07dd388c9690b5033130d92bb79acf"),
+    "amigentd.apollo": (108600, "596ed90669103359a887a6847cdde8e025c956f2c6ef85eacd37954faf854ab3"),
+    "amigent-monitor": (21276, "afb9ec9e22f3273e5dc12600832368e6dbed07bca714f96bc1a7b84d72313655"),
 }
 CLASSIC = {
     "amigentd": (87396, "1b469f0668c6dda42276ca23937bc9ccf450733cb50ee076d6cbe9f3dc914a92"),
@@ -156,8 +156,8 @@ def test_release_files_selects_the_packaged_apollo_daemon_and_monitor():
     for name in (*APPROVED, *CLASSIC):
         _assert_native(files[name].read_bytes(), name)
     readme = module.aminet_readme()
-    assert "\nVersion:      1.3.1rc2\n" in readme
-    assert module.__version__ == "1.3.1rc2"
+    assert "\nVersion:      1.3.1rc3\n" in readme
+    assert module.__version__ == "1.3.1rc3"
 
 
 def test_release_files_reads_the_package_directory_not_build(tmp_path):
@@ -239,14 +239,14 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
         members = _archive_names(archive)
         for name in (*APPROVED, *CLASSIC):
             _assert_native(_native_member(members, name), name)
-        assert _declared_version(members) == "1.3.1rc2"
+        assert _declared_version(members) == "1.3.1rc3"
         if archive.suffix == ".whl":
             assert not any("/native/" in name or name.startswith("native/") for name in members)
-            assert archive.name.startswith("amigent-1.3.1rc2-")
+            assert archive.name.startswith("amigent-1.3.1rc3-")
         else:
             assert any(name.endswith("src/native/amiga/daemon/amigentd.c") for name in members)
             assert any(name.endswith("src/native/amiga/tools/amigent-monitor.c") for name in members)
-            assert archive.name.startswith("amigent-1.3.1rc2.")
+            assert archive.name.startswith("amigent-1.3.1rc3.")
         joined = "\n".join(members)
         for banned in EXCLUDED:
             assert banned not in joined, (archive.name, banned)
@@ -288,7 +288,7 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
     assert lines[1] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
     assert lines[2] == f"{CLASSIC['amigentd'][0]} {CLASSIC['amigentd'][1]}"
     assert lines[3] == f"{CLASSIC['amigentd.000'][0]} {CLASSIC['amigentd.000'][1]}"
-    assert lines[4] == "1.3.1rc2"
+    assert lines[4] == "1.3.1rc3"
     assert lines[5] == "True"
 
 
@@ -331,7 +331,7 @@ def test_editable_install_reads_the_corrected_source_tree(tmp_path):
     assert Path(lines[0]) == expected
     assert lines[1] == f"{APPROVED['amigentd.apollo'][0]} {APPROVED['amigentd.apollo'][1]}"
     assert lines[2] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
-    assert lines[3] == "1.3.1rc2"
+    assert lines[3] == "1.3.1rc3"
 
 
 def test_build_log_redirection_stays_inside_one_bash_argument():

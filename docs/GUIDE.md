@@ -419,10 +419,12 @@ builds `amigentd.apollo` with ApolloCrossDev's gcc and vasmm68k_mot. Set
 `make -f src/native/amiga/Makefile.apollo install` does that copy. A wheel,
 a source distribution, `amigent-setup`, and `scripts/make_release.py` all
 read the files already in `src/amigent/amiga/bin/`. The `amigentd.apollo`
-there includes the native port-release retry and the screen-buffer release,
-and that is the ApolloOS executable that was run on a V4. `amigentd` and
+there includes the native port-release retry, the screen-buffer release,
+the reset chord, and the read-only LOADED and TASKS lists, and that is
+the ApolloOS executable that was run on a V4. `amigentd` and
 `amigentd.000` in that directory are earlier binaries and do not include
-those native changes. A fresh `make` into `build/apollo/` does not replace
+those native changes. `amigent-monitor` there is the Apollo V4 build.
+Install and update copy that one monitor file on every machine. A fresh `make` into `build/apollo/` does not replace
 them. A clean compile that reproduces the older 108076-byte baseline is a
 different file from the packaged Apollo executable, and it has not by
 itself been run on Apollo hardware. `scripts/make_release.py` packs the

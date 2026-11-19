@@ -1,24 +1,97 @@
 # changelog
 
 Versions follow [semver](https://semver.org). Package metadata uses the
-PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc2`.
+PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc3`.
 The number lives in `src/amigent/__init__.py`, and everything else reads
 it from there.
 
 ## Unreleased
 
-Read-only loaded-module, task and Guru diagnostics. The hello stays
-protocol 5, so command 38 is still AUDIO and command 39 is still PIP.
-LOADED is command 40 (`modules=1`) and TASKS is command 41 (`tasklist=1`).
-SYSINFO adds `last_alert_where` beside `last_alert`. The PC names that
-guru. PEEK, POKE, disassembly and raw register access are not commands.
-The daemon source has the two list handlers. LOADED and TASKS stop at a
-fixed list, hunk, resident and reply-size limit and end with a line
-`MORE` when that happens. Running out of memory is an error reply. A
-count stops a cycle; it does not make a corrupt pointer safe to read.
-The packaged Apollo daemon is unchanged, so a daemon already running
-does not answer 40 or 41 or send the new SYSINFO fields until that
-packaged file is replaced.
+## 1.3.1rc3 (2026-11-19)
+
+AmanitaHouse fork prerelease. The package version is `1.3.1rc3`. This is
+not the complete official upstream 1.4.0 release, and it does not replace
+the published 1.3.0 packages or the published `v1.3.1rc1` and `v1.3.1rc2`
+prereleases. Protocol 5 is retained. NOTE is command 37, AUDIO is command
+38, PIP is command 39, LOADED is command 40 and TASKS is command 41.
+
+The native programs still report `$VER: amigentd 1.3.0 (06.11.2026)` and
+`$VER: amigent-monitor 1.3.0 (06.11.2026)`. Those strings were left as
+they are. Changing them would mean rebuilding binaries that already
+passed their V4 tests.
+
+The packaged `amigentd.apollo` is the diagnostics daemon validated in
+Phase 10C. Its tested source commit is
+`72c2c65bb918487b2d050a7859a13168305d4a01`, and that tree is the tree
+integrated as `8525a74`. The file is 108600 bytes,
+`596ed90669103359a887a6847cdde8e025c956f2c6ef85eacd37954faf854ab3`.
+It was not rebuilt for this package.
+
+The packaged `amigent-monitor` is the monitor validated in Phase 10F,
+including the redraw after another window covered it. Its tested source
+commit is `aec9d55991f664e8fa99fb668ddbcc50e46c74ee`. The file is
+21276 bytes,
+`afb9ec9e22f3273e5dc12600832368e6dbed07bca714f96bc1a7b84d72313655`.
+It was not rebuilt for this package. It is a 68080 executable. Install
+and update still copy that one monitor file on every machine. Only the
+Apollo V4-SA was used to validate it.
+
+The packaged `amigentd` and `amigentd.000` are the earlier binaries.
+Their bytes are unchanged. They do not contain the 90-second port
+retry, the screen-picture release, the reset chord, or the LOADED and
+TASKS lists.
+
+### Included
+
+- The reliability and screen-handling fixes from `1.3.1rc1` stay: a
+  longer wait when replacing a running daemon, screen-picture memory
+  returned when the screen client leaves, per-screen packing, a packing
+  mode that stays while another process runs, and a monitor that draws
+  into a backing bitmap.
+- The reset chord from `1.3.1rc2` stays, with its five-second safeguard.
+  Ctrl, Left Amiga and Right Amiga must all be pressed within five
+  seconds. A key release clears that key. amigentd calls `ColdReboot()`
+  when exec is 36 or newer. The viewer sends the three key-downs only
+  on exec 36, 37 and 38 when `C:Reboot` is missing, and refuses on exec
+  34 and 35 without `C:Reboot`.
+- Apollo read-only LOADED and TASKS diagnostics. Each list stops at a
+  fixed limit and can end with `MORE`. Running out of memory is an
+  error reply. A count stops a cycle; it does not make a corrupt
+  pointer safe to read.
+- Human-readable Guru diagnostics. SYSINFO adds `last_alert_where`
+  beside `last_alert`. The PC names that guru.
+- The viewer states a known reason when it cannot connect, and when an
+  existing connection ends.
+- The monitor locks its layer only when a frame has to be drawn. An
+  idle tick returns to `Delay` before taking that lock.
+
+### Not included
+
+- PEEK, POKE, TASKCTL and tracepoints are not commands in this fork.
+- ApolloOS APeek and APoke integration remains deferred.
+- This candidate does not change TLS, AUDIO or PIP behaviour.
+
+### What was tested
+
+Native validation of the two packaged Apollo executables was on one
+Apollo V4-SA. The diagnostics daemon answered LOADED and TASKS, and
+the monitor redrew after another window covered it. No actual reset
+chord was triggered during hardware validation. Classic AmigaOS was
+not part of that validation.
+
+### Limitations
+
+- The updater restoration timeout remains unresolved. In Phase 10C the
+  first restore run quit the daemon and did not report an outcome. The
+  known-good daemon was restored only after a reboot and another
+  updater run. This package does not change that updater.
+- The intermittent TLS record-layer observation remains unresolved. A
+  candidate-specific regression has not been established. Phase 10C
+  saw the same class of record-layer failure after the known-good
+  daemon was restored. The client did not open a plaintext session.
+- The packaged monitor is the 68080 file named above. A 68000 machine
+  was not run with it. AmigaOS 2 and AmigaOS 3 were not run with it.
+- Native binaries still report `$VER 1.3.0`.
 
 ## 1.3.1rc2 (2026-11-19)
 

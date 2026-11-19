@@ -153,37 +153,34 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-AmanitaHouse fork prerelease 1.3.1rc2. Not the official upstream 1.4.0
-release, and not a replacement for the published 1.3.0 packages. Native
-programs still report $VER 1.3.0. Those files were not rebuilt to change
-that string. This release does not fix the outstanding audio-acquisition
-deficit.
+AmanitaHouse fork prerelease 1.3.1rc3. Not the complete official
+upstream 1.4.0 release, and not a replacement for the published 1.3.0
+packages or for v1.3.1rc1 and v1.3.1rc2. Protocol 5 is unchanged.
+NOTE is 37, AUDIO is 38, PIP is 39, LOADED is 40 and TASKS is 41.
+Native programs still report $VER 1.3.0. Those files were not rebuilt
+to change that string.
 
-Kept from 1.3.1rc1, and still only in the packaged amigentd.apollo unless
-noted: a 90-second wait when replacing a running daemon, screen-picture
-memory returned when the screen client leaves, per-screen packing, a
-packing mode that stays while another process runs, and a monitor that
-draws into a backing bitmap. The packaged amigentd and amigentd.000 are
-earlier binaries and do not have the retry, the picture release, or the
-reset chord. AmigaOS 2 and AmigaOS 3 were not run with this monitor.
-Install and update copy that one monitor file on every machine.
+Kept from the earlier candidates: the longer daemon-replacement wait,
+screen-picture release, per-screen packing, a packing mode that stays,
+a monitor that draws into a backing bitmap, and the reset chord with
+its five-second window. Ctrl, Left Amiga and Right Amiga must all go
+down within five seconds. Releasing a key clears that key. amigentd
+calls ColdReboot() when exec is 36 or newer. On exec 34 and 35 without
+C:Reboot this fork refuses. No reset chord was triggered on hardware.
 
-The reset chord is ported from the final upstream 1.4.0 source. Ctrl,
-Left Amiga and Right Amiga must all go down within five seconds.
-Releasing a key clears that key, so an old held Ctrl does not finish a
-much later reset. amigentd calls ColdReboot() when exec is 36 or newer.
-The viewer sends those three keys only when C:Reboot is missing and exec
-is 36, 37 or 38, after the disks are flushed. On exec 34 and 35 without
-C:Reboot this fork refuses, instead of leaving the modifier keys down.
-Where C:Reboot is available, restart still runs that command.
+The packaged amigentd.apollo adds read-only LOADED and TASKS lists and
+the fields the PC uses to name a Guru. PEEK, POKE, TASKCTL and
+tracepoints are not included. ApolloOS APeek and APoke stay deferred.
+The packaged amigentd and amigentd.000 are unchanged earlier binaries.
 
-Offline tests covered the reset logic and native input dispatch. The
-updated daemon was smoke-tested on an Apollo V4. An actual reset chord,
-and the pre-OS 3 fallback, were not tested on hardware.
+The packaged amigent-monitor locks its layer only while a frame is
+drawn, and the viewer states why a connection failed or ended. Only
+the Apollo V4-SA was used for native validation. Install still copies
+that one monitor file on every machine. It is a 68080 executable.
 
-Intermittent TLS record-layer failures remain under investigation. A
-candidate-specific regression has not been established. This release
-does not show that TLS reliability matches the known-good daemon.
+The updater restoration timeout remains unresolved. Intermittent TLS
+record-layer failures remain under investigation. This release does
+not change TLS, AUDIO or PIP behaviour.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS

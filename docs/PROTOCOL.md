@@ -35,8 +35,11 @@ tried on a real Vampire yet, and `bin/amigentd` runs there as well. ApolloOS get
 (`src/native/amiga/Makefile.apollo`; the compiler prefix comes from `APOLLOCROSSDEV`).
 The default target writes `build/apollo/` and does not replace a packaged binary.
 The packaged `bin/amigentd.apollo` is the file `amigent-setup` and the release
-archive ship. It includes the native port-release retry and the screen-buffer
-release. `bin/amigentd` and `bin/amigentd.000` are earlier builds and do not.
+archive ship. It includes the native port-release retry, the screen-buffer
+release, the reset chord, and the read-only LOADED and TASKS lists.
+`bin/amigentd` and `bin/amigentd.000` are earlier builds and do not.
+The packaged `bin/amigent-monitor` is the Apollo V4 build. Install copies
+that one file on every machine.
 `amigent-setup` installs `amigentd.apollo` only after an ApolloOS
 check, and AmigaOS on a Vampire keeps `bin/amigentd`. OS 2.04 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read

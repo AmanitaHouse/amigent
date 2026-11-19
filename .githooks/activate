@@ -1,0 +1,30 @@
+#!/bin/sh
+# Reactivate the repository-local identity and the identity guard.
+# Touches only this repository's .git/config. Never --global or --system.
+
+set -eu
+
+top=$(git rev-parse --show-toplevel)
+cd "$top"
+
+file=$top/.githooks/identity
+[ -f "$file" ] || { printf '%s\n' "amigent identity guard: identity file is missing." >&2; exit 1; }
+name=$(sed -n '1s/\r$//;1p' "$file")
+email=$(sed -n '2s/\r$//;2p' "$file")
+[ -n "$name" ] && [ -n "$email" ] || { printf '%s\n' "amigent identity guard: identity file is incomplete." >&2; exit 1; }
+
+git config --local user.name "$name"
+git config --local user.email "$email"
+git config --local user.useConfigOnly true
+git config --local core.hooksPath .githooks
+
+# Drop conflicting keys only when they are stored in this repository.
+for key in author.name author.email committer.name committer.email; do
+    git config --local --unset-all "$key" >/dev/null 2>&1 || true
+done
+
+printf '%s\n' "Repository-local identity set to $name <$email>"
+printf '%s\n' "user.useConfigOnly=true"
+printf '%s\n' "core.hooksPath=.githooks"
+printf '%s\n' "Confirm with: git var GIT_AUTHOR_IDENT"
+printf '%s\n' "Confirm with: git var GIT_COMMITTER_IDENT"

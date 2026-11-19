@@ -1,0 +1,14 @@
+#!/bin/sh
+# Reject a commit unless the effective author and committer are this repository's identity.
+
+. "$(dirname "$0")/lib.sh"
+
+load_expected
+
+author=$(git var GIT_AUTHOR_IDENT 2>/dev/null) || guard_fail "author identity cannot be determined. Fail closed."
+committer=$(git var GIT_COMMITTER_IDENT 2>/dev/null) || guard_fail "committer identity cannot be determined. Fail closed."
+
+check_var_ident author "$author"
+check_var_ident committer "$committer"
+
+exit 0

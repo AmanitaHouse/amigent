@@ -7,6 +7,19 @@ it from there.
 
 ## Unreleased
 
+Read-only loaded-module, task and Guru diagnostics. The hello stays
+protocol 5, so command 38 is still AUDIO and command 39 is still PIP.
+LOADED is command 40 (`modules=1`) and TASKS is command 41 (`tasklist=1`).
+SYSINFO adds `last_alert_where` beside `last_alert`. The PC names that
+guru. PEEK, POKE, disassembly and raw register access are not commands.
+The daemon source has the two list handlers. LOADED and TASKS stop at a
+fixed list, hunk, resident and reply-size limit and end with a line
+`MORE` when that happens. Running out of memory is an error reply. A
+count stops a cycle; it does not make a corrupt pointer safe to read.
+The packaged Apollo daemon is unchanged, so a daemon already running
+does not answer 40 or 41 or send the new SYSINFO fields until that
+packaged file is replaced.
+
 ## 1.3.1rc2 (2026-11-19)
 
 AmanitaHouse fork prerelease. The package version is `1.3.1rc2`. This is

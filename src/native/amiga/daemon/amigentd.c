@@ -19,6 +19,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/execbase.h>
+#include <exec/resident.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <dos/dosextens.h>
@@ -134,7 +135,13 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
     CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
-    CMD_AUDIO = 38, CMD_PIP = 39  /* ApolloOS: ARNE mix and the SAGA PIP surface */
+    /* 38 and 39 stay AUDIO and PIP. Upstream 1.4.0 uses those numbers for
+     * LOADED and PEEK; this daemon does not. Hello stays protocol 5 so a
+     * stock 1.4.0 client does not send 38 meaning LOADED. There is no PEEK,
+     * POKE, disassembly or raw register command. APeek and APoke are not
+     * called from here. */
+    CMD_AUDIO = 38, CMD_PIP = 39,  /* ApolloOS: ARNE mix and the SAGA PIP surface */
+    CMD_LOADED = 40, CMD_TASKS = 41  /* read-only lists; SYSINFO modules=1, tasklist=1 */
 };
 
 #ifdef AMIGENT_APOLLO
@@ -1997,17 +2004,30 @@ static BOOL info(void)
 
 /* ---- protocol 2: screens, true colour, user interface ------------------ */
 
-/* A growing reply buffer for the variable length answers. */
+/* ENUM_HOST_TEXT_BEGIN */
+/* A growing reply buffer for the variable length answers.
+ * bounded is set when the buffer must not grow (LOADED and TASKS).
+ * room is the last byte a normal write may use; past that sets trunc. */
 struct text {
     UBYTE *buf;
-    ULONG len, size;
-    BOOL broke;
+    ULONG len, size, room;
+    BOOL broke, bounded, trunc;
 };
 
 static void t_add(struct text *t, const void *data, ULONG n)
 {
-    if (t->broke)
+    if (t->broke || t->trunc || !n)
         return;
+    if (t->bounded) {
+        /* allocated before Forbid: do not AllocVec, and do not grow */
+        if (!t->buf || t->len + n > t->room) {
+            t->trunc = TRUE;
+            return;
+        }
+        CopyMem((APTR)data, t->buf + t->len, n);
+        t->len += n;
+        return;
+    }
     if (t->len + n > t->size) {
         ULONG size = t->size ? t->size : 4096;
         UBYTE *bigger;
@@ -2072,6 +2092,7 @@ static void t_tab(struct text *t)
 {
     t_chr(t, '\t');
 }
+/* ENUM_HOST_TEXT_END */
 
 /* u32 length, then the text. */
 static BOOL send_text(struct text *t)
@@ -3719,6 +3740,9 @@ static BOOL c_sysinfo(struct link *l)
         t_str(&t, (const UBYTE *)"last_alert=", FALSE);
         t_hex(&t, SysBase->LastAlert[0]);
         t_chr(&t, '\n');
+        t_str(&t, (const UBYTE *)"last_alert_where=", FALSE);  /* task or address exec kept */
+        t_hex(&t, SysBase->LastAlert[1]);
+        t_chr(&t, '\n');
     }
     t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
     t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
@@ -3771,6 +3795,9 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
+    /* Not upstream loaded=1: that flag also means PEEK. These two are lists only. */
+    t_pair(&t, "modules", 1);  /* LOADED, command 40 */
+    t_pair(&t, "tasklist", 1);  /* TASKS, command 41 */
     t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
     t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
@@ -6458,6 +6485,307 @@ static BOOL c_pip(struct link *l)
 }
 #endif
 
+/* ---- loaded modules and tasks: exec's lists, not a memory read -------- */
+
+/* ENUM_HOST_WALK_BEGIN */
+/* These caps stop a cycle and limit the reply. They do not make a corrupt
+ * pointer safe to read: a bad ln_Succ, resident link or hunk address can
+ * still fault inside the cap. A corrupt pointer is still a fault. The reply
+ * buffer is taken before Forbid. The walk does not allocate and does not
+ * use the network. */
+#define ENUM_LIST_MAX 256       /* one exec list: libraries, devices, resources, tasks */
+#define ENUM_HUNK_PER 64        /* hunks of one process */
+#define ENUM_HUNK_TOTAL 256     /* hunk lines in one LOADED reply */
+#define ENUM_RESIDENT_MAX 256   /* resident entries and resident-table links */
+#define ENUM_REPLY_MAX (48 * 1024)
+#define ENUM_MORE_LEN 5         /* "MORE\n", reserved at the end of the buffer */
+
+/* FALSE once this walk must stop. seen counts nodes already accepted. */
+static BOOL enum_visit(struct text *t, LONG *seen, LONG max)
+{
+    if (t->trunc)
+        return FALSE;
+    if (*seen >= max) {
+        t->trunc = TRUE;
+        return FALSE;
+    }
+    (*seen)++;
+    return TRUE;
+}
+
+/* The whole reply, before Forbid. Failure leaves t empty and returns FALSE. */
+static BOOL enum_prepare(struct text *t)
+{
+    UBYTE *buf = AllocVec(ENUM_REPLY_MAX, MEMF_ANY);
+
+    if (!buf)
+        return FALSE;
+    t->buf = buf;
+    t->len = 0;
+    t->size = ENUM_REPLY_MAX;
+    t->room = ENUM_REPLY_MAX - ENUM_MORE_LEN;
+    t->broke = FALSE;
+    t->bounded = TRUE;
+    t->trunc = FALSE;
+    return TRUE;
+}
+
+/* A stop is a line MORE, after the last complete line. TREE uses the same word. */
+static void enum_seal(struct text *t)
+{
+    static const UBYTE more[ENUM_MORE_LEN] = {'M', 'O', 'R', 'E', '\n'};
+
+    if (!t->trunc || t->broke || !t->buf)
+        return;
+    while (t->len && t->buf[t->len - 1] != '\n')
+        t->len--;
+    if (t->len + ENUM_MORE_LEN > t->size) {
+        t->broke = TRUE;
+        return;
+    }
+    CopyMem((APTR)more, t->buf + t->len, ENUM_MORE_LEN);
+    t->len += ENUM_MORE_LEN;
+}
+
+/* One line per library, device or resource:
+ * L|D|R  name  version  revision  open count  base  neg size  pos size  id string */
+static void t_libs(struct text *t, char kind, struct List *list)
+{
+    struct Node *n;
+    LONG seen = 0;
+
+    if (!list || !list->lh_Head)
+        return;
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        struct Library *lib = (struct Library *)n;
+
+        if (!enum_visit(t, &seen, ENUM_LIST_MAX))
+            break;
+        t_chr(t, kind);
+        t_tab(t);
+        t_str(t, (const UBYTE *)(n->ln_Name ? n->ln_Name : "?"), FALSE);
+        t_tab(t);
+        if (kind == 'R' && n->ln_Type != NT_LIBRARY && n->ln_Type != NT_RESOURCE) {
+            /* some resources are a bare node, without library fields */
+            t_add(t, "0\t0\t0\t", 6);
+            t_hex(t, (ULONG)n);
+            t_add(t, "\t0\t0\t\n", 6);
+        } else {
+            t_num(t, lib->lib_Version);
+            t_tab(t);
+            t_num(t, lib->lib_Revision);
+            t_tab(t);
+            t_num(t, lib->lib_OpenCnt);
+            t_tab(t);
+            t_hex(t, (ULONG)lib);
+            t_tab(t);
+            t_num(t, lib->lib_NegSize);
+            t_tab(t);
+            t_num(t, lib->lib_PosSize);
+            t_tab(t);
+            if (lib->lib_IdString && (TypeOfMem(lib->lib_IdString) ||
+                                      (ULONG)lib->lib_IdString >= 0xF80000UL))
+                t_str(t, (const UBYTE *)lib->lib_IdString, FALSE);
+            t_chr(t, '\n');
+        }
+        if (t->trunc)
+            break;
+    }
+}
+
+/* H  process  command  hunk  start  size: where a running program's code sits.
+ * The size is the hunk's, not its bytes. Nothing here copies those bytes.
+ * hunks counts lines already emitted, across both task lists. */
+static void t_hunks(struct text *t, struct List *list, LONG *hunks)
+{
+    struct Node *n;
+    LONG procs = 0;
+
+    if (t->trunc || !list || !list->lh_Head)
+        return;
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        struct Process *pr = (struct Process *)n;
+        const UBYTE *cmd = NULL;
+        BPTR seg = 0;
+        LONG hunk;
+
+        if (!enum_visit(t, &procs, ENUM_LIST_MAX))
+            break;
+        if (n->ln_Type != NT_PROCESS)
+            continue;
+        if (pr->pr_CLI) {
+            struct CommandLineInterface *cli = BADDR(pr->pr_CLI);
+            seg = cli->cli_Module;
+            cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+        }
+        if (!seg && pr->pr_SegList) {  /* started from Workbench or by CreateNewProc() */
+            BPTR *array = BADDR(pr->pr_SegList);
+            if (array && TypeOfMem(array) && array[0] >= 3 && array[0] < 16)
+                seg = array[3];
+        }
+        for (hunk = 0; seg; hunk++) {
+            ULONG *p;
+
+            if (hunk >= ENUM_HUNK_PER || *hunks >= ENUM_HUNK_TOTAL) {
+                t->trunc = TRUE;
+                break;
+            }
+            p = BADDR(seg);
+            /* a hunk is a size long, a link and the code; anything else is not a seglist */
+            if (((ULONG)p & 3) || !TypeOfMem(p - 1) || p[-1] < 8 || p[-1] > 0x1000000UL ||
+                !TypeOfMem((UBYTE *)p + p[-1] - 5))
+                break;
+
+            t_chr(t, 'H');
+            t_tab(t);
+            t_str(t, (const UBYTE *)(n->ln_Name ? n->ln_Name : "?"), FALSE);
+            t_tab(t);
+            if (cmd && cmd[0]) {
+                LONG k;
+                for (k = 1; k <= cmd[0] && !t->trunc; k++)
+                    t_chr(t, cmd[k] == '\t' || cmd[k] < ' ' ? ' ' : cmd[k]);
+            }
+            t_tab(t);
+            t_num(t, hunk);
+            t_tab(t);
+            t_hex(t, (ULONG)(p + 1));
+            t_tab(t);
+            t_num(t, p[-1] - 8);  /* the size long counts itself and the link */
+            t_chr(t, '\n');
+            (*hunks)++;
+            if (t->trunc)
+                break;
+            seg = *p;
+        }
+        if (t->trunc)
+            break;
+    }
+}
+
+/* M  name  version  start  end: resident modules, from ROM and from disk */
+static void t_residents(struct text *t)
+{
+    ULONG *rm = (ULONG *)SysBase->ResModules;
+    LONG seen = 0;
+
+    if (t->trunc)
+        return;
+    while (rm && *rm) {
+        struct Resident *r;
+
+        if (!enum_visit(t, &seen, ENUM_RESIDENT_MAX))
+            break;
+        if (*rm & 0x80000000UL) {  /* a link to the next table */
+            rm = (ULONG *)(*rm & 0x7FFFFFFFUL);
+            continue;
+        }
+        r = (struct Resident *)*rm++;
+        t_chr(t, 'M');
+        t_tab(t);
+        t_str(t, (const UBYTE *)(r->rt_Name ? r->rt_Name : "?"), FALSE);
+        t_tab(t);
+        t_num(t, r->rt_Version);
+        t_tab(t);
+        t_hex(t, (ULONG)r);
+        t_tab(t);
+        t_hex(t, (ULONG)r->rt_EndSkip);
+        t_chr(t, '\n');
+        if (t->trunc)
+            break;
+    }
+}
+
+static BOOL c_loaded(struct link *l)
+{
+    struct text t = {0};
+    LONG hunks = 0;
+
+    if (!enum_prepare(&t))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    Forbid();
+    t_libs(&t, 'L', &SysBase->LibList);
+    t_libs(&t, 'D', &SysBase->DeviceList);
+    t_libs(&t, 'R', &SysBase->ResourceList);
+    t_hunks(&t, &SysBase->TaskReady, &hunks);
+    t_hunks(&t, &SysBase->TaskWait, &hunks);
+    t_residents(&t);
+    Permit();
+    enum_seal(&t);
+    return c_text(l, &t);
+}
+
+/* T  address  name  command  type  pri  state  stack_size  stack_used  sig_wait  sig_recvd */
+static void t_task(struct text *t, struct Task *task, const char *state)
+{
+    const UBYTE *cmd = NULL;
+    ULONG size = (ULONG)task->tc_SPUpper - (ULONG)task->tc_SPLower;
+    ULONG used = task == SysBase->ThisTask ? 0 : (ULONG)task->tc_SPUpper - (ULONG)task->tc_SPReg;
+
+    if (task->tc_Node.ln_Type == NT_PROCESS && ((struct Process *)task)->pr_CLI) {
+        struct CommandLineInterface *cli = BADDR(((struct Process *)task)->pr_CLI);
+        cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+    }
+    t_chr(t, 'T');
+    t_tab(t);
+    t_hex(t, (ULONG)task);
+    t_tab(t);
+    t_str(t, (const UBYTE *)(task->tc_Node.ln_Name ? task->tc_Node.ln_Name : "?"), FALSE);
+    t_tab(t);
+    if (cmd && cmd[0]) {
+        LONG k;
+        for (k = 1; k <= cmd[0] && !t->trunc; k++)
+            t_chr(t, cmd[k] == '\t' || cmd[k] < ' ' ? ' ' : cmd[k]);
+    }
+    t_tab(t);
+    t_str(t, (const UBYTE *)(task->tc_Node.ln_Type == NT_PROCESS ? "process" : "task"), FALSE);
+    t_tab(t);
+    t_num(t, task->tc_Node.ln_Pri);
+    t_tab(t);
+    t_str(t, (const UBYTE *)state, FALSE);
+    t_tab(t);
+    t_num(t, size);
+    t_tab(t);
+    t_num(t, used > size ? 0 : used);
+    t_tab(t);
+    t_hex(t, task->tc_SigWait);
+    t_tab(t);
+    t_hex(t, task->tc_SigRecvd);
+    t_chr(t, '\n');
+}
+
+static void t_task_list(struct text *t, struct List *list, const char *state)
+{
+    struct Node *n;
+    LONG seen = 0;
+
+    if (t->trunc || !list || !list->lh_Head)
+        return;
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        if (!enum_visit(t, &seen, ENUM_LIST_MAX))
+            break;
+        t_task(t, (struct Task *)n, state);
+        if (t->trunc)
+            break;
+    }
+}
+
+static BOOL c_tasks(struct link *l)
+{
+    struct text t = {0};
+
+    if (!enum_prepare(&t))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    Forbid();
+    if (SysBase->ThisTask)
+        t_task(&t, SysBase->ThisTask, "run");
+    t_task_list(&t, &SysBase->TaskReady, "ready");
+    t_task_list(&t, &SysBase->TaskWait, "wait");
+    Permit();
+    enum_seal(&t);
+    return c_text(l, &t);
+}
+/* ENUM_HOST_WALK_END */
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -6513,6 +6841,12 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_DEBUGLOG:
         mon_say('C', "debug log", NULL);
         return c_debuglog(l, (ULONG)w << 16 | h);
+    case CMD_LOADED:
+        mon_say('C', "loaded", NULL);
+        return c_loaded(l);
+    case CMD_TASKS:
+        mon_say('C', "tasks", NULL);
+        return c_tasks(l);
 #ifdef AMIGENT_APOLLO
     case CMD_AUDIO:
         if (c[1] & 1)

@@ -478,6 +478,8 @@ else.
 | 37 | NOTE | | x = text length | text | nothing, see [monitor](#monitor) |
 | 38 | AUDIO | 0 one shot, 1 start a stream, 2 stop that stream | y = ms, one shot only | | one shot: `u32 rate`, `u32 length`, s16le stereo. A stream, after the status byte, repeats `u32 rate`, `u32 length`, s16le; length 0 waits, `ffffffff` ends it. ApolloOS only |
 | 39 | PIP | | | | `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, RGB bytes. ApolloOS only; w is 0. sagadoc marks the PIP registers write-only, and a read clears the overlay, so the surface is not read |
+| 40 | LOADED | | | | text, see [loaded modules](#loaded-modules). SYSINFO `modules=1` |
+| 41 | TASKS | | | | text, see [task list](#task-list). SYSINFO `tasklist=1` |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -545,7 +547,13 @@ separated by tabs.
   E clock), `daemon_uptime`, the seconds since amigentd started, and
   `last_alert`, exec's last alert in 8 hex digits, when it kept one from before
   the last reset. A client compares the uptimes with its last look to tell a
-  restart of the Amiga or of amigentd from a network fault.
+  restart of the Amiga or of amigentd from a network fault. When `last_alert`
+  is sent, `last_alert_where` is exec's second alert number (the task or the
+  address), in the same 8 hex digits. `modules=1` means [LOADED](#loaded-modules)
+  (command 40) is answered. `tasklist=1` means [TASKS](#task-list) (command 41)
+  is answered. Those two flags do not mean a memory read. Upstream AmiGent
+  1.4.0 uses `loaded=1` for a different set of commands at different numbers;
+  this daemon does not send `loaded=1`.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 - From protocol 5 SYSINFO also has `deflate_fast`, `deflate_best` and
@@ -574,11 +582,63 @@ separated by tabs.
 
 After COMPRESS with level 1 or 2, the bulk of these replies comes packed: the
 data of READ, the output of EXEC and every text reply (DIR, STAT, SYSINFO,
-VOLUMES, TEXT, WAIT, TREE). The length field before them still gives the
+VOLUMES, TEXT, WAIT, TREE, LOADED, TASKS). The length field before them still gives the
 unpacked length; what follows is one raw deflate stream in frames, `u32
 length` and that many bytes, ended by a frame of length `0`. Status, error
 texts, CHECKSUM and DEBUGLOG never come packed. COMPRESS 0 goes back to plain
 replies; the setting belongs to the channel.
+
+### loaded modules
+
+LOADED (command 40) lists what is in memory, under Forbid, one line per entry.
+The hello stays protocol 5. Command 38 remains AUDIO and command 39 remains
+PIP. There is no PEEK, POKE, disassembly or raw register command. A future
+memory read or write is a new opcode at 42 or above, chosen after comparing
+ApolloOS `APeek` and `APoke` with the safety rules those tools already have.
+`APoke` is not a remote write, and upstream's `ALLOWPOKE` gate is not bypassed
+by leaving the write out.
+
+    L|D|R  name  version  revision  open_count  base  neg_size  pos_size  id_string
+    H  task  command  hunk  start  size
+    M  name  version  start  end
+
+`L` libraries, `D` devices, `R` resources from exec's lists (a resource that
+is a bare node has zeros); base, start and end in 8 hex digits. `H` lines are
+the hunks of every process that runs a program: the Shell's `cli_Module`, or
+the seglist a Workbench start or `CreateNewProc()` gave it; the size is that
+of the code, without the size and link longs. The hunk's bytes are not
+copied. `M` lines are the resident modules, from ROM and from disk
+(`rt_MatchTag` to `rt_EndSkip`). SYSINFO says `modules=1` when this command
+is answered.
+
+Each list stops after 256 nodes: libraries, devices, resources, and the
+ready and waiting lists walked for hunks. One process contributes at most
+64 hunks, and the reply at most 256 hunks. Resident modules, counting a
+link to another resident table as one step, stop after 256. The reply text
+is at most 48 KiB (49152 bytes), with the last 5 bytes reserved. Hitting
+any of these ends the text with a line `MORE`, the same word TREE uses
+when it stops early. The lines before `MORE` are complete. Running out of
+memory is an error reply, not a short success. The node count ends a
+cycle. It does not make a corrupt pointer safe to read: a bad `ln_Succ`,
+resident link or hunk address can still fault inside the cap.
+
+### task list
+
+TASKS (command 41) has a line per task, under Forbid, the running one first:
+
+    T  address  name  command  task|process  priority  run|ready|wait  stack_size  stack_now  sig_wait  sig_recvd
+
+`command` is the program a Shell process runs. `stack_now` is how much of
+its stack a waiting task uses at that moment, from the task structure's
+stack bounds. The stack itself is not copied. There is no command that
+changes a task's priority or signals. SYSINFO says `tasklist=1` when this
+command is answered. `tasks=` in SYSINFO remains the `|`-separated name list
+used to notice other agents.
+
+The running task is first, then at most 256 ready and 256 waiting. The
+reply is at most 48 KiB (49152 bytes). A stop ends with a line `MORE`.
+The same count ends a cycle and does not make a corrupt task pointer safe
+to read.
 
 ### screen text
 

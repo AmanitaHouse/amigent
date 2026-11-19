@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
-from . import secret, system, uptime, watch
+from . import diagnostics, secret, system, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
@@ -51,7 +51,9 @@ INSTRUCTIONS = """Amigent operates a real Amiga.
   would save time next time.
 - Before installing software, amiga_install_begin, afterwards amiga_install_end,
   so the user can take it back with amiga_install_undo.
-- To hear what an AHI program is playing on ApolloOS, amiga_listen."""
+- To hear what an AHI program is playing on ApolloOS, amiga_listen.
+- To see what is loaded, what is running, or the last guru, use amiga_loaded,
+  amiga_tasks and amiga_gurus. There is no remote memory read or write."""
 
 mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
 # One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
@@ -225,6 +227,10 @@ _join = join_path
 seen = uptime.Seen(secret.FOLDER / "uptime.json")
 
 
+def _amiga_name() -> str:
+    return machines.name_of(HOST) or machines.address(HOST) or HOST or "amiga"
+
+
 @mcp.tool()
 def amiga_status() -> str:
     """Show memory, OS and TCP stack versions, and mounted volumes with free space.
@@ -246,9 +252,15 @@ def amiga_status() -> str:
             report["warning"] = _others_seen["text"]
     if "uptime" in info:
         report["running_for"] = uptime.duration(int(info["uptime"]))
-    said = seen.check(machines.name_of(HOST) or machines.address(HOST) or "", info)
+    name = machines.name_of(HOST) or machines.address(HOST) or ""
+    before = seen.previous(name)
+    said = seen.check(name, info, tasks=tasks)
     if said:
         report["notes"] = said
+    if uptime.restarted(said) or info.get("last_alert"):
+        post = _postmortem(before, tasks)
+        if post:
+            report["before_it_went_away"] = post
     report["system"] = _system_facts()
     report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
     outdated = pc_outdated(getattr(getattr(ctl, "backend", None), "protocol", 0))
@@ -277,6 +289,88 @@ def _system_facts() -> dict:
                 facts["ppc"] = ppc
         _system_seen.update({k: v for k, v in facts.items() if v})
     return dict(_system_seen)
+
+
+def _postmortem(before: dict, tasks: str | None) -> dict:
+    """After a restart or a guru: which tasks were running then and are gone now."""
+    out = {}
+    then, now_names = others.names(before.get("tasks", "")), others.names(tasks or "")
+    gone = sorted(then - now_names)
+    if gone:
+        out["running_then_not_now"] = gone
+    return out
+
+
+def _diag_lines(method: str) -> list[str]:
+    def run():
+        backend = ctl.backend
+        fn = getattr(backend, method, None) if backend is not None else None
+        if fn is None:
+            raise AmigaError(f"the connected daemon has no {method} list")
+        return fn()
+    return _with_ctl(run)
+
+
+@mcp.tool()
+def amiga_loaded(kind: str = "all", name: str = "") -> str:
+    """What is in memory now: libraries, devices, resources with version and open
+    count; running programs with their hunks; resident modules.
+
+    kind: all, libraries, devices, resources, programs or residents; name filters.
+    The running daemon must report modules=1. This does not read arbitrary memory.
+    A list that stopped at a limit ends with "truncated".
+    """
+    if kind not in ("all", "libraries", "devices", "resources", "programs", "residents"):
+        raise AmigaError("kind: all, libraries, devices, resources, programs or residents")
+    return diagnostics.listing(diagnostics.parse(_diag_lines("loaded")), kind, name)
+
+
+@mcp.tool()
+def amiga_tasks(name: str = "") -> str:
+    """All tasks and processes: address, priority, ready or waiting, stack used of
+    its size (with a warning near full), and the program. name filters.
+
+    The running daemon must report tasklist=1. This does not change a task.
+    A list that stopped at a limit ends with "truncated".
+    """
+    lines = _diag_lines("tasks")
+    return diagnostics.task_table(diagnostics.parse_tasks(lines), name,
+                                  truncated=diagnostics.was_truncated(lines))
+
+
+GURU_LOGS = ("S:GuruHistory", "S:Guru.log", "ENVARC:GuruHistory")
+
+
+@mcp.tool()
+def amiga_gurus(code: str = "") -> str:
+    """Guru meditations in words: the code given, the last one exec kept, and the
+    gurus logged by tools such as MCP (S:GuruHistory), explained."""
+    from . import alerts
+    if code:
+        c, _, where = code.strip().lstrip("#").partition(".")
+        return f"{code}: {alerts.describe(c, where or None)}"
+    extra = {}
+    try:
+        extra = alerts.gurudat(_with_ctl(lambda: ctl.read_file("S:MCP.gurudat")).decode("iso-8859-1"))
+    except AmigaError:
+        pass
+    out = []
+    info = _with_ctl(ctl.sysinfo)
+    if info.get("last_alert"):
+        c, w = info["last_alert"], info.get("last_alert_where", "")
+        out.append(f"last alert exec kept: {c.upper()}{'.' + w.upper() if w else ''} -> "
+                   f"{alerts.describe(c, w or None)}")
+    else:
+        out.append("exec kept no alert from before the last reset")
+    for path in GURU_LOGS:
+        try:
+            text = _with_ctl(lambda path=path: ctl.read_file(path)).decode("iso-8859-1")
+        except AmigaError:
+            continue
+        found = alerts.history(text, extra)
+        out.append(f"{path}: " + (f"{len(found)} guru(s)" if found else "no gurus logged"))
+        out += [f"  {x}" for x in found[-20:]]
+    return "\n".join(out)
 
 
 def _clear_hold() -> str:

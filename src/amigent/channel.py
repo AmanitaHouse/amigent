@@ -28,6 +28,8 @@ EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUME
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
 AUDIO, PIP = 38, 39  # ApolloOS: ARNE mix, and the SAGA picture-in-picture surface
+# Fork diagnostics. Not upstream protocol 6: there 38 is LOADED and 39 is PEEK.
+LOADED, TASKS = 40, 41
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
 PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
@@ -177,6 +179,32 @@ def audio_request() -> bytes:
 def pip_request() -> bytes:
     """The 10-byte header of a PIP command. It carries no payload."""
     return struct.pack(">BBHHHH", PIP, 0, 0, 0, 0, 0)
+
+
+def loaded_request() -> bytes:
+    """The 10-byte header of a LOADED command. It carries no payload."""
+    return struct.pack(">BBHHHH", LOADED, 0, 0, 0, 0, 0)
+
+
+def tasks_request() -> bytes:
+    """The 10-byte header of a TASKS command. It carries no payload."""
+    return struct.pack(">BBHHHH", TASKS, 0, 0, 0, 0, 0)
+
+
+def diagnostic_commands(info: dict | None) -> frozenset[str]:
+    """LOADED and TASKS when this daemon's SYSINFO says so.
+
+    ``modules=1`` is command 40. ``tasklist=1`` is command 41. Neither flag
+    means a memory read. Upstream's ``loaded=1`` is a different claim (it
+    includes PEEK) and is ignored here.
+    """
+    info = info or {}
+    commands = set()
+    if info.get("modules") == "1":
+        commands.add("LOADED")
+    if info.get("tasklist") == "1":
+        commands.add("TASKS")
+    return frozenset(commands)
 
 
 def apollo_commands(info: dict | None) -> frozenset[str]:
@@ -739,6 +767,33 @@ class AmigaChannel(VolumeFlush):
         raw = text.encode(ENCODING, "replace")[:NOTE_MAX]
         self._sock.settimeout(self.timeout)
         self._send(struct.pack(">BBHHHH", NOTE, 0, len(raw), 0, 0, 0) + raw)
+
+    def _need_diag(self, what: str, flag: str) -> None:
+        """SYSINFO flag, not a protocol number.
+
+        Protocol stays 5 so a stock 1.4.0 client does not send 38 as LOADED.
+        """
+        if not self._sock:
+            self.connect()
+        attr = f"_diag_{flag}"
+        if getattr(self, attr, None) is None:
+            setattr(self, attr, self.sysinfo().get(flag) == "1")
+        if not getattr(self, attr):
+            raise AmigaError(f"{what} needs an amigentd that reports {flag}=1 in SYSINFO")
+
+    def loaded(self) -> list[str]:
+        """LOADED lines: L/D/R libraries, devices, resources; H hunks; M resident modules.
+
+        A final line MORE means the daemon stopped at a list, hunk, resident or size limit."""
+        self._need_diag("listing loaded modules", "modules")
+        return self._text(LOADED)
+
+    def tasks(self) -> list[str]:
+        """TASKS lines: T address name command type pri state stack_size stack_used sigwait sigrecvd.
+
+        A final line MORE means the daemon stopped at a list or size limit."""
+        self._need_diag("listing tasks", "tasklist")
+        return self._text(TASKS)
 
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""

@@ -1,17 +1,17 @@
 #!/bin/sh
 # Reject a push that introduces a fork commit whose raw author or committer is not
-# this repository's identity. Published origin history and upstream history are
-# left alone. This hook does not rewrite commits and does not use the network.
+# this repository's identity. Published origin history is left alone. Upstream
+# history is left alone only when refs/tags/upstream-v1.4.0 is the verified
+# annotated tag object. A tag name that starts with upstream- is not an exemption.
+# This hook does not rewrite commits and does not use the network.
 
 . "$(dirname "$0")/lib.sh"
 
 load_expected
+load_verified_upstream
 
 git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null \
     || guard_fail "refs/remotes/origin/main is missing, so published commits cannot be distinguished from new ones. Fail closed."
-
-upstream=$(git rev-parse --verify --quiet 'refs/tags/upstream-v1.4.0^{commit}') \
-    || guard_fail "upstream baseline tag upstream-v1.4.0 is missing. Fail closed."
 
 rejected=0
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -26,17 +26,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         || guard_fail "cannot read commit $local_sha. Fail closed."
 
     # One --not applies to every revision that follows. Repeating --not toggles it.
-    set -- "$local_sha" --not "$upstream"
+    set -- "$local_sha" --not "$verified_upstream"
     for remote_tip in $(git for-each-ref --format='%(objectname)' refs/remotes/origin); do
         set -- "$@" "$remote_tip"
     done
-    for ref in $(git for-each-ref --format='%(refname)' 'refs/tags/upstream-*' refs/remotes/upstream); do
-        peeled=$(git rev-parse --verify --quiet "$ref^{commit}") \
-            || guard_fail "cannot peel $ref. Fail closed."
-        set -- "$@" "$peeled"
-    done
 
-    commits=$(git rev-list "$@" ) || guard_fail "cannot list commits for $local_ref. Fail closed."
+    commits=$(git rev-list "$@") || guard_fail "cannot list commits for $local_ref. Fail closed."
     for c in $commits; do
         if ! check_commit_ident "$c"; then
             rejected=1

@@ -1,30 +1,61 @@
 #!/bin/sh
-# Reactivate the repository-local identity and the identity guard.
-# Touches only this repository's .git/config. Never --global or --system.
+# Install the tracked identity guard into this repository's private hooks
+# directory. That directory stays in effect on every branch, including a
+# checkout that does not contain .githooks. Touches only this repository.
+# Never --global or --system.
 
 set -eu
 
 top=$(git rev-parse --show-toplevel)
 cd "$top"
 
-file=$top/.githooks/identity
-[ -f "$file" ] || { printf '%s\n' "amigent identity guard: identity file is missing." >&2; exit 1; }
-name=$(sed -n '1s/\r$//;1p' "$file")
-email=$(sed -n '2s/\r$//;2p' "$file")
+src=$top/.githooks
+[ -f "$src/identity" ] || { printf '%s\n' "amigent identity guard: identity file is missing." >&2; exit 1; }
+[ -f "$src/pre-commit" ] || { printf '%s\n' "amigent identity guard: pre-commit is missing." >&2; exit 1; }
+[ -f "$src/pre-push" ] || { printf '%s\n' "amigent identity guard: pre-push is missing." >&2; exit 1; }
+[ -f "$src/lib.sh" ] || { printf '%s\n' "amigent identity guard: lib.sh is missing." >&2; exit 1; }
+[ -f "$src/upstream-baseline" ] || { printf '%s\n' "amigent identity guard: upstream baseline is missing." >&2; exit 1; }
+
+name=$(sed -n '1s/\r$//;1p' "$src/identity")
+email=$(sed -n '2s/\r$//;2p' "$src/identity")
 [ -n "$name" ] && [ -n "$email" ] || { printf '%s\n' "amigent identity guard: identity file is incomplete." >&2; exit 1; }
 
 git config --local user.name "$name"
 git config --local user.email "$email"
 git config --local user.useConfigOnly true
-git config --local core.hooksPath .githooks
+# A worktree-relative hooks path disappears when that directory is not in the checkout.
+if git config --local --get-all core.hooksPath >/dev/null 2>&1; then
+    git config --local --unset-all core.hooksPath
+fi
 
 # Drop conflicting keys only when they are stored in this repository.
 for key in author.name author.email committer.name committer.email; do
     git config --local --unset-all "$key" >/dev/null 2>&1 || true
 done
 
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+
+install_hooks() {
+    dest=$1
+    mkdir -p "$dest"
+    for f in pre-commit pre-push lib.sh identity upstream-baseline; do
+        cp "$src/$f" "$dest/$f"
+    done
+    chmod a+x "$dest/pre-commit" "$dest/pre-push" "$dest/lib.sh" 2>/dev/null || true
+}
+
+install_hooks "$common/hooks"
+if [ -d "$common/worktrees" ]; then
+    for wt in "$common/worktrees"/*; do
+        [ -d "$wt" ] || continue
+        install_hooks "$wt/hooks"
+    done
+fi
+
 printf '%s\n' "Repository-local identity set to $name <$email>"
 printf '%s\n' "user.useConfigOnly=true"
-printf '%s\n' "core.hooksPath=.githooks"
+printf '%s\n' "core.hooksPath is unset; the active hooks are in the private Git directory"
+printf '%s\n' "Installed from .githooks into $common/hooks and each linked worktree"
+printf '%s\n' "Run this again after git worktree add."
 printf '%s\n' "Confirm with: git var GIT_AUTHOR_IDENT"
 printf '%s\n' "Confirm with: git var GIT_COMMITTER_IDENT"

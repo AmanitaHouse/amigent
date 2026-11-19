@@ -27,14 +27,19 @@ integrated as `8525a74`. The file is 108600 bytes,
 `596ed90669103359a887a6847cdde8e025c956f2c6ef85eacd37954faf854ab3`.
 It was not rebuilt for this package.
 
-The packaged `amigent-monitor` is the monitor validated in Phase 10F,
-including the redraw after another window covered it. Its tested source
-commit is `aec9d55991f664e8fa99fb668ddbcc50e46c74ee`. The file is
+The packaged `amigent-monitor.apollo` is the monitor validated in Phase
+10F, including the redraw after another window covered it. Its tested
+source commit is `aec9d55991f664e8fa99fb668ddbcc50e46c74ee`. The file is
 21276 bytes,
 `afb9ec9e22f3273e5dc12600832368e6dbed07bca714f96bc1a7b84d72313655`.
-It was not rebuilt for this package. It is a 68080 executable. Install
-and update still copy that one monitor file on every machine. Only the
-Apollo V4-SA was used to validate it.
+It was not rebuilt for this package. It is a 68080 executable. Only the
+Apollo V4-SA was used to validate it. Install and update copy that file
+to `amigent-monitor` when the check that selects `amigentd.apollo` says
+the machine is ApolloOS. Every other machine, and a machine that does
+not identify itself, keeps the earlier general-purpose `amigent-monitor`:
+22604 bytes,
+`bcadce2fbae29c2c5b25db398739d50e2a07dd388c9690b5033130d92bb79acf`.
+That file was not rebuilt either.
 
 The packaged `amigentd` and `amigentd.000` are the earlier binaries.
 Their bytes are unchanged. They do not contain the 90-second port
@@ -89,8 +94,10 @@ not part of that validation.
   candidate-specific regression has not been established. Phase 10C
   saw the same class of record-layer failure after the known-good
   daemon was restored. The client did not open a plaintext session.
-- The packaged monitor is the 68080 file named above. A 68000 machine
-  was not run with it. AmigaOS 2 and AmigaOS 3 were not run with it.
+- The 68080 monitor is installed only after the ApolloOS check that
+  selects `amigentd.apollo`. Other machines keep the earlier
+  general-purpose monitor. A 68000 machine was not run with the 68080
+  file. AmigaOS 2 and AmigaOS 3 were not run with it.
 - Native binaries still report `$VER 1.3.0`.
 
 ## 1.3.1rc2 (2026-11-19)

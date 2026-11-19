@@ -93,6 +93,31 @@ def binary_path(name: str):
     return path
 
 
+def monitor_file(build: str) -> str:
+    """The packaged monitor for a build ``select_build`` already returned.
+
+    The installed name stays ``amigent-monitor``. Only ``amigentd.apollo``
+    selects the 68080 file. A 68000, AmigaOS, an unknown build, or a machine
+    that did not identify itself keeps the general-purpose monitor.
+    """
+    if build == "amigentd.apollo":
+        return "amigent-monitor.apollo"
+    return "amigent-monitor"
+
+
+def window_source(name: str, build: str):
+    """Local file to store as ``name``, or None when that window is not packaged.
+
+    A missing Apollo monitor stops the caller before anything is copied.
+    A missing general-purpose window is skipped, as the other windows are.
+    """
+    packaged = monitor_file(build) if name == "amigent-monitor" else name
+    if name == "amigent-monitor" and packaged != "amigent-monitor":
+        return binary_path(packaged)
+    path = AMIGA / "bin" / packaged
+    return path if path.exists() else None
+
+
 def _probe_output(channel) -> str:
     """What the small ApolloOS probe printed, or '' when it cannot be run."""
     probe = AMIGA / "bin" / "amigent-apollo-probe"
@@ -162,6 +187,8 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         print("uploading amigactld")
         link.put("C:amigactld", binary)
     build = amigentd_build(link)
+    if monitor_file(build) != "amigent-monitor":
+        binary_path(monitor_file(build))  # missing Apollo monitor: change nothing
     print(f"uploading {build}")
     link.put("C:amigentd.new", (AMIGA / "bin" / build).read_bytes())
     run(link, f"MakeDir >NIL: {home}")
@@ -171,8 +198,9 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
     for name in WINDOWS:  # the little windows on the Amiga's side
-        if (AMIGA / "bin" / name).exists():
-            link.put(f"{home}/{name}", (AMIGA / "bin" / name).read_bytes())
+        source = window_source(name, build)
+        if source is not None:
+            link.put(f"{home}/{name}", source.read_bytes())
     print("setting the key")
     link.put("S:amigent.key", (key + "\n").encode())
     link.put(f"{home}/amigent.key", (key + "\n").encode())
@@ -215,8 +243,12 @@ WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-
 UPDATE_WAIT = 180.0
 
 
-def update_windows(channel, home: str | None) -> None:
-    """amigent-status and amigent-monitor into the Amigent folder, where they differ."""
+def update_windows(channel, home: str | None, build: str) -> None:
+    """amigent-status and amigent-monitor into the Amigent folder, where they differ.
+
+    ``build`` is the daemon ``build_for_channel`` already chose. The monitor
+    follows it, and the file on the Amiga is still named amigent-monitor.
+    """
     if not home:
         try:
             home = channel.read_file("ENVARC:amigent-home").decode("iso-8859-1").strip()
@@ -224,8 +256,8 @@ def update_windows(channel, home: str | None) -> None:
             home = ""
     home = home or "SYS:amigent"
     for name in WINDOWS:
-        local = AMIGA / "bin" / name
-        if not local.exists():
+        local = window_source(name, build)
+        if local is None:
             continue
         target = f"{home}/{name}"
         try:
@@ -251,13 +283,15 @@ def update(host: str, home: str | None) -> int:
         try:
             build = build_for_channel(channel)
             new = binary_path(build).read_bytes()
+            if monitor_file(build) != "amigent-monitor":
+                binary_path(monitor_file(build))
         except SystemExit as e:
             print(e)
             channel.close()
             return 1
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
-        update_windows(channel, home)
+        update_windows(channel, home, build)
         if channel.read_file("C:amigentd") == new:
             print(f"amigentd on {host} is already the one from Amigent {__version__}.")
             channel.close()

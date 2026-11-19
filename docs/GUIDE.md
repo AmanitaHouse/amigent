@@ -423,14 +423,19 @@ there includes the native port-release retry, the screen-buffer release,
 the reset chord, and the read-only LOADED and TASKS lists, and that is
 the ApolloOS executable that was run on a V4. `amigentd` and
 `amigentd.000` in that directory are earlier binaries and do not include
-those native changes. `amigent-monitor` there is the Apollo V4 build.
-Install and update copy that one monitor file on every machine. A fresh `make` into `build/apollo/` does not replace
+those native changes. `amigent-monitor.apollo` there is the Apollo V4
+build, and `amigent-monitor` is the earlier general-purpose monitor.
+Install and update copy the Apollo file to `amigent-monitor` only when
+the same check that selects `amigentd.apollo` says the machine is
+ApolloOS. Any other machine, including one that does not identify
+itself, keeps the general-purpose file. A fresh `make` into `build/apollo/` does not replace
 them. A clean compile that reproduces the older 108076-byte baseline is a
 different file from the packaged Apollo executable, and it has not by
 itself been run on Apollo hardware. `scripts/make_release.py` packs the
 archive with LhA on the Amiga from those packaged files, including
-`amigentd.apollo` and `amigent-monitor` when they are present. Tests for
-the PC side: `python scripts/repo_hygiene.py -- python -m pytest -q`.
+`amigentd.apollo`, `amigent-monitor` and `amigent-monitor.apollo` when
+they are present. Tests for the PC side:
+`python scripts/repo_hygiene.py -- python -m pytest -q`.
 
 A source distribution contains the maintained Python package, the tests, the
 scripts that build and check the tree, the documentation, and the native

@@ -5,7 +5,8 @@ Usage: make_release.py HOST
 Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
 Writes dist/amigent.lha with an Amigent drawer: amigentd (68020),
 amigentd.000 (68000) if that packaged file is present, amigentd.apollo when
-that packaged file is present, amigent-monitor when present, the icon,
+that packaged file is present, amigent-monitor when present,
+amigent-monitor.apollo when present, the icon,
 Amigent-Update, ReadMe and the licence, and next to it amigent.readme for
 Aminet. Aminet wants the version in the readme, not in the file name:
 uploading amigent.lha again replaces the last one. The same archive goes to
@@ -173,10 +174,14 @@ the fields the PC uses to name a Guru. PEEK, POKE, TASKCTL and
 tracepoints are not included. ApolloOS APeek and APoke stay deferred.
 The packaged amigentd and amigentd.000 are unchanged earlier binaries.
 
-The packaged amigent-monitor locks its layer only while a frame is
-drawn, and the viewer states why a connection failed or ended. Only
-the Apollo V4-SA was used for native validation. Install still copies
-that one monitor file on every machine. It is a 68080 executable.
+The packaged amigent-monitor.apollo locks its layer only while a
+frame is drawn, and the viewer states why a connection failed or
+ended. Only the Apollo V4-SA was used for native validation. It is
+a 68080 executable. Install and update copy it to amigent-monitor
+on ApolloOS, using the same check that selects amigentd.apollo.
+Every other machine keeps the earlier general-purpose
+amigent-monitor. A machine that does not identify itself does not
+receive the 68080 file.
 
 The updater restoration timeout remains unresolved. Intermittent TLS
 record-layer failures remain under investigation. This release does
@@ -279,6 +284,10 @@ def release_files(bin_dir: Path | None = None, root: Path | None = None) -> dict
     if (bin_dir / "amigent-monitor").exists():
         files["amigent-monitor"] = bin_dir / "amigent-monitor"
         files["amigent-monitor.info"] = bin_dir / "amigent-monitor.info"
+    if (bin_dir / "amigent-monitor.apollo").exists():
+        files["amigent-monitor.apollo"] = bin_dir / "amigent-monitor.apollo"
+    if (bin_dir / "amigent-apollo-probe").exists():
+        files["amigent-apollo-probe"] = bin_dir / "amigent-apollo-probe"
     if (bin_dir / "amigentd.000").exists():
         files["amigentd.000"] = bin_dir / "amigentd.000"
         files["amigentd.000.info"] = bin_dir / "amigentd.info"
@@ -306,7 +315,8 @@ def main() -> None:
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
     ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
-    for name in ("amigentd", "amigentd.000", "amigentd.apollo", "amigent-status", "amigent-monitor"):
+    for name in ("amigentd", "amigentd.000", "amigentd.apollo", "amigent-status",
+                 "amigent-monitor", "amigent-monitor.apollo", "amigent-apollo-probe"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
     archive = "amigent.lha"

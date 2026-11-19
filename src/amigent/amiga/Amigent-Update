@@ -14,9 +14,21 @@ If WARN
   Skip done
 EndIf
 Set build amigentd
+Set monitor amigent-monitor
 CPU CHECK 68020 >NIL:
 If WARN
   Set build amigentd.000
+Else
+  ; The probe is the same ApolloOS check amigent-setup uses for amigentd.apollo.
+  ; WARN, a missing probe, or a missing file keeps the general-purpose monitor.
+  If EXISTS amigent-apollo-probe
+    amigent-apollo-probe >NIL:
+    If NOT WARN
+      If EXISTS amigent-monitor.apollo
+        Set monitor amigent-monitor.apollo
+      EndIf
+    EndIf
+  EndIf
 EndIf
 If NOT EXISTS $build
   Echo "$build is missing in this drawer."
@@ -32,8 +44,8 @@ If EXISTS "$home"
   If EXISTS amigent-status
     Copy amigent-status "$home/" QUIET
   EndIf
-  If EXISTS amigent-monitor
-    Copy amigent-monitor "$home/" QUIET
+  If EXISTS $monitor
+    Copy $monitor "$home/amigent-monitor" QUIET
   EndIf
   If NOT EXISTS "$home/amigent-status.info"
     Copy amigent-status.info "$home/" QUIET
@@ -43,6 +55,7 @@ If EXISTS "$home"
   EndIf
 EndIf
 UnSet home
+UnSet monitor
 Copy $build C:amigentd.new QUIET
 Run >NIL: RexxMast >NIL:
 Wait 1

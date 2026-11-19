@@ -71,10 +71,23 @@ def run(monkeypatch):
     return go
 
 
+def monitor_at(amiga, home="SYS:amigent"):
+    return amiga.files[f"{home}/amigent-monitor"]
+
+
+def general_monitor():
+    return (AMIGA / "bin" / "amigent-monitor").read_bytes()
+
+
+def apollo_monitor():
+    return (AMIGA / "bin" / "amigent-monitor.apollo").read_bytes()
+
+
 def test_the_new_amigentd_replaces_the_old(run, capsys):
     amiga = Amiga()
     assert run(amiga, "Stuff:amigent") == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert monitor_at(amiga, "Stuff:amigent") == general_monitor()
     assert "Run >NIL: rx T:amigent-update.rexx Stuff:amigent" in amiga.commands
     assert 'Echo >ENVARC:amigent-home "Stuff:amigent"' in amiga.commands
     assert "Done: amigentd 1.2.0, protocol 4." in capsys.readouterr().out
@@ -91,6 +104,7 @@ def test_a_68000_gets_its_own_build(run):
     amiga = Amiga(cpu_rc=5)
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.000").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
 
 
 def test_apolloos_gets_its_own_build(run):
@@ -98,13 +112,16 @@ def test_apolloos_gets_its_own_build(run):
     amiga.info = {"os": "ApolloOS", "exec_version": "51.3", "attn_flags": "1024"}
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    assert monitor_at(amiga) == apollo_monitor()
+    assert "amigent-monitor.apollo" not in "".join(amiga.files)
 
 
 def test_amigaos_on_a_vampire_keeps_amigentd(run):
     amiga = Amiga()
-    amiga.info = {"exec_version": "47.96", "attn_flags": "1024"}
+    amiga.info = {"exec_version": "47.96", "attn_flags": "1024", "cpu": "68080"}
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
 
 
 def test_exec_51_without_the_fpga_bit_is_not_apollo(run):
@@ -112,6 +129,7 @@ def test_exec_51_without_the_fpga_bit_is_not_apollo(run):
     amiga.info = {"exec_version": "51.3", "attn_flags": "0"}
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
 
 
 def test_the_version_text_can_name_apolloos(run):
@@ -119,6 +137,7 @@ def test_the_version_text_can_name_apolloos(run):
     amiga.version_full = "exec.library 51.3\nApolloOS\n"
     assert run(amiga) == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    assert monitor_at(amiga) == apollo_monitor()
 
 
 def test_apolloos_without_the_binary_changes_nothing(run, monkeypatch, tmp_path, capsys):
@@ -152,6 +171,51 @@ def test_an_unknown_cpu_stops_before_anything_changes(run):
     amiga = Amiga(cpu_rc=20)
     assert run(amiga) == 1
     assert "C:amigentd.new" not in amiga.files
+    assert not any(path.endswith("amigent-monitor") for path in amiga.files)
+    assert apollo_monitor() not in amiga.files.values()
+
+
+def test_an_unidentified_machine_keeps_the_general_monitor(run):
+    amiga = Amiga()
+    amiga.info = {}
+    amiga.probe = ""
+    amiga.version_full = ""
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
+    assert apollo_monitor() not in amiga.files.values()
+
+
+def test_a_68080_label_without_apolloos_keeps_the_general_monitor(run):
+    amiga = Amiga()
+    amiga.info = {"cpu": "68080"}
+    amiga.version_full = "exec.library 47.96\n"
+    amiga.probe = "AmigaOS\n"
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
+    assert apollo_monitor() not in amiga.files.values()
+
+
+def test_a_68000_does_not_receive_the_68080_monitor(run):
+    amiga = Amiga(cpu_rc=5)
+    amiga.info = {"os": "ApolloOS", "cpu": "68080"}
+    assert run(amiga) == 0
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd.000").read_bytes()
+    assert monitor_at(amiga) == general_monitor()
+
+
+def test_apolloos_without_the_monitor_changes_nothing(run, monkeypatch, tmp_path, capsys):
+    daemon = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    monkeypatch.setattr(setup, "AMIGA", tmp_path)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "amigentd.apollo").write_bytes(daemon)
+    amiga = Amiga()
+    amiga.info = {"os": "ApolloOS"}
+    assert run(amiga) == 1
+    assert "C:amigentd.new" not in amiga.files
+    assert not any(path.endswith("amigent-monitor") for path in amiga.files)
+    assert "not in this package" in capsys.readouterr().out
 
 
 def test_a_home_that_cannot_be_written_does_not_stop_the_update(run, capsys):

@@ -84,6 +84,8 @@ def test_sdist_list_has_native_sources_and_not_the_wheel_extras():
         assert rel in listed, rel
     assert "src/amigent/amiga/bin/amigentd.080" not in listed
     assert "src/amigent/amiga/bin/amigentd.apollo" in listed
+    assert "src/amigent/amiga/bin/amigent-monitor" in listed
+    assert "src/amigent/amiga/bin/amigent-monitor.apollo" in listed
     assert not any(rel == "a.out" or rel.endswith("/a.out") for rel in listed)
     assert not any("apollo_audio.s" in rel or "audio_diag" in rel for rel in listed)
     assert not any(rel.startswith("build/") or rel.startswith("dist/") for rel in listed)
@@ -92,7 +94,10 @@ def test_sdist_list_has_native_sources_and_not_the_wheel_extras():
 
 APPROVED = {
     "amigentd.apollo": (108600, "596ed90669103359a887a6847cdde8e025c956f2c6ef85eacd37954faf854ab3"),
-    "amigent-monitor": (21276, "afb9ec9e22f3273e5dc12600832368e6dbed07bca714f96bc1a7b84d72313655"),
+}
+MONITORS = {
+    "amigent-monitor": (22604, "bcadce2fbae29c2c5b25db398739d50e2a07dd388c9690b5033130d92bb79acf"),
+    "amigent-monitor.apollo": (21276, "afb9ec9e22f3273e5dc12600832368e6dbed07bca714f96bc1a7b84d72313655"),
 }
 CLASSIC = {
     "amigentd": (87396, "1b469f0668c6dda42276ca23937bc9ccf450733cb50ee076d6cbe9f3dc914a92"),
@@ -125,7 +130,7 @@ def _make_release():
 
 
 def _assert_native(data: bytes, name: str) -> None:
-    size, digest = {**APPROVED, **CLASSIC}[name]
+    size, digest = {**APPROVED, **CLASSIC, **MONITORS}[name]
     assert len(data) == size, name
     assert _sha256(data) == digest, name
     assert len(data) != DIAGNOSTIC[0]
@@ -134,7 +139,7 @@ def _assert_native(data: bytes, name: str) -> None:
 
 def test_packaged_natives_match_the_approved_files():
     bin_dir = ROOT / "src" / "amigent" / "amiga" / "bin"
-    for name in APPROVED:
+    for name in (*APPROVED, *MONITORS):
         _assert_native((bin_dir / name).read_bytes(), name)
     for name in CLASSIC:
         _assert_native((bin_dir / name).read_bytes(), name)
@@ -152,8 +157,10 @@ def test_release_files_selects_the_packaged_apollo_daemon_and_monitor():
     bin_dir = ROOT / "src" / "amigent" / "amiga" / "bin"
     assert files["amigentd.apollo"] == bin_dir / "amigentd.apollo"
     assert files["amigent-monitor"] == bin_dir / "amigent-monitor"
+    assert files["amigent-monitor.apollo"] == bin_dir / "amigent-monitor.apollo"
+    assert files["amigent-apollo-probe"] == bin_dir / "amigent-apollo-probe"
     assert "amigentd.080" not in files
-    for name in (*APPROVED, *CLASSIC):
+    for name in (*APPROVED, *CLASSIC, *MONITORS):
         _assert_native(files[name].read_bytes(), name)
     readme = module.aminet_readme()
     assert "\nVersion:      1.3.1rc3\n" in readme
@@ -167,15 +174,19 @@ def test_release_files_reads_the_package_directory_not_build(tmp_path):
     (root / "src" / "amigent" / "amiga").mkdir(parents=True)
     (root / "LICENSE").write_bytes(b"lic")
     for name in ("amigentd", "amigentd.info", "amigent-status", "amigent-status.info",
-                 "amigent-monitor", "amigent-monitor.info", "amigentd.000", "amigentd.apollo"):
+                 "amigent-monitor", "amigent-monitor.info", "amigent-monitor.apollo",
+                 "amigent-apollo-probe", "amigentd.000", "amigentd.apollo"):
         (bin_dir / name).write_bytes(f"pkg-{name}".encode())
     decoy = tmp_path / "build"
     (decoy / "monitor").mkdir(parents=True)
     (decoy / "apollo").mkdir()
     (decoy / "monitor" / "amigent-monitor").write_bytes(b"old-monitor")
+    (decoy / "monitor" / "amigent-monitor.apollo").write_bytes(b"old-apollo-monitor")
     (decoy / "apollo" / "amigentd.apollo").write_bytes(b"old-apollo")
     files = _make_release().release_files(bin_dir, root)
     assert files["amigent-monitor"].read_bytes() == b"pkg-amigent-monitor"
+    assert files["amigent-monitor.apollo"].read_bytes() == b"pkg-amigent-monitor.apollo"
+    assert files["amigent-apollo-probe"].read_bytes() == b"pkg-amigent-apollo-probe"
     assert files["amigentd.apollo"].read_bytes() == b"pkg-amigentd.apollo"
     assert files["amigentd.apollo.info"] == bin_dir / "amigentd.info"
     assert "amigentd.080" not in files
@@ -237,7 +248,7 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
     assert len(packed) == 1, packed
     for archive in (built[0], packed[0]):
         members = _archive_names(archive)
-        for name in (*APPROVED, *CLASSIC):
+        for name in (*APPROVED, *CLASSIC, *MONITORS):
             _assert_native(_native_member(members, name), name)
         assert _declared_version(members) == "1.3.1rc3"
         if archive.suffix == ".whl":
@@ -264,16 +275,22 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
         [sys.executable, "-c",
          "import hashlib\n"
          "from amigent.paths import AMIGA\n"
-         "from amigent.setup import binary_path, select_build\n"
+         "from amigent.setup import binary_path, monitor_file, select_build\n"
          "assert select_build(0, {'os': 'ApolloOS'}) == 'amigentd.apollo'\n"
          "assert select_build(5, {'os': 'ApolloOS'}) == 'amigentd.000'\n"
          "assert select_build(0, {'exec_version': '47.96', 'attn_flags': '1024'}) == 'amigentd'\n"
+         "assert monitor_file('amigentd.apollo') == 'amigent-monitor.apollo'\n"
+         "assert monitor_file('amigentd') == 'amigent-monitor'\n"
+         "assert monitor_file('amigentd.000') == 'amigent-monitor'\n"
+         "assert monitor_file('unknown') == 'amigent-monitor'\n"
          "apollo = binary_path('amigentd.apollo').read_bytes()\n"
          "monitor = (AMIGA / 'bin' / 'amigent-monitor').read_bytes()\n"
+         "apollo_monitor = (AMIGA / 'bin' / 'amigent-monitor.apollo').read_bytes()\n"
          "classic = binary_path('amigentd').read_bytes()\n"
          "plain = binary_path('amigentd.000').read_bytes()\n"
          "print(len(apollo), hashlib.sha256(apollo).hexdigest())\n"
          "print(len(monitor), hashlib.sha256(monitor).hexdigest())\n"
+         "print(len(apollo_monitor), hashlib.sha256(apollo_monitor).hexdigest())\n"
          "print(len(classic), hashlib.sha256(classic).hexdigest())\n"
          "print(len(plain), hashlib.sha256(plain).hexdigest())\n"
          "import os\n"
@@ -285,11 +302,12 @@ def test_wheel_and_sdist_carry_the_approved_natives(tmp_path):
     assert probe.returncode == 0, probe.stderr
     lines = probe.stdout.splitlines()
     assert lines[0] == f"{APPROVED['amigentd.apollo'][0]} {APPROVED['amigentd.apollo'][1]}"
-    assert lines[1] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
-    assert lines[2] == f"{CLASSIC['amigentd'][0]} {CLASSIC['amigentd'][1]}"
-    assert lines[3] == f"{CLASSIC['amigentd.000'][0]} {CLASSIC['amigentd.000'][1]}"
-    assert lines[4] == "1.3.1rc3"
-    assert lines[5] == "True"
+    assert lines[1] == f"{MONITORS['amigent-monitor'][0]} {MONITORS['amigent-monitor'][1]}"
+    assert lines[2] == f"{MONITORS['amigent-monitor.apollo'][0]} {MONITORS['amigent-monitor.apollo'][1]}"
+    assert lines[3] == f"{CLASSIC['amigentd'][0]} {CLASSIC['amigentd'][1]}"
+    assert lines[4] == f"{CLASSIC['amigentd.000'][0]} {CLASSIC['amigentd.000'][1]}"
+    assert lines[5] == "1.3.1rc3"
+    assert lines[6] == "True"
 
 
 def test_editable_install_reads_the_corrected_source_tree(tmp_path):
@@ -319,9 +337,11 @@ def test_editable_install_reads_the_corrected_source_tree(tmp_path):
          "from amigent.setup import binary_path\n"
          "apollo = binary_path('amigentd.apollo')\n"
          "monitor = AMIGA / 'bin' / 'amigent-monitor'\n"
+         "apollo_monitor = AMIGA / 'bin' / 'amigent-monitor.apollo'\n"
          "print(apollo.resolve())\n"
          "print(len(apollo.read_bytes()), hashlib.sha256(apollo.read_bytes()).hexdigest())\n"
          "print(len(monitor.read_bytes()), hashlib.sha256(monitor.read_bytes()).hexdigest())\n"
+         "print(len(apollo_monitor.read_bytes()), hashlib.sha256(apollo_monitor.read_bytes()).hexdigest())\n"
          "from amigent import __version__\n"
          "print(__version__)\n"],
         cwd=tmp_path, env=env, capture_output=True, text=True)
@@ -330,8 +350,9 @@ def test_editable_install_reads_the_corrected_source_tree(tmp_path):
     expected = (ROOT / "src" / "amigent" / "amiga" / "bin" / "amigentd.apollo").resolve()
     assert Path(lines[0]) == expected
     assert lines[1] == f"{APPROVED['amigentd.apollo'][0]} {APPROVED['amigentd.apollo'][1]}"
-    assert lines[2] == f"{APPROVED['amigent-monitor'][0]} {APPROVED['amigent-monitor'][1]}"
-    assert lines[3] == "1.3.1rc3"
+    assert lines[2] == f"{MONITORS['amigent-monitor'][0]} {MONITORS['amigent-monitor'][1]}"
+    assert lines[3] == f"{MONITORS['amigent-monitor.apollo'][0]} {MONITORS['amigent-monitor.apollo'][1]}"
+    assert lines[4] == "1.3.1rc3"
 
 
 def test_build_log_redirection_stays_inside_one_bash_argument():

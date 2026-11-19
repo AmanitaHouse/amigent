@@ -19,11 +19,14 @@ CPU CHECK 68020 >NIL:
 If WARN
   Set build amigentd.000
 Else
-  ; The probe is the same ApolloOS check amigent-setup uses for amigentd.apollo.
-  ; WARN, a missing probe, or a missing file keeps the general-purpose monitor.
+  ; The probe is the ApolloOS check amigent-setup already uses.
+  ; Success selects amigentd.apollo. The missing-file test below then
+  ; stops before a copy or the swap. No probe, or a warning, keeps the
+  ; CPU choice and the general-purpose monitor.
   If EXISTS amigent-apollo-probe
     amigent-apollo-probe >NIL:
     If NOT WARN
+      Set build amigentd.apollo
       If EXISTS amigent-monitor.apollo
         Set monitor amigent-monitor.apollo
       EndIf

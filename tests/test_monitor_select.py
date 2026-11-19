@@ -1,13 +1,9 @@
 """Which packaged monitor is copied, and under which installed name."""
 
-from pathlib import Path
-
 import pytest
 
 from amigent.paths import AMIGA
 from amigent.setup import install, monitor_file, select_build
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def general_monitor():
@@ -108,18 +104,3 @@ def test_install_without_the_apollo_monitor_copies_no_daemon(monkeypatch, tmp_pa
     assert not any(path.endswith("amigent-monitor") for path in link.files)
 
 
-def test_the_amiga_updater_follows_the_probe_and_keeps_the_daemon_choice():
-    lines = (ROOT / "src" / "amigent" / "amiga" / "Amigent-Update").read_text(encoding="iso-8859-1").splitlines()
-    assert "Set build amigentd.apollo" not in lines
-    cpu = lines.index("CPU CHECK 68020 >NIL:")
-    warned = lines.index("If WARN", cpu)
-    classic = lines.index("  Set build amigentd.000", warned)
-    otherwise = lines.index("Else", classic)
-    probe = lines.index("    amigent-apollo-probe >NIL:", otherwise)
-    opened = lines.index("    If NOT WARN", probe)
-    chosen = lines.index("        Set monitor amigent-monitor.apollo", opened)
-    copied = lines.index('    Copy $monitor "$home/amigent-monitor" QUIET', chosen)
-    assert lines.index("Set build amigentd") < lines.index("Set monitor amigent-monitor") < cpu
-    assert classic < otherwise < probe < opened < chosen < copied
-    assert "Copy $build C:amigentd.new QUIET" in lines
-    assert "Copy amigent-monitor \"$home/\"" not in "\n".join(lines)

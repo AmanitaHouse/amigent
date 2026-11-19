@@ -1,31 +1,87 @@
 # changelog
 
 Versions follow [semver](https://semver.org). Package metadata uses the
-PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc1`.
+PEP 440 spelling of a prerelease, so this candidate is `1.3.1rc2`.
 The number lives in `src/amigent/__init__.py`, and everything else reads
 it from there.
 
 ## Unreleased
 
-The reset chord from upstream 1.4.0 is ported on this branch. The tag is
-`v1.4.0` and the source commit is `4fea38f602f84ddad2d5215fbc9d2742605d892c`.
-The package version stays `1.3.1rc1`. This is not a release. The packaged
-`amigentd.apollo` is the offline build of this source: 108464 bytes,
-`f2377a1542310b88f9fa7d42313cfa61ae90dc51e95c8448f98968918c4e7dc0`.
-No Amiga has been reset with it.
+## 1.3.1rc2 (2026-11-19)
 
-Ctrl, Left Amiga and Right Amiga have to go down within five seconds of one
-another. amigentd then calls `ColdReboot()` when exec is 36 or newer. On exec
-34 and 35 the same three key-downs are still delivered and `ColdReboot()` is
-not called. Nothing in the chord sends the matching key-ups, so those keys
-would stay down. A key that went down earlier, including one whose release
-never arrived because a client broke off, does not complete that chord. The
-remote desktop sends the three keys only when `C:Reboot` is missing and exec
-is 36, 37 or 38, after the disks are flushed. That is the released upstream
-1.4.0 fallback. Exec below 36 is a deliberate difference from upstream 1.4.0:
-the viewer sends no reset-chord keys and reports the restart as unsupported.
-Exec 39 and newer, and any system that has `C:Reboot`, still use the command.
-`amiga_restart` still requires `C:Reboot`.
+AmanitaHouse fork prerelease. The package version is `1.3.1rc2`. This is
+not the complete official upstream 1.4.0 release, and it does not replace
+the published 1.3.0 packages or the published `v1.3.1rc1` prerelease. The
+native programs still report `$VER 1.3.0`. Those files were not rebuilt
+to change that string.
+
+The packaged `amigentd.apollo` is the daemon smoke-tested in Phase 9D:
+108464 bytes,
+`f2377a1542310b88f9fa7d42313cfa61ae90dc51e95c8448f98968918c4e7dc0`.
+The packaged `amigent-monitor` is the monitor tested in Phase 8D:
+22604 bytes,
+`bcadce2fbae29c2c5b25db398739d50e2a07dd388c9690b5033130d92bb79acf`.
+
+### Kept from 1.3.1rc1
+
+The five improvements already released in `1.3.1rc1` stay in this candidate:
+
+- Replacing a running amigentd waits longer for the old TCP port. The
+  packaged `amigentd.apollo` tries for 90 seconds. Amigent-Update waits
+  100 seconds, and `amigent-setup --update` waits 180 seconds.
+- That daemon returns the memory of its screen pictures when the screen
+  client leaves and no other client takes over.
+- Packing is timed per screen, and the faster of packed or unpacked is
+  used.
+- A packing mode stays while another Amigent process for the same Amiga
+  is running. Mode and line estimates share one save.
+- amigent-monitor draws each update in a backing bitmap and copies the
+  changed rectangle into the window.
+
+The packaged `amigentd` and `amigentd.000` are the earlier binaries. They
+do not contain the 90-second port retry, the screen-picture release, or
+the reset chord. The monitor file is the one copied on every machine.
+
+### Reset chord
+
+The reset chord is ported from the final upstream 1.4.0 source (`v1.4.0`,
+commit `4fea38f602f84ddad2d5215fbc9d2742605d892c`). Ctrl, Left Amiga and
+Right Amiga must all be pressed within five seconds. A key release clears
+that key's pressed state, so an old held Ctrl, including one whose release
+never arrived, does not complete a much later reset. amigentd calls
+`ColdReboot()` when exec is 36 or newer.
+
+The viewer's fallback sends those three key-downs, after the disks are
+flushed, only on exec 36, 37 and 38 when `C:Reboot` is unavailable. On
+exec 34 and 35 without `C:Reboot`, this fork refuses the operation. The
+daemon would post the three key-downs and would not call `ColdReboot()`,
+and the chord sends no key-ups, so the modifier keys would stay down.
+Exec 39 and newer, and any system that has `C:Reboot`, still restart with
+that command. `amiga_restart` still requires `C:Reboot`.
+
+### What was tested
+
+Offline reset logic and native input dispatch were tested. The updated
+daemon was smoke-tested on an Apollo V4: it was installed, ordinary input
+still worked, and the previous daemon was restored. An actual reset chord
+and the pre-OS 3 fallback were not tested on hardware. No Amiga was reset
+for this candidate.
+
+### Limitations
+
+- The existing audio-acquisition deficit is not fixed.
+- Intermittent TLS record-layer failures remain under investigation. A
+  candidate-specific regression has not been established. Phase 8D
+  recorded one client-side TLS record-layer failure
+  (`RECORD_LAYER_FAILURE` from `monitor_once()`, raised as
+  `TlsHandshakeFailed`) while an earlier candidate daemon was installed.
+  The client closed the socket and did not open a plaintext session.
+- Classic daemon binaries do not contain the newly rebuilt Apollo native
+  improvements.
+- AmigaOS 2 and AmigaOS 3 monitor runtime compatibility remains
+  unverified. The window was shown on ApolloOS. The code uses a friend
+  bitmap on OS 3 and chip bitplanes on OS 2.
+- Native binaries still report `$VER 1.3.0`.
 
 ## 1.3.1rc1 (2026-11-19)
 

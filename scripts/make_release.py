@@ -153,40 +153,37 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-AmanitaHouse fork prerelease 1.3.1rc1. Not an upstream 1.4.0 release, and
-not a replacement for the published 1.3.0 packages. This release does not
-fix the outstanding audio-acquisition deficit. The reset-chord change from
-upstream PR #14 is not in this release.
+AmanitaHouse fork prerelease 1.3.1rc2. Not the official upstream 1.4.0
+release, and not a replacement for the published 1.3.0 packages. Native
+programs still report $VER 1.3.0. Those files were not rebuilt to change
+that string. This release does not fix the outstanding audio-acquisition
+deficit.
 
-- Replacing a running amigentd waits longer for the old TCP port. The
-  packaged amigentd.apollo tries for 90 seconds. Amigent-Update waits 100
-  seconds, and amigent-setup --update waits 180 seconds. The packaged
-  amigentd and amigentd.000 are earlier binaries and do not have that
-  retry. An ordinary update was run on ApolloOS V4-SA. A long wait, and a
-  rollback when the new daemon never appears, were not.
-- The packaged amigentd.apollo returns the memory of its screen pictures
-  when the screen client leaves and no other client takes over. On
-  ApolloOS V4-SA that was one connect, disconnect, reconnect and takeover,
-  not a long run. The packaged amigentd and amigentd.000 still keep those
-  pictures until they quit.
-- Packing is timed per screen, and the faster of packed or unpacked is
-  used. A slow screen no longer leaves command packing on. A packing mode
-  stays while another Amigent process for the same Amiga is running. The
-  live decision and the mode handoff were run on ApolloOS V4-SA. A forced
-  refusal for lack of memory was not.
-- amigent-monitor draws each update in a backing bitmap and copies the
-  changed rectangle into the window. If that bitmap cannot be allocated,
-  it draws into the window as before. That failure was not forced. The
-  window was shown on ApolloOS V4-SA. AmigaOS 2 and AmigaOS 3 were not
-  run, so this monitor build is untested there. Install and update copy
-  this one file on every machine.
+Kept from 1.3.1rc1, and still only in the packaged amigentd.apollo unless
+noted: a 90-second wait when replacing a running daemon, screen-picture
+memory returned when the screen client leaves, per-screen packing, a
+packing mode that stays while another process runs, and a monitor that
+draws into a backing bitmap. The packaged amigentd and amigentd.000 are
+earlier binaries and do not have the retry, the picture release, or the
+reset chord. AmigaOS 2 and AmigaOS 3 were not run with this monitor.
+Install and update copy that one monitor file on every machine.
 
-Phase 8D recorded one client-side TLS record-layer failure while this
-daemon was installed. The client did not open a plaintext session. A
-second reported bad record mac is not in the preserved records of that
-run. No daemon crash was recorded, and a candidate-specific TLS
-regression was not established. This release does not show that TLS
-reliability matches the known-good daemon.
+The reset chord is ported from the final upstream 1.4.0 source. Ctrl,
+Left Amiga and Right Amiga must all go down within five seconds.
+Releasing a key clears that key, so an old held Ctrl does not finish a
+much later reset. amigentd calls ColdReboot() when exec is 36 or newer.
+The viewer sends those three keys only when C:Reboot is missing and exec
+is 36, 37 or 38, after the disks are flushed. On exec 34 and 35 without
+C:Reboot this fork refuses, instead of leaving the modifier keys down.
+Where C:Reboot is available, restart still runs that command.
+
+Offline tests covered the reset logic and native input dispatch. The
+updated daemon was smoke-tested on an Apollo V4. An actual reset chord,
+and the pre-OS 3 fallback, were not tested on hardware.
+
+Intermittent TLS record-layer failures remain under investigation. A
+candidate-specific regression has not been established. This release
+does not show that TLS reliability matches the known-good daemon.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS

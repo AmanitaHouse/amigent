@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN = AMIGA / "bin"
 HUNK = b"\x00\x00\x03\xf3"
 DAEMON = (131292, "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca")
-PROBE = (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4")
+PROBE = (3224, "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265")
 MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
     "amigentd": (108896, "563f19c2662a8c7e8df2f3b95aa01d224a4e8b8ba5e04178cd8492a3a6d3ecee"),
@@ -114,12 +114,12 @@ def test_a_missing_probe_or_daemon_does_not_replace_a_classic_choice(tmp_path, m
     monkeypatch.setattr(setup, "AMIGA", package)
     link = _install(0, 0)
     assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd").read_bytes()
+    assert "T:amigent-apollo-probe" not in link.files
     (package / "bin" / "amigent-apollo-probe").write_bytes(b"probe")
-    import pytest
-    refused = SetupLink(0, 0)
-    with pytest.raises(SystemExit):
-        setup.install(refused, "SYS:amigent", "secret", None, False)
-    assert "C:amigentd.new" not in refused.files
+    link = _install(0, 0)  # the probe says Apollo, but no Apollo daemon is packaged
+    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd").read_bytes()
+    assert link.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
+    assert link.files["T:amigent-apollo-probe"] == b"probe"
 
 
 class UpdateChannel:

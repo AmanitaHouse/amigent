@@ -179,10 +179,9 @@ def build_for_channel(channel) -> str:
 def _apollo_by_probe(link: Amigentd) -> bool:
     """SETUP only returns a program's exit code.
 
-    A current probe returns 0 only when ApolloOS and the FPGA core bit are both
-    present. An older probe may return 0 for ApolloOS alone; callers must still
-    require separate 68080 evidence before choosing the Apollo daemon. A missing
-    probe is an unsuccessful probe: the caller keeps the classic binary.
+    The packaged probe returns 0 only when ApolloOS and the FPGA core bit are
+    both present. A missing probe is an unsuccessful probe: the caller keeps
+    the classic binary.
     """
     probe = AMIGA / "bin" / "amigent-apollo-probe"
     if not probe.is_file():
@@ -195,10 +194,9 @@ def _apollo_by_probe(link: Amigentd) -> bool:
 def amigentd_build(link: Amigentd) -> str:
     """The packaged daemon for a fresh install. SETUP only returns exit codes.
 
-    A 68000-class CPU is not asked about ApolloOS. Exit 0 from an older probe
-    means ApolloOS only; the Apollo daemon still needs 68080 core evidence, so
-    a verified general build is used until the packaged probe requires the FPGA
-    bit for that exit code.
+    A 68000-class CPU is not asked about ApolloOS. The packaged probe returns 0
+    only when ApolloOS and the FPGA core bit are both present, which is enough
+    to choose the Apollo daemon when it is packaged.
     """
     cpu = detect_cpu(link.run)
     if cpu is None:
@@ -207,8 +205,8 @@ def amigentd_build(link: Amigentd) -> str:
         apollo = False
     else:
         apollo = _apollo_by_probe(link)
-        # Do not raise cpu to 68080 from the OS probe alone. A later probe that
-        # returns 0 only with AFF_FPGA can set cpu through that contract.
+        if apollo:
+            cpu = CPU_68080
     return _chosen(Machine(cpu, apollo))
 
 

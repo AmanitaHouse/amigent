@@ -27,7 +27,8 @@ HUNK = b"\x00\x00\x03\xf3"
 # GCC 6.50 Stable. The daemon links the MMIO guard with AUDIO. build/ is not packaged.
 APOLLO = {
     "amigentd.apollo": (129844, "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6"),
-    "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
+    # Rebuilt with GCC 6.50 Stable to report AFF_FPGA core evidence.
+    "amigent-apollo-probe": (3224, "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265"),
 }
 MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
@@ -98,13 +99,12 @@ def _install(cpu=0, probe=0):
     return link
 
 
-def test_setup_keeps_the_general_daemon_when_the_probe_only_names_apolloos():
-    # SETUP only sees the exit code. An older probe's 0 means ApolloOS, not a
-    # verified 68080 core, so the first install uses the general daemon.
+def test_setup_copies_the_apollo_daemon_when_the_probe_confirms_the_core():
+    # The packaged probe returns 0 only for ApolloOS with the FPGA core bit.
     link = _install(cpu=0, probe=0)
-    assert link.files["C:amigentd.new"] == _packaged("amigentd")
+    assert link.files["C:amigentd.new"] == _packaged("amigentd.apollo")
     assert link.files["T:amigent-apollo-probe"] == _packaged("amigent-apollo-probe")
-    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
+    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor.apollo")
     assert b"amigent-monitor.apollo" not in link.files["T:amigent-setup"]
     assert b"pip" not in link.files["T:amigent-setup"]
 
@@ -230,7 +230,7 @@ def test_apolloos_without_the_optional_monitor_keeps_the_classic_one(tmp_path, m
     (package / "bin" / "amigent-monitor.apollo").unlink()
     monkeypatch.setattr(setup, "AMIGA", package)
     link = _install(cpu=0, probe=0)
-    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd").read_bytes()
+    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd.apollo").read_bytes()
     assert link.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
     channel = _update(monkeypatch, info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
     assert channel.files["C:amigentd"] == (package / "bin" / "amigentd.apollo").read_bytes()

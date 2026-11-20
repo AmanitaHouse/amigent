@@ -100,8 +100,8 @@ def test_setup_keeps_the_classic_daemon_when_the_probe_or_binary_is_absent(tmp_p
     assert "T:amigent-apollo-probe" in link.puts
 
     (binary / "amigentd.apollo").write_bytes(b"apollo")
-    # SETUP sees only the exit code; without packaged probe core evidence keep classic.
-    assert setup.amigentd_build(Link(0, probe=0)) == "amigentd"
+    # Packaged probe exit 0 means ApolloOS and the FPGA core bit together.
+    assert setup.amigentd_build(Link(0, probe=0)) == "amigentd.apollo"
     assert setup.amigentd_build(Link(0, probe=5)) == "amigentd"
     assert setup.amigentd_build(Link(5, probe=0)) == "amigentd.000"
 
@@ -224,7 +224,8 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_stays_68000():
     makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_os_here" in detect and "VREG_BOARD" in detect
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
-    assert "RETURN_WARN" in probe and "m68080" not in probe
+    assert "RETURN_WARN" in probe and "AFF_FPGA" in probe and "m68080" not in probe
+    assert 'PutStr("68080\\n")' in probe or 'PutStr("68080\n")' in probe
     assert "amigent-apollo-probe" in makefile and "PROBE_CFLAGS" in makefile
     assert "-m68000" in makefile
     assert "apollo.c" not in makefile and "ammx.s" not in makefile

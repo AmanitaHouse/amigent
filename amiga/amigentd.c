@@ -53,22 +53,26 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
-/* The SDK vbcc builds with here has the CGX inline stubs but no clib or
- * cybergraphx headers; the values below are from cybergraphx/cybergraphics.h.
- * GCC takes the headers that come with its toolchain, and the inline macros
- * it uses for the library calls declared in this file. */
-#ifdef __VBCC__
+/* vbcc has the CGX inline stubs but no clib or cybergraphx headers; the
+ * values below are from cybergraphx/cybergraphics.h. The Apollo GCC build
+ * declares the same calls and implements them in gcc_support.c. */
+#ifndef __VBCC__
+#include <inline/macros.h>
+#endif
 extern struct Library *CyberGfxBase;
+#ifdef __VBCC__
 #include <inline/cybergraphics_protos.h>
+#else
+ULONG GetCyberMapAttr(struct BitMap *bm, ULONG attr);
+void ReadPixelArray(APTR dest, ULONG destx, ULONG desty, ULONG destmod, struct RastPort *rp,
+                    ULONG srcx, ULONG srcy, ULONG sizex, ULONG sizey, ULONG format);
+APTR LockBitMapTagList(APTR bitmap, struct TagItem *tags);
+void UnLockBitMap(APTR handle);
+#endif
 
 #define RECTFMT_RGB 0
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
-#else
-#include <proto/cybergraphics.h>
-#include <cybergraphx/cybergraphics.h>
-#include <inline/macros.h>
-#endif
 
 #define PROTOCOL_VERSION 6
 #define NAMES_MAX 4096  /* SYSINFO ports= and tasks= */

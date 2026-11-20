@@ -1,0 +1,15 @@
+include CHANGELOG.md
+graft docs
+graft scripts
+graft tests
+graft amiga
+prune build
+prune dist
+global-exclude *.py[cod]
+global-exclude *.o
+global-exclude *.obj
+global-exclude a.out
+global-exclude apollo_audio.s
+global-exclude audio_diag.c
+global-exclude audio_diag.h
+exclude src/amigent/amiga/bin/amigentd.080

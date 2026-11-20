@@ -101,8 +101,6 @@
  "status_fast": "Fast {size}",
  "free_of": "{free} из {size} свободно",
  "status_free": "{size} свободно",
- "status_graphics": "граф. память {size}",
- "status_fast": "быстр. память {size}",
  "screen_select": "Экран",
  "screen_untitled": "Экран без названия",
  "pc_outdated": "На Amiga установлена более новая версия Amigent, чем на этом компьютере. Обновите его и здесь: pipx upgrade amigent",

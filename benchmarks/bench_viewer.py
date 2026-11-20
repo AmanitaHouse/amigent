@@ -1,8 +1,8 @@
 """Viewer benchmark on a simulated slow Amiga and slow wire. Offline, localhost only.
 
-    python3 scripts/bench_viewer.py                    this tree, all links
-    python3 scripts/bench_viewer.py --compare main     before (git ref) vs. now, as a table
-    python3 scripts/bench_viewer.py --links 15K/100ms  just one
+    python3 benchmarks/bench_viewer.py                    this tree, all links
+    python3 benchmarks/bench_viewer.py --compare main     before (git ref) vs. now, as a table
+    python3 benchmarks/bench_viewer.py --links 15K/100ms  just one
 
 Each run starts tests/slowlink.py's FakeAmiga behind a SlowLink in a child
 process, then a Viewer and a stand-in browser page in this one, and measures

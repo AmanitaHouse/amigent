@@ -11,7 +11,8 @@ Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
 plain 68000; `amigent-setup` picks the right one. A Vampire running AmigaOS
 keeps the plain `amigentd`. ApolloOS gets `amigentd.apollo` when the probe
-identifies it. An RTG graphics card is optional: chipset screens, HAM included, are
+identifies it, and `amigent-monitor.apollo` under the name `amigent-monitor`
+when that file is packaged. Without it, the general-purpose monitor stays. An RTG graphics card is optional: chipset screens, HAM included, are
 read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
 about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 

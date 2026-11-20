@@ -96,9 +96,9 @@ def binary_path(name: str):
 def monitor_file(build: str) -> str:
     """The packaged monitor for a build ``select_build`` already returned.
 
-    The installed name stays ``amigent-monitor``. The 68080 monitor is used
-    only when that file is in the package. This distribution installs the
-    general-purpose monitor with the Apollo daemon.
+    The installed name stays ``amigent-monitor``. ApolloOS uses the 68080
+    monitor when that file is in the package, and the general-purpose
+    monitor when it is not. Every other build keeps the general-purpose one.
     """
     if build == "amigentd.apollo" and (AMIGA / "bin" / "amigent-monitor.apollo").is_file():
         return "amigent-monitor.apollo"

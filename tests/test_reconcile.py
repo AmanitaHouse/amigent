@@ -47,4 +47,4 @@ def test_sdist_includes_the_amiga_sources_and_the_protocol6_apollo_daemon():
     binary = ROOT / "src" / "amigent" / "amiga" / "bin"
     assert (binary / "amigentd.apollo").is_file()
     assert (binary / "amigent-apollo-probe").is_file()
-    assert not (binary / "amigent-monitor.apollo").exists()
+    assert (binary / "amigent-monitor.apollo").is_file()

@@ -1,7 +1,6 @@
-"""ApolloOS identification for the installer, without an Apollo daemon in the package.
+"""Which packaged daemon the installer copies.
 
-The 68080 daemon, AUDIO and PIP are not part of this change. These tests check
-which packaged file the installer copies. They do not run on Apollo hardware.
+These tests do not run on Apollo hardware. PIP is not a packaged capability.
 """
 
 import re
@@ -152,9 +151,10 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
     assert setup.build_for_channel(broken) == "amigentd"
 
 
-def test_update_on_apolloos_keeps_the_packaged_68020_daemon(monkeypatch):
-    """The published package has no Apollo daemon, so the copy must stay the classic one."""
-    assert not (AMIGA / "bin" / "amigentd.apollo").is_file()
+def test_update_on_identified_apolloos_copies_the_packaged_daemon(monkeypatch):
+    """SYSINFO already says ApolloOS, so the updater copies that daemon and does not run the probe."""
+    apollo = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    assert apollo.startswith(b"\x00\x00\x03\xf3") and b"pip" not in apollo
     amiga = {"C:amigentd": b"old", "commands": []}
 
     class Live(Channel):
@@ -189,7 +189,7 @@ def test_update_on_apolloos_keeps_the_packaged_68020_daemon(monkeypatch):
     monkeypatch.setattr(setup.time, "sleep", lambda s: None)
     monkeypatch.setattr(setup, "AmigaChannel", Live)
     assert setup.update("192.0.2.1", None) == 0
-    assert amiga["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert amiga["C:amigentd"] == apollo
     assert "T:amigent-apollo-probe" not in amiga
 
 

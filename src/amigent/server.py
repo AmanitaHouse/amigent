@@ -1993,14 +1993,19 @@ def amiga_hrtmon() -> str:
     os_name = info.get("os", "")
     version = ""
     if os_name != "ApolloOS":
-        version = _with_ctl(lambda: ctl.exec("Version FULL exec.library")).output
+        reported = _with_ctl(lambda: ctl.exec("Version FULL exec.library"))
+        if reported.rc == 0:
+            version = reported.output
     on_path = False
     if os_name == "ApolloOS" or "ApolloOS" in version:
         if "hrtmon" not in info.get("tasks", "").lower():
             on_path = _with_ctl(lambda: ctl.exec("Which HRTmon")).rc == 0
     text, start = plan(os_name, version, info.get("tasks", ""), on_path)
-    if start:
-        _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
+    if not start:
+        return text
+    started = _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
+    if started.rc != 0:
+        raise AmigaError("HRTmon did not start. The ROM monitor stays unused.")
     return text
 
 

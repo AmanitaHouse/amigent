@@ -203,18 +203,22 @@ def test_install_selection(tmp_path, monkeypatch):
             self.puts.append(name)
 
     assert setup.select_build(5, {"os": "ApolloOS"}) == "amigentd.000"
-    assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd.apollo"
+    # ApolloOS alone does not prove the 68080 core; the FPGA attention bit does.
+    assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd"
     assert setup.select_build(0, {}) == "amigentd"
+    assert setup.select_build(20, {}) == "amigentd.000"  # an unknown CPU takes only the 68000 build
+    (binary / "amigentd.000").rename(binary / "amigentd.000.hold")
     with pytest.raises(SystemExit):
         setup.select_build(20, {})
+    (binary / "amigentd.000.hold").rename(binary / "amigentd.000")
     assert setup.amigentd_build(Link(5)) == "amigentd.000"
     assert setup.amigentd_build(Link(0)) == "amigentd"
     (binary / "amigent-apollo-probe").write_bytes(b"probe")
-    with pytest.raises(SystemExit):
-        setup.amigentd_build(Link(0))
+    assert setup.amigentd_build(Link(0)) == "amigentd"  # no Apollo daemon packaged: stay classic
     (binary / "amigentd.apollo").write_bytes(b"apollo")
     chosen = setup.amigentd_build(Link(0))
     assert chosen == "amigentd.apollo"
+    assert setup.select_build(0, {"os": "ApolloOS", "attn_flags": "0x400"}) == "amigentd.apollo"
     assert setup.monitor_file(chosen) == "amigent-monitor"
     with pytest.raises(SystemExit):
         setup.binary_path("amigent-monitor.apollo")

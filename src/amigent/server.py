@@ -1982,6 +1982,16 @@ viewer: Viewer | None = None
 last_look = 0.0  # when the agent last looked at the screen; wait_change counts from here
 
 
+def _listen_seconds(seconds) -> float:
+    """The clip length the tool accepts: a number from a fifth of a second to two."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    value = float(seconds)
+    if not 0.2 <= value <= 2.0:
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    return value
+
+
 def _listen_clip(seconds: float) -> tuple[int, bytes]:
     """Gather up to seconds of the Apollo mix. Opcode 48, not LOADED."""
     from .channel import pcm_wav
@@ -2021,9 +2031,10 @@ def amiga_listen(seconds: float = 1.0) -> list:
 
     A short clip of the mix arne.audio is sending to the DAC. Nothing comes
     back when the Amiga is quiet, or when the sound is not going through AHI.
-    seconds is capped at two. This is opcode 48, not LOADED.
+    seconds is from 0.2 to 2. This is opcode 48, not LOADED. The returned
+    count is bytes received from the daemon, not a claim that they were heard.
     """
-    seconds = min(2.0, max(0.2, float(seconds)))
+    seconds = _listen_seconds(seconds)
     info = _with_ctl(ctl.sysinfo)
     if info.get("audio") != "1":
         return ["this Amiga has no AHI mix to hear"]

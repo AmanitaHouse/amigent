@@ -90,6 +90,10 @@
  "folder_error": "не удаётся прочитать эту папку",
  "about_system": "Система",
  "about_cpu": "Процессор",
+ "about_daemon": "Демон",
+ "about_protocol": "Протокол",
+ "about_daemon_cpu": "CPU демона",
+ "about_capabilities": "Возможности",
  "about_memory": "Память",
  "about_network": "Сетевой стек",
  "about_volumes": "Тома",
@@ -140,5 +144,7 @@
  "pause_15": "15 мин",
  "paused": "Изображение на Amiga приостановлено, осталось {time}. Мышь и клавиши работают.",
  "resume": "Продолжить",
- "pause_failed": "Не удалось приостановить"
+ "pause_failed": "Не удалось приостановить",
+ "not_reported": "Не указано",
+ "named_file": "названный файл"
 }

@@ -33,6 +33,8 @@ from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import PLAIN_CLOSED_TEXT, Commands, apollo_commands, audio_uses_tls, pc_outdated
+from .daemons import describe_connected
+from .paths import AMIGA
 from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
                      native_ppc, ppc_software)
 from . import tls
@@ -229,8 +231,12 @@ class Viewer:
         self.reason = ""  # why the Amiga does not answer, for the page and the terminal
         self.ever_joined = False
         self.amiga: dict = {}
+        self.hear = False  # the page asks; opening the window does not start the mix
         self.screen_list: list = []
         self._system: dict = {}
+        self._daemon_path = ""
+        self._daemon_bytes: bytes | None = None
+        self._daemon_version = ""
         self.alone_since = time.monotonic()
         self.screen.listeners.append(self._on_screen)
 
@@ -289,6 +295,7 @@ class Viewer:
             self.clients.discard(ws)
             if not self.clients:
                 self.alone_since = time.monotonic()
+                self.hear = False
 
     def _watching(self) -> bool:
         with self.clients_lock:
@@ -333,6 +340,9 @@ class Viewer:
                 return  # malformed message from the page
             threading.Thread(target=self._pause, args=(seconds,), daemon=True).start()
             return
+        if op.get("t") == "audio":
+            self.hear = op.get("on") is True
+            return
         self.inputs.put(op)
         self.feed.ring()
 
@@ -342,6 +352,7 @@ class Viewer:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
             raise ValueError("not an address")
         machines.move(self.host, new)
+        self.hear = False
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
@@ -351,6 +362,8 @@ class Viewer:
 
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
+            if not online:
+                self.hear = False
             self.online = online
             self.reason = "" if online else connection_reason(reason)
             self.event("online", online=online, reason=self.reason)
@@ -384,50 +397,92 @@ class Viewer:
                     pass  # the next round tries again
             seconds += 1
 
-    def _media(self) -> None:
-        """ARNE audio and the SAGA PIP, on their own command channels, only while a page is open.
+    def _hearing(self) -> bool:
+        with self.clients_lock:
+            return bool(self.hear and self.clients)
 
-        AUDIO is opcode 48 and PIP is opcode 49. The screen connection is not this socket.
-        When the daemon has closed the plain port, this socket is TLS. A failed TLS
-        handshake is not retried in the clear.
-        """
-        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
-        quiet_pip = False
-        pip_at = 0.0
-        fail_until = 0.0
-        while True:
-            if not self._watching():
-                time.sleep(0.05)
-                continue
-            info = self.amiga or {}
-            now = time.monotonic()
-            offered = apollo_commands(info)
-            if "AUDIO" not in offered or now < fail_until:
-                time.sleep(0.05)
-            else:
+    def _audio_ready(self) -> bool:
+        """Whether SYSINFO offered AUDIO. A described machine without it drops the request."""
+        info = self.amiga or {}
+        if not info:
+            return False
+        if info.get("audio") == "1":
+            return True
+        if self.hear:
+            self.hear = False
+            self.event("audio", on=False)
+        return False
+
+    def _release_audio(self, link: Commands) -> None:
+        try:
+            if link.connected:
                 try:
-                    if not link.connected:
-                        link.connect_audio(tls=audio_uses_tls(self.screen.flags, self.host))
-                    link.audio_start()
-                    while self._watching():
-                        got = link.audio_read()
-                        if got is None:
-                            break
-                        rate, pcm = got
-                        if pcm:
-                            self.broadcast(pcm_message(rate or 48000, pcm))
-                        quiet_pip, pip_at = self._poll_pip(offered, quiet_pip, pip_at)
-                    if self._watching():
-                        continue
                     link.audio_stop()
                     while link.audio_read() is not None:
                         pass
+                except (AmigaError, OSError, AttributeError):
+                    pass
+        finally:
+            link.close()
+            self.event("audio", on=False)
+
+    def _play_audio(self, link: Commands, between=None) -> None:
+        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block."""
+        if not link.connected:
+            link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
+        link.audio_start()
+        self.event("audio", on=True)
+        while self._hearing():
+            got = link.audio_read()
+            if got is None:
+                break
+            rate, pcm = got
+            if pcm and len(pcm) % 4:
+                raise AmigaError("audio samples are not stereo frames")
+            if pcm:
+                self.broadcast(pcm_message(rate or 48000, pcm))
+            if between:
+                between()
+        if self._hearing():
+            return
+        self._release_audio(link)
+
+    def _drop_audio(self, link: Commands) -> None:
+        link.close()
+        self.hear = False
+        self.event("audio", on=False)
+
+    def _media(self) -> None:
+        """ARNE audio, only after the page asks, and the SAGA PIP, while a page is open.
+
+        AUDIO is opcode 48 and PIP is opcode 49, each on its own command channel.
+        The screen connection is not this socket. When the daemon has closed the
+        plain port, this socket is TLS. A failed TLS handshake is not retried in
+        the clear. Opening the window never starts the mix.
+        """
+        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
+        pip = [False, 0.0]  # quiet, next poll
+
+        def poll() -> None:
+            pip[0], pip[1] = self._poll_pip(apollo_commands(self.amiga or {}), pip[0], pip[1])
+
+        while True:
+            if not self._watching():
+                if link.connected:
+                    self._release_audio(link)
+                time.sleep(0.05)
+                continue
+            if self._hearing() and self._audio_ready():
+                try:
+                    self._play_audio(link, poll)
                 except (AmigaError, AttributeError, OSError):
-                    link.close()
-                    fail_until = time.monotonic() + 0.5
+                    self._drop_audio(link)
                     time.sleep(0.05)
-            if "AUDIO" not in offered:
-                quiet_pip, pip_at = self._poll_pip(offered, quiet_pip, pip_at)
+                continue
+            if link.connected:
+                self._release_audio(link)
+            poll()
+            time.sleep(0.05)
 
     def _poll_pip(self, offered: set, quiet_pip: bool, pip_at: float) -> tuple[bool, float]:
         if "PIP" not in offered or quiet_pip or time.monotonic() < pip_at:
@@ -471,7 +526,8 @@ class Viewer:
             facts["cpu"] = "68080"
         # chip_free stays None when SYSINFO omits it, so the page can tell a
         # real zero from an older daemon. The other counts keep "missing means 0".
-        return {**facts, "tcp": info.get("bsdsocket", ""),
+        protocol = getattr(getattr(self.ctl, "backend", None), "protocol", 0) or self.screen.protocol
+        return {**facts, **self._connected_daemon(info, protocol), "tcp": info.get("bsdsocket", ""),
                 "board": info.get("board", ""), "board_name": info.get("board_name", ""),
                 "audio": info.get("audio", ""), "pip": info.get("pip", ""),
                 "chip_free": reported_bytes(info, "chip_free"),
@@ -480,6 +536,24 @@ class Viewer:
                 "fast_total": counted_bytes(info, "fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
+
+    def _connected_daemon(self, info: dict, protocol: int) -> dict:
+        """Protocol from the handshake; family only from the file SYSINFO named."""
+        path = str(info.get("self") or "")
+        # Quote the path for Version so spaces cannot split the Shell command.
+        blob = None
+        version = ""
+        if path and path == self._daemon_path and self._daemon_bytes is not None:
+            blob, version = self._daemon_bytes, self._daemon_version
+        elif path and "\n" not in path and "\"" not in path:
+            try:
+                blob = self._ctl(lambda: self.ctl.read_file(path))
+                reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
+                version = reported.output.strip().split("\n", 1)[0]
+                self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version
+            except (AmigaError, OSError, AttributeError):
+                blob, version = None, ""
+        return describe_connected(protocol, version, blob, info, AMIGA / "bin")
 
     def _answers(self) -> bool:
         """Is the Amiga there? Asked on the command line, which leaves the screen alone."""

@@ -13,6 +13,16 @@ from amigent.screenfeed import Feed, InputQueue
 from fakeamiga import FakeAmiga
 
 
+class Clock:
+    """Pause time the test moves. Sleeps and other threads keep the real clock."""
+
+    def __init__(self, now: float):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
 @pytest.fixture
 def amiga():
     a = FakeAmiga()
@@ -73,7 +83,27 @@ def test_the_feed_asks_for_no_frames_while_paused_but_input_goes_through(amiga, 
     until(lambda: amiga.counts.get(2, 0) > frames, 3)
 
 
+def test_a_fresh_pause_reports_the_seconds_asked_for_at_the_rounding_boundary():
+    # (8.002 + 120) - 8.002 is 120.00000000000001, so a ceiling of that sum is 121.
+    clock = Clock(8.002)
+    summed = (clock() + 120) - clock()
+    assert summed > 120 and -int(-summed // 1) == 121
+    amiga = FakeAmiga(clock=clock)
+    try:
+        amiga.set_pause(120)
+        assert amiga.pause_left() == 120
+        clock.now += 0.1  # still inside the first second
+        assert amiga.pause_left() == 120
+        clock.now += 0.9
+        assert amiga.pause_left() == 119
+        amiga.set_pause(0)
+        assert amiga.pause_left() == 0
+    finally:
+        amiga.close()
+
+
 def test_the_tools_stand_in_a_note_for_the_picture(amiga, monkeypatch):
+    amiga.clock = Clock(8.002)  # the reading that used to be reported as 121
     ctl = Commands("127.0.0.1", 1, amiga.port, timeout=5)
     screen = Amigentd("127.0.0.1", amiga.port, timeout=5)
     monkeypatch.setattr(server, "ctl", ctl)

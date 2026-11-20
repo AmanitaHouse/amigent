@@ -76,7 +76,8 @@ def test_opcode_map_has_no_audio_or_pip_collision():
     sysinfo = DAEMON.split("c_sysinfo", 1)[1].split("static void t_bytes", 1)[0]
     assert "modules" not in sysinfo and "tasklist" not in sysinfo
     assert 't_pair(&t, "loaded", 1)' in DAEMON
-    assert 't_pair(&t, "audio", 1)' in DAEMON and 't_pair(&t, "pip", 1)' in DAEMON
+    assert 't_pair(&t, "audio", 1)' in DAEMON and 't_pair(&t, "pip", 0)' in DAEMON
+    assert 't_pair(&t, "pip", 1)' not in DAEMON
 
 
 def test_audio_and_pip_requests_consume_only_their_header():
@@ -93,6 +94,7 @@ def test_audio_and_pip_requests_consume_only_their_header():
 
 def test_capabilities_follow_upstream_names():
     assert channel.apollo_commands({"audio": "1", "pip": "1"}) == {"AUDIO", "PIP"}
+    assert channel.apollo_commands({"audio": "1", "pip": "0"}) == {"AUDIO"}
     assert channel.apollo_commands({"modules": "1", "tasklist": "1", "loaded": "1"}) == set()
     assert channel.apollo_commands({}) == set()
     assert "def amiga_jobs" in Path(server.__file__).read_text(encoding="utf-8")

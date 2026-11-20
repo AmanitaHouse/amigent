@@ -481,7 +481,7 @@ else.
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
 | 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. |
-| 49 | PIP | | | | Apollo build only. Status, `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, then `w*h*3` RGB bytes. `w` 0 means no picture. The handler does not read PIP registers. `pip=1` in SYSINFO. |
+| 49 | PIP | | | | Apollo build only. Status, `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, then `w*h*3` RGB bytes. `w` 0 means no picture. The handler does not read PIP registers. SYSINFO sends `pip=0` while no safe picture can be supplied. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -568,7 +568,13 @@ separated by tabs.
   CPU, DRAG and QUIET are understood; `execbase`, exec's base in hex; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
   The Apollo build also sends `os` (`ApolloOS` or `AmigaOS`), `board`, `board_name`,
-  `cpu` `68080`, `audio=1` and `pip=1`. It does not send `modules` or `tasklist`.
+  `cpu` `68080`, `audio=1` and `pip=0`. It does not send `modules` or `tasklist`.
+  `pip=0` means opcode 49 is answered with an empty surface. It is not a claim
+  that a picture is available. A protocol 5 Apollo daemon used 38 for AUDIO and
+  39 for PIP, and 40 and 41 for LOADED and TASKS when it sent `modules=1` and
+  `tasklist=1`. Those numbers are LOADED and PEEK on protocol 6. The host
+  chooses from the protocol it was greeted with, and only sends an Apollo
+  extension when that daemon advertises it.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.

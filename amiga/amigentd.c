@@ -4340,8 +4340,8 @@ static BOOL c_sysinfo(struct link *l)
             t_str(&t, (const UBYTE *)"board_name=", FALSE);
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
-            t_pair(&t, "audio", 1);  /* opcode 48 */
-            t_pair(&t, "pip", 1);    /* opcode 49; the handler does not read PIP registers */
+            t_pair(&t, "audio", 1);  /* opcode 48: a usable AHI mix */
+            t_pair(&t, "pip", 0);    /* opcode 49 answers, but there is no safe picture */
         }
 #endif
     }

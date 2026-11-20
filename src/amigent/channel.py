@@ -76,18 +76,72 @@ def audio_uses_tls(flags: int, host: str) -> bool:
     return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
 
 
-def audio_request(arg: int = 0, y: int = 0) -> bytes:
-    """The 10-byte AUDIO header. arg 1 starts a stream, arg 2 stops, y is a one-shot in ms."""
-    return struct.pack(">BBHHHH", AUDIO, arg & 0xFF, 0, y & 0xFFFF, 0, 0)
+def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int | None:
+    """The opcode for one feature on this daemon, or None when it is not offered.
+
+    Protocol 6 uses the upstream map. Opcode 38 is LOADED there, and AUDIO is 48.
+    Protocol 5 uses the AmanitaHouse map, and only when SYSINFO advertises it:
+    AUDIO 38, PIP 39, LOADED 40 when ``modules=1``, TASKS 41 when ``tasklist=1``.
+    PEEK, TASKCTL, POKE and TRACE exist only on protocol 6.
+    """
+    info = info or {}
+    if protocol >= LOADED_PROTOCOL:
+        if feature == "AUDIO":
+            return AUDIO if info.get("audio") == "1" else None
+        if feature == "PIP":
+            return PIP if info.get("pip") == "1" else None
+        if feature == "LOADED" and info.get("loaded") == "1":
+            return LOADED
+        if feature == "TASKS" and info.get("loaded") == "1":
+            return TASKS
+        if feature == "PEEK" and info.get("loaded") == "1":
+            return PEEK
+        if feature == "TASKCTL" and info.get("loaded") == "1":
+            return TASKCTL
+        if feature == "TRACE" and info.get("loaded") == "1":
+            return TRACE
+        if feature == "POKE":
+            return POKE
+        return None
+    if protocol != PACK_PROTOCOL:
+        return None
+    legacy = {"AUDIO": (38, "audio"), "PIP": (39, "pip"),
+              "LOADED": (40, "modules"), "TASKS": (41, "tasklist")}
+    if feature not in legacy:
+        return None
+    opcode, flag = legacy[feature]
+    return opcode if info.get(flag) == "1" else None
 
 
-def pip_request() -> bytes:
-    """The 10-byte header of a PIP command. It carries no payload."""
-    return struct.pack(">BBHHHH", PIP, 0, 0, 0, 0, 0)
+def audio_request(arg: int = 0, y: int = 0, protocol: int = LOADED_PROTOCOL) -> bytes:
+    """The 10-byte AUDIO header. arg 1 starts a stream, arg 2 stops, y is a one-shot in ms.
+
+    Protocol 6 is opcode 48. Protocol 5 is opcode 38, and only a daemon that
+    advertised ``audio=1`` may be sent it.
+    """
+    opcode = feature_opcode(protocol, "AUDIO", {"audio": "1"})
+    if opcode is None:
+        raise AmigaError("AUDIO is not available on this protocol")
+    return struct.pack(">BBHHHH", opcode, arg & 0xFF, 0, y & 0xFFFF, 0, 0)
+
+
+def pip_request(protocol: int = LOADED_PROTOCOL) -> bytes:
+    """The 10-byte PIP header. Protocol 6 is opcode 49. Protocol 5 is opcode 39.
+
+    Building the header is not permission to send it. ``pip=1`` is required,
+    and this tree's protocol 6 daemon sends ``pip=0``.
+    """
+    opcode = feature_opcode(protocol, "PIP", {"pip": "1"})
+    if opcode is None:
+        raise AmigaError("PIP is not available on this protocol")
+    return struct.pack(">BBHHHH", opcode, 0, 0, 0, 0, 0)
 
 
 def apollo_commands(info: dict | None) -> frozenset[str]:
-    """AUDIO and PIP when SYSINFO advertises them. loaded=1 is not either."""
+    """AUDIO and PIP when SYSINFO says a usable one is available.
+
+    ``pip=0`` is an empty surface, not a picture. ``loaded=1`` is neither.
+    """
     info = info or {}
     commands = set()
     if info.get("audio") == "1":
@@ -294,6 +348,8 @@ class AmigaChannel(VolumeFlush):
         self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
         self.zlevel = 0  # what COMPRESS last set on this connection
         self._asked = 0.0  # when the request whose answer comes next went out
+        self._info: dict | None = None
+        self._audio_opcode: int | None = None
 
     # link
 
@@ -329,6 +385,8 @@ class AmigaChannel(VolumeFlush):
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
             self._notes = self._read_from = self._audio = self._pip = None  # a new amigentd may answer now
+            self._info = None
+            self._audio_opcode = None
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -566,7 +624,14 @@ class AmigaChannel(VolumeFlush):
     # system state
 
     def sysinfo(self) -> dict:
-        return dict(line.split("=", 1) for line in self._text(SYSINFO) if "=" in line)
+        info = dict(line.split("=", 1) for line in self._text(SYSINFO) if "=" in line)
+        self._info = info
+        return info
+
+    def _cached_info(self) -> dict:
+        if self._info is None:
+            return self.sysinfo()
+        return self._info
 
     def pause_screen(self, seconds: int) -> int:
         """Stop amigentd reading the screen for seconds, 0 to go on; the seconds left after.
@@ -652,9 +717,21 @@ class AmigaChannel(VolumeFlush):
                              "run amigent-setup --update")
 
     def loaded(self) -> list[str]:
-        """LOADED lines: L/D/R libraries, devices, resources; H hunks; M resident modules."""
-        self._need6("listing what is loaded")
-        return self._text(LOADED)
+        """LOADED lines: L/D/R libraries, devices, resources; H hunks; M resident modules.
+
+        Protocol 6 sends opcode 38. A protocol 5 daemon that says ``modules=1``
+        is asked with opcode 40. Opcode 38 is not sent to that daemon: there it
+        is AUDIO.
+        """
+        if not self._sock:
+            self.connect()
+        if self.protocol >= LOADED_PROTOCOL:
+            return self._text(LOADED)
+        opcode = feature_opcode(self.protocol, "LOADED", self._cached_info())
+        if opcode is None:
+            raise AmigaError(f"listing what is loaded needs amigentd 1.4.0 or newer "
+                             f"(protocol {LOADED_PROTOCOL}); run amigent-setup --update")
+        return self._text(opcode)
 
     def peek(self, address: int, size: int) -> bytes:
         """Memory as it is: only RAM exec manages and the Kickstart ROM, at most 64 KB."""
@@ -665,9 +742,20 @@ class AmigaChannel(VolumeFlush):
                                  size & 0xFFFF, read=_read_blob))
 
     def tasks(self) -> list[str]:
-        """TASKS lines: T address name command type pri state stack_size stack_used sigwait sigrecvd."""
-        self._need6("listing tasks")
-        return self._text(TASKS)
+        """TASKS lines: T address name command type pri state stack_size stack_used sigwait sigrecvd.
+
+        Protocol 6 sends opcode 40. A protocol 5 daemon that says ``tasklist=1``
+        is asked with opcode 41.
+        """
+        if not self._sock:
+            self.connect()
+        if self.protocol >= LOADED_PROTOCOL:
+            return self._text(TASKS)
+        opcode = feature_opcode(self.protocol, "TASKS", self._cached_info())
+        if opcode is None:
+            raise AmigaError(f"listing tasks needs amigentd 1.4.0 or newer "
+                             f"(protocol {LOADED_PROTOCOL}); run amigent-setup --update")
+        return self._text(opcode)
 
     def task_control(self, address: int, op: int, value: int) -> None:
         """op 1: priority value; op 2: break signals value (1 C, 2 D, 4 E, 8 F)."""
@@ -725,13 +813,22 @@ class AmigaChannel(VolumeFlush):
         self._need_probe("a quiet monitor")
         self._one(Request(QUIET, "", 0, seconds))
 
-    def _need_apollo(self, what: str, flag: str) -> None:
-        self._need6(what)
-        attr = "_audio" if flag == "audio" else "_pip"
-        if getattr(self, attr, None) is None:
-            setattr(self, attr, self.sysinfo().get(flag) == "1")
-        if not getattr(self, attr):
+    def _apollo_opcode(self, what: str, feature: str) -> int:
+        """48/49 on protocol 6, 38/39 on an advertised protocol 5 daemon.
+
+        A protocol 6 channel never receives opcode 38 for AUDIO or 39 for PIP.
+        A classic protocol 5 daemon that did not advertise the extension is not
+        sent one.
+        """
+        if not self._sock:
+            self.connect()
+        if self.protocol < PACK_PROTOCOL:
+            raise AmigaError(f"{what} needs amigentd 1.3.0 or newer (protocol {PACK_PROTOCOL}); "
+                             "run amigent-setup --update")
+        opcode = feature_opcode(self.protocol, feature, self._cached_info())
+        if opcode is None:
             raise AmigaError(f"{what} needs the Apollo build of amigentd")
+        return opcode
 
     def audio(self, ms: int = 0) -> tuple[int, bytes]:
         """One shot of the AHI mix arne.audio is playing: (sample rate, s16le stereo).
@@ -741,16 +838,15 @@ class AmigaChannel(VolumeFlush):
         the Apollo build answers. A viewer that wants the mix continuously
         uses audio_start, audio_read and audio_stop instead.
         """
-        self._need_apollo("ARNE audio", "audio")
-        self._request(AUDIO, y=max(0, min(int(ms), 200)))
+        self._request(self._apollo_opcode("ARNE audio", "AUDIO"), y=max(0, min(int(ms), 200)))
         head = self._exact(8)
         rate, size = struct.unpack(">II", head)
         return rate, self._exact(size) if size else b""
 
     def audio_start(self) -> None:
         """Ask the daemon to copy the mix into its FIFO and push it until audio_stop."""
-        self._need_apollo("ARNE audio", "audio")
-        self._request(AUDIO, arg=1)
+        self._audio_opcode = self._apollo_opcode("ARNE audio", "AUDIO")
+        self._request(self._audio_opcode, arg=1)
 
     def audio_read(self) -> tuple[int, bytes] | None:
         """The next streamed chunk, or None when the daemon has ended the stream."""
@@ -766,12 +862,12 @@ class AmigaChannel(VolumeFlush):
         if not self._sock:
             return
         self._sock.settimeout(self.timeout)
-        self._header(AUDIO, arg=2)
+        opcode = self._audio_opcode or self._apollo_opcode("ARNE audio", "AUDIO")
+        self._header(opcode, arg=2)
 
     def pip(self) -> tuple[int, int, int, int, bytes]:
         """The SAGA picture-in-picture surface: x, y, w, h and RGB bytes. w is 0 when off."""
-        self._need_apollo("SAGA picture-in-picture", "pip")
-        self._request(PIP)
+        self._request(self._apollo_opcode("SAGA picture-in-picture", "PIP"))
         head = self._exact(12)
         x, y, w, h, size = struct.unpack(">HHHHI", head)
         return x, y, w, h, self._exact(size) if size else b""

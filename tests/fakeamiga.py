@@ -228,16 +228,16 @@ class FakeAmiga:
     # screen client
 
     def set_pause(self, seconds: int) -> None:
-        # Keep the request beside the clock. ``now + seconds`` is not always
-        # the integer it looks like: (8.002 + 120) - 8.002 is just over 120.
+        # Keep the request beside the clock. Adding the seconds on and taking
+        # the ceiling reports one more than was asked: 31 for 30, 121 for 120.
         self.pause_for = seconds if seconds else 0
         self.pause_started = self.clock()
 
     def pause_left(self) -> int:
         if not self.pause_for:
             return 0
-        left = self.pause_for - (self.clock() - self.pause_started)
-        return -int(-left // 1) if left > 0 else 0
+        elapsed = max(0.0, self.clock() - self.pause_started)
+        return max(0, self.pause_for - int(elapsed))
 
     def _screen(self, me, cmd, arg, x, y, w, h) -> bytes:
         width, height = self.picture.size

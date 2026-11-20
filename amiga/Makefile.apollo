@@ -1,6 +1,6 @@
-# 68000 ApolloOS probe, the 68080 daemon, and its ARNE audio. PIP and the
-# Apollo monitor are later changes; this file does not build them and does
-# not install anything.
+# 68000 ApolloOS probe, the 68080 daemon, and its ARNE audio. `monitor`
+# builds the optional 68080 amigent-monitor. PIP is not built here, and
+# this file does not install anything.
 # Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
 # `all` writes build/apollo/amigent-apollo-probe and build/apollo/amigentd.apollo.
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -22,6 +22,7 @@ INCLUDES := -I$(APOLLO) \
 	-I$(PREFIX)/m68k-amigaos/sys-include \
 	-I$(PREFIX)/m68k-amigaos/ndk-include
 PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
+MONITOR_CFLAGS := -noixemul -O2 -m68080 -fomit-frame-pointer
 
 # No libnix: its startup opens "*" and the boot console stays up. The string
 # routines, qsort and the entry are in apollo_runtime.c and apollo_start.s.
@@ -29,9 +30,11 @@ PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
 OBJ_NAMES := amigentd.o apollo_detect.o apollo_mmio.o apollo_audio.o gcc_support.o div64.o apollo_runtime.o
 OBJS := $(addprefix $(BUILD)/,$(OBJ_NAMES))
 
-.PHONY: all clean
+.PHONY: all monitor clean
 
 all: $(BUILD)/amigentd.apollo $(BUILD)/amigent-apollo-probe
+
+monitor: $(BUILD)/amigent-monitor.apollo
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -65,6 +68,9 @@ $(BUILD)/div64.o: $(APOLLO)/div64.c | $(BUILD)
 
 $(BUILD)/amigent-apollo-probe: $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c | $(BUILD)
 	$(CC) $(PROBE_CFLAGS) $(INCLUDES) -o $@ $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c -lgcc
+
+$(BUILD)/amigent-monitor.apollo: $(HERE)/amigent-monitor.c | $(BUILD)
+	$(CC) $(MONITOR_CFLAGS) $(INCLUDES) -o $@ $(HERE)/amigent-monitor.c
 
 clean:
 	rm -rf $(BUILD)

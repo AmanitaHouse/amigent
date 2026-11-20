@@ -81,12 +81,16 @@ void UnLockBitMap(APTR handle);
 #endif
 
 #ifdef AMIGENT_APOLLO
-/* The 68000 probe and this daemon share the identification. AUDIO and PIP
- * are not part of this build, so SYSINFO does not advertise them. */
+/* The 68000 probe and this daemon share the identification. AUDIO is opcode
+ * 48 on this build. Opcode 49 is reserved for PIP and is not implemented. */
+#include "apollo_audio.h"
 BOOL apollo_os_here(void);
 UWORD apollo_board(void);
 const char *apollo_board_name(UWORD board);
 BOOL apollo_mmio_hit(ULONG at, ULONG n);
+static volatile LONG audio_hold;
+static volatile LONG audio_wait;
+static struct Task *volatile audio_task;
 #endif
 
 #define PROTOCOL_VERSION 6
@@ -146,6 +150,9 @@ enum {
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET  /* protocol 6, "probe" in SYSINFO */
+#ifdef AMIGENT_APOLLO
+    , CMD_AUDIO = 48  /* ARNE mix. 49 is reserved for PIP and has no command. */
+#endif
 };
 
 const char version[] = "$VER: amigentd 1.4.0 (18.11.2026)";
@@ -1604,7 +1611,11 @@ static void AMIGENT_SAVEDS reader_main(void)
             more = wanted > 0;
             ReleaseSemaphore(&picture);
             SetTaskPri(me, -1);  /* lets the stack and every program go first */
-        } while (more && !reader_quit);
+        } while (more && !reader_quit
+#ifdef AMIGENT_APOLLO
+                 && !audio_hold
+#endif
+                );
     }
     Forbid();
     Signal(server, 1UL << reader_gone);
@@ -4261,6 +4272,7 @@ static BOOL c_sysinfo(struct link *l)
             t_str(&t, (const UBYTE *)"board_name=", FALSE);
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
+            t_pair(&t, "audio", 1);  /* opcode 48 is implemented in this build */
         }
 #endif
     }
@@ -7447,6 +7459,447 @@ static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD 
     return c_text(l, &t);
 }
 
+#ifdef AMIGENT_APOLLO
+/* What send() accepted. A full window is not an error: the caller pumps again. */
+static BOOL audio_send_some(struct link *l, UBYTE *buf, ULONG *sent, ULONG len)
+{
+    struct Library *SocketBase = l->base;
+    LONG n;
+
+    if (*sent >= len)
+        return TRUE;
+    n = send(l->fd, buf + *sent, len - *sent, 0);
+    if (n < 0 && Errno() == EWOULDBLOCK)
+        return TRUE;
+    if (n <= 0)
+        return FALSE;
+    *sent += (ULONG)n;
+    net_out += (ULONG)n;
+    return TRUE;
+}
+
+/* 1: a 10-byte command has arrived (the stream's stop). -1: the socket died. */
+static int audio_incoming(struct link *l, UBYTE *acc, ULONG *got)
+{
+    struct Library *SocketBase = l->base;
+    LONG n;
+
+    if (*got >= 10)
+        return 1;
+    n = recv(l->fd, acc + *got, 10 - *got, 0);
+    if (n == 0)
+        return -1;
+    if (n < 0)
+        return Errno() == EWOULDBLOCK ? 0 : -1;
+    *got += (ULONG)n;
+    return *got >= 10 ? 1 : 0;
+}
+
+/* One look, then a vblank. Nothing is playing, or a stop is waiting for the
+ * last bytes to leave. */
+static BOOL audio_idle(ULONG *rate)
+{
+    if (SetSignal(0, 0) & SIGBREAKF_CTRL_C)
+        return FALSE;
+    if (rate)
+        apollo_audio_pump(rate);
+    Delay(1);
+    return (SetSignal(0, 0) & SIGBREAKF_CTRL_C) == 0;
+}
+
+/* Copy while the mix is moving, and keep sending what is already copied.
+ * Stopping every couple of seconds to send was a spurt of sound and then a
+ * break of the same length. A full window does not wait: the bytes stay
+ * queued and the next look tries again. Quiet for a moment means it stopped. */
+static BOOL audio_push(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate,
+                       ULONG budget);
+
+static BOOL audio_feed(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate)
+{
+    LONG n;
+
+    if (*out_sent < *out_len) {
+        if (!audio_send_some(l, out, out_sent, *out_len))
+            return FALSE;
+        if (*out_sent >= *out_len)
+            *out_len = *out_sent = 0;
+        return TRUE;
+    }
+    if (apollo_audio_pending() < 4)
+        return TRUE;
+    n = apollo_audio_take(out + 8, 4096);
+    if (n < 4)
+        return TRUE;
+    be32(out, rate);
+    be32(out + 4, (ULONG)n);
+    *out_len = 8 + (ULONG)n;
+    *out_sent = 0;
+    if (!audio_send_some(l, out, out_sent, *out_len))
+        return FALSE;
+    if (*out_sent >= *out_len)
+        *out_len = *out_sent = 0;
+    return TRUE;
+}
+
+/* A few milliseconds, this task asleep. The port is this task's, so the
+ * timer signals here. The device is the one the main task already opened.
+ * Opening timer.device again from the music task is what stopped the daemon. */
+static struct timerequest *yield_io(struct MsgPort **port)
+{
+    struct timerequest *io;
+
+    *port = NULL;
+    if (!timer_io)
+        return NULL;
+    if (!(*port = CreateMsgPort()))
+        return NULL;
+    if (!(io = (struct timerequest *)CreateIORequest(*port, sizeof(*io)))) {
+        DeleteMsgPort(*port);
+        *port = NULL;
+        return NULL;
+    }
+    io->tr_node.io_Device = timer_io->tr_node.io_Device;
+    io->tr_node.io_Unit = timer_io->tr_node.io_Unit;
+    return io;
+}
+
+static void yield_close(struct MsgPort *port, struct timerequest *io)
+{
+    if (io)
+        DeleteIORequest((struct IORequest *)io);
+    if (port)
+        DeleteMsgPort(port);
+}
+
+/* TRUE when the wait finished. FALSE when stop arrived during it. */
+static BOOL yield_us(struct MsgPort *port, struct timerequest *io, ULONG us)
+{
+    ULONG sigs;
+
+    io->tr_node.io_Command = TR_ADDREQUEST;
+    io->tr_time.tv_secs = 0;
+    io->tr_time.tv_micro = us;
+    SendIO((struct IORequest *)io);
+    sigs = Wait((1UL << port->mp_SigBit) | SIGBREAKF_CTRL_C);
+    if (!CheckIO((struct IORequest *)io))
+        AbortIO((struct IORequest *)io);
+    WaitIO((struct IORequest *)io);
+    SetSignal(0, 1UL << port->mp_SigBit);
+    return (sigs & SIGBREAKF_CTRL_C) == 0;
+}
+
+/* The TLS pump connects from this machine. A music socket from the PC does not. */
+static BOOL peer_local(struct link *l)
+{
+    struct Library *SocketBase = l->base;
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+
+    if (getpeername(l->fd, (struct sockaddr *)&addr, &len) != 0)
+        return TRUE;
+    return addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK);
+}
+
+static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, ULONG *since,
+                         UBYTE *out, ULONG *out_len, ULONG *out_sent)
+{
+    struct Task *me = FindTask(NULL);
+    BYTE pri = me->tc_Node.ln_Pri;
+    struct MsgPort *nap_port = NULL;
+    struct timerequest *nap = NULL;
+    ULONG look = now_ms(), click = look;
+    BOOL plain = !peer_local(l);
+    BOOL ok = TRUE;
+    UBYTE heard = 0;
+
+    /* Stay above the picture cipher and wait on the timer between looks.
+     * Dropping to the bottom and giving the picture one turn let it keep
+     * the CPU, and a pass went out only every couple of seconds. */
+    if (plain)
+        nap = yield_io(&nap_port);
+    audio_hold = 1;
+    audio_task = me;
+    SetTaskPri(me, 5);
+    for (;;) {
+        ULONG seq = apollo_audio_seq();
+        ULONG now = 0, got;
+        int stop;
+
+        if (plain) {
+            ULONG pending;
+            int copied;
+
+            apollo_audio_pump(rate);
+            copied = apollo_audio_seq() != seq;
+            pending = apollo_audio_pending();
+            if (copied)
+                heard = 1;
+            if (pending >= 4) {
+                if (!audio_push(l, out, out_len, out_sent, *rate, 4096)) {
+                    ok = FALSE;
+                    break;
+                }
+            }
+            if (nap) {
+                if (!yield_us(nap_port, nap, 1000)) {
+                    ok = FALSE;
+                    break;
+                }
+            } else
+                Delay(1);
+            now = now_ms();
+            if (heard) {
+                *since = now;
+                heard = 0;
+            }
+            if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+                ok = FALSE;
+                break;
+            }
+            if (*since && (ULONG)(now - *since) > 600)
+                break;
+            if ((ULONG)(now - click) < 200)
+                continue;
+            stop = audio_incoming(l, acc, acc_n);
+            if (stop) {
+                if (stop < 0)
+                    ok = FALSE;
+                break;
+            }
+            click = now;
+            continue;
+        }
+        apollo_audio_pump(rate);
+        if (apollo_audio_seq() != seq)
+            *since = now_ms();
+        now = now_ms();
+        if (apollo_audio_seq() == seq && (ULONG)(now - look) < 15)
+            continue;
+        if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+            ok = FALSE;
+            break;
+        }
+        stop = audio_incoming(l, acc, acc_n);
+        if (stop) {
+            if (stop < 0)
+                ok = FALSE;
+            break;
+        }
+        if (*since && (ULONG)(now - *since) > 600)
+            break;
+        if (*out_len || apollo_audio_pending() >= 4) {
+            if (!audio_push(l, out, out_len, out_sent, *rate, 16384)) {
+                ok = FALSE;
+                break;
+            }
+            if (!plain) {
+                SetSignal(0, SIGBREAKF_CTRL_D);
+                audio_wait = 1;
+                SetTaskPri(me, 3);
+                got = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D);
+                audio_wait = 0;
+                if (got & SIGBREAKF_CTRL_C) {
+                    ok = FALSE;
+                    break;
+                }
+            }
+        }
+        now = now_ms();
+        if ((ULONG)(now - click) > 200) {
+            if (plain && nap) {
+                if (!yield_us(nap_port, nap, 3000)) {
+                    ok = FALSE;
+                    break;
+                }
+            } else {
+                SetTaskPri(me, 3);
+                Delay(1);
+            }
+            click = now_ms();
+            now = click;
+        }
+        look = now_ms();
+        SetTaskPri(me, 5);
+    }
+    yield_close(nap_port, nap);
+    audio_wait = 0;
+    audio_task = NULL;
+    audio_hold = 0;
+    SetTaskPri(me, pri);
+    return ok;
+}
+
+/* What is already queued, up to a few halves. More than that in one wake
+ * would sit on the picture's socket. A full window stops the burst. */
+static BOOL audio_push(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate,
+                       ULONG budget)
+{
+    LONG n;
+
+    for (;;) {
+        if (*out_sent < *out_len) {
+            ULONG before = *out_sent;
+
+            if (!audio_send_some(l, out, out_sent, *out_len))
+                return FALSE;
+            if (*out_sent == before)
+                return TRUE;
+            if (*out_sent >= *out_len)
+                *out_len = *out_sent = 0;
+            continue;
+        }
+        if (budget < 4 || apollo_audio_pending() < 4)
+            return TRUE;
+        n = apollo_audio_take(out + 8, 4096);
+        if (n < 4)
+            return TRUE;
+        be32(out, rate);
+        be32(out + 4, (ULONG)n);
+        *out_len = 8 + (ULONG)n;
+        *out_sent = 0;
+        budget = (ULONG)n >= budget ? 0 : budget - (ULONG)n;
+    }
+}
+
+/* Everything copied during the tone. A full window waits one vblank and
+ * tries again, so a slow reader does not throw the rest away. */
+static BOOL audio_drain(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate)
+{
+    ULONG stalls = 0;
+
+    for (;;) {
+        ULONG pending = apollo_audio_pending();
+        ULONG sent = *out_sent;
+
+        if (!audio_push(l, out, out_len, out_sent, rate, 16384))
+            return FALSE;
+        if (!*out_len && apollo_audio_pending() < 4)
+            return TRUE;
+        if (*out_sent == sent && apollo_audio_pending() == pending) {
+            if (++stalls > 80)
+                return TRUE;
+            if (!audio_idle(NULL))
+                return FALSE;
+        } else
+            stalls = 0;
+    }
+}
+
+/* AUDIO with arg 1. Bytes follow the status byte until arg 2 arrives:
+ * u32 rate, u32 length, then that many s16le bytes. Length 0 is a keepalive.
+ * Length 0xffffffff ends the stream. The screen connection is not involved.
+ * Each finished half is sent once, in the order the DAC played it. */
+static BOOL c_audio_stream(struct link *l)
+{
+    UBYTE out[8 + 4096], acc[10];
+    ULONG out_len = 0, out_sent = 0, acc_n = 0, rate = 0, spins = 0, since = 0;
+    BOOL ok = TRUE;
+
+    if (!apollo_audio_claim())
+        return c_fail(l, 1, "audio is already streaming");
+    if (!l_send(l, "\0", 1, IO_SECONDS)) {
+        apollo_audio_release();
+        return FALSE;
+    }
+    while (ok) {
+        int stop;
+        ULONG seq;
+
+        stop = audio_incoming(l, acc, &acc_n);
+        if (stop < 0) {
+            ok = FALSE;
+            break;
+        }
+        if (stop > 0) {
+            ULONG stalls = 0;
+
+            while (ok && out_sent < out_len) {
+                ULONG before = out_sent;
+
+                ok = audio_send_some(l, out, &out_sent, out_len);
+                if (ok && out_sent == before) {
+                    if (++stalls > 50) {
+                        ok = FALSE;
+                        break;
+                    }
+                    if (!audio_idle(NULL))
+                        ok = FALSE;
+                }
+            }
+            if (ok) {
+                be32(out, 0);
+                be32(out + 4, 0xFFFFFFFFUL);
+                ok = l_send(l, out, 8, IO_SECONDS);
+            }
+            break;
+        }
+        seq = apollo_audio_seq();
+        if (!since) {
+            if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+                ok = FALSE;
+                break;
+            }
+            ULONG burst = 0;
+
+            while (burst < 4000 && apollo_audio_seq() == seq) {
+                apollo_audio_pump(&rate);
+                burst++;
+            }
+            if (apollo_audio_seq() != seq)
+                since = now_ms();
+            else {
+                if (++spins >= 10) {
+                    be32(out, rate);
+                    be32(out + 4, 0);
+                    out_len = 8;
+                    out_sent = 0;
+                    spins = 0;
+                    ok = audio_send_some(l, out, &out_sent, out_len);
+                    if (out_sent >= out_len)
+                        out_len = out_sent = 0;
+                }
+                if (ok && !audio_idle(NULL))
+                    ok = FALSE;
+                continue;
+            }
+        }
+        spins = 0;
+        if (!audio_follow(l, acc, &acc_n, &rate, &since, out, &out_len, &out_sent))
+            ok = FALSE;
+        if (ok && !audio_drain(l, out, &out_len, &out_sent, rate))
+            ok = FALSE;
+        if (since && (ULONG)(now_ms() - since) > 300) {
+            since = 0;
+            apollo_audio_breathe();
+        }
+    }
+    apollo_audio_release();
+    return ok;
+}
+
+/* AUDIO is its own answer, so a frame on the screen connection is not held up.
+ * Nothing is read until a client sends the command. */
+static BOOL c_audio(struct link *l, UWORD ms)
+{
+    UBYTE *buf, head[9];
+    ULONG rate = 48000;
+    LONG n;
+    BOOL ok;
+
+    if (!(buf = AllocVec(48000, MEMF_ANY)))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    n = apollo_audio(buf, 48000, &rate, ms);
+    if (n < 0)
+        n = 0;
+    head[0] = 0;
+    be32(head + 1, rate);
+    be32(head + 5, (ULONG)n);
+    ok = l_send(l, head, 9, IO_SECONDS) && (n == 0 || l_send(l, buf, n, IO_SECONDS));
+    FreeVec(buf);
+    return ok;
+}
+
+#endif
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -7528,6 +7981,14 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_PEEK:  /* address as hex in the name, length in w:h */
         mon_say('C', "read memory", NULL);
         return c_peek(l, x, (ULONG)w << 16 | h);
+#ifdef AMIGENT_APOLLO
+    case CMD_AUDIO:
+        if (c[1] & 1)
+            return c_audio_stream(l);
+        if (c[1] & 2)
+            return c_ok(l); /* stop arrived with no stream on this channel */
+        return c_audio(l, y);
+#endif
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
             return FALSE;
@@ -7994,6 +8455,11 @@ static BOOL ssl_write_all(SSL *ssl, const UBYTE *buf, LONG n)
         buf += k;
         n -= k;
     }
+#ifdef AMIGENT_APOLLO
+    /* The music task waits on this signal between halves instead of spinning. */
+    if (audio_wait && audio_task)
+        Signal(audio_task, SIGBREAKF_CTRL_D);
+#endif
     return TRUE;
 }
 

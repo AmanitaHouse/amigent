@@ -96,11 +96,11 @@ def binary_path(name: str):
 def monitor_file(build: str) -> str:
     """The packaged monitor for a build ``select_build`` already returned.
 
-    The installed name stays ``amigent-monitor``. Only ``amigentd.apollo``
-    selects the 68080 file. A 68000, AmigaOS, an unknown build, or a machine
-    that did not identify itself keeps the general-purpose monitor.
+    The installed name stays ``amigent-monitor``. The 68080 monitor is used
+    only when that file is in the package. This distribution installs the
+    general-purpose monitor with the Apollo daemon.
     """
-    if build == "amigentd.apollo":
+    if build == "amigentd.apollo" and (AMIGA / "bin" / "amigent-monitor.apollo").is_file():
         return "amigent-monitor.apollo"
     return "amigent-monitor"
 
@@ -108,7 +108,7 @@ def monitor_file(build: str) -> str:
 def window_source(name: str, build: str):
     """Local file to store as ``name``, or None when that window is not packaged.
 
-    A missing Apollo monitor stops the caller before anything is copied.
+    The 68080 monitor is requested only when that file is in the package.
     A missing general-purpose window is skipped, as the other windows are.
     """
     packaged = monitor_file(build) if name == "amigent-monitor" else name

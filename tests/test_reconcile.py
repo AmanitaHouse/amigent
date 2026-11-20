@@ -38,11 +38,13 @@ def test_russian_catalog_has_one_string_per_key():
         assert key in english
 
 
-def test_sdist_includes_the_amiga_sources_and_not_a_protocol5_apollo_binary():
+def test_sdist_includes_the_amiga_sources_and_the_protocol6_apollo_daemon():
     lines = (ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
     assert "graft amiga" in lines
     assert "graft src/native" not in lines
     assert "exclude src/amigent/amiga/bin/amigentd.080" in lines
     assert (ROOT / "amiga" / "amigentd.c").is_file()
-    assert not (ROOT / "src" / "amigent" / "amiga" / "bin" / "amigentd.apollo").exists()
-    assert not (ROOT / "src" / "amigent" / "amiga" / "bin" / "amigent-monitor.apollo").exists()
+    binary = ROOT / "src" / "amigent" / "amiga" / "bin"
+    assert (binary / "amigentd.apollo").is_file()
+    assert (binary / "amigent-apollo-probe").is_file()
+    assert not (binary / "amigent-monitor.apollo").exists()

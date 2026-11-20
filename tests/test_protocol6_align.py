@@ -215,10 +215,11 @@ def test_install_selection(tmp_path, monkeypatch):
     (binary / "amigentd.apollo").write_bytes(b"apollo")
     chosen = setup.amigentd_build(Link(0))
     assert chosen == "amigentd.apollo"
-    assert setup.monitor_file(chosen) == "amigent-monitor.apollo"
+    assert setup.monitor_file(chosen) == "amigent-monitor"
     with pytest.raises(SystemExit):
         setup.binary_path("amigent-monitor.apollo")
     (binary / "amigent-monitor.apollo").write_bytes(b"monitor")
+    assert setup.monitor_file(chosen) == "amigent-monitor.apollo"
     assert setup.binary_path("amigent-monitor.apollo").read_bytes() == b"monitor"
 
 

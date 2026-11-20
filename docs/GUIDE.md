@@ -9,8 +9,9 @@ Amiga: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL), a TCP/IP
 stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
-plain 68000; `amigent-setup` picks the right one. A Vampire's 68080 runs the
-plain `amigentd`. An RTG graphics card is optional: chipset screens, HAM included, are
+plain 68000; `amigent-setup` picks the right one. A Vampire running AmigaOS
+keeps the plain `amigentd`. ApolloOS gets `amigentd.apollo` when the probe
+identifies it. An RTG graphics card is optional: chipset screens, HAM included, are
 read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
 about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 
@@ -24,8 +25,9 @@ on the Amiga.
 
 Copy [`amigentd`](../src/amigent/amiga/bin/amigentd) to the Amiga, or unpack
 `amigent-1.0.0.lha` from the releases. If the Amiga has a browser or wget but
-no other way in, `amigent-setup --serve` (see below) offers both builds on the
-network for 30 minutes and prints the address to open. Then start it:
+no other way in, `amigent-setup --serve` (see below) offers the 68020 build
+and the 68000 build on the network for 30 minutes and prints the address to
+open. It does not offer `amigentd.apollo`. Then start it:
 double-click the icon, or `amigentd SETUP` in a Shell (`amigentd.000 SETUP` on a
 68000).
 

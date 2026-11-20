@@ -1,9 +1,10 @@
 """Bootstrap: beam amigentd to the Amiga over the wire, no floppy swapping.
 
 `amigent-setup --serve` spins up a tiny web server on this PC with amigentd and
-amigentd.000. On the Amiga, open the printed address in a browser, or fetch
-the file from a Shell. Under WSL the server runs in Windows Python, because the
-LAN can't reach servers inside WSL.
+amigentd.000. It does not serve amigentd.apollo. amigent-setup copies that
+daemon after the probe identifies ApolloOS. On the Amiga, open the printed
+address in a browser, or fetch the file from a Shell. Under WSL the server
+runs in Windows Python, because the LAN can't reach servers inside WSL.
 """
 
 from __future__ import annotations

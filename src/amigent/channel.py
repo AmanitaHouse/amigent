@@ -7,6 +7,7 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import re
 import struct
@@ -106,6 +107,34 @@ PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost on
 PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
                      "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
                      "to this one, or run amigent-setup again.")
+
+
+def peer_is_loopback(host: str) -> bool:
+    """127.0.0.1 and localhost. The TLS pump is one of these. A name is not."""
+    text = str(host).split("%", 1)[0]
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def audio_uses_tls(flags: int, host: str) -> bool:
+    """Remote audio goes over TLS when the daemon has closed the plain port."""
+    return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
+
+
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """s16le stereo at rate, as a WAV. The bytes are what arrived; hearing them is separate."""
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(pcm), b"WAVE",
+        b"fmt ", 16, 1, 2, rate, rate * 4, 4, 16,
+        b"data", len(pcm))
+    return header + pcm
+
+
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
@@ -791,6 +820,15 @@ class Commands:
                  timeout: float = 30.0):
         self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
+
+    def connect_audio(self, *, tls: bool) -> None:
+        """The music stream. A TLS failure stays a failure and does not fall through to amigactld."""
+        channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+        channel.connect()
+        if tls and not hasattr(channel._sock, "version"):
+            channel.close()
+            raise AmigaError(PLAIN_CLOSED_TEXT)
+        self.backend = channel
 
     def connect(self) -> None:
         if self.backend is None:

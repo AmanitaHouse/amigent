@@ -234,4 +234,4 @@ def test_the_apollo_daemon_reports_its_identity_and_not_audio():
     makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "amigentd.apollo" in makefile and "-m68080" in makefile and "-DAMIGENT_APOLLO" in makefile
     assert "gcc_support.o" in makefile and "div64.o" in makefile
-    assert "apollo.o" not in makefile and "apollo_mmio" not in makefile
+    assert "apollo.o" not in makefile and "apollo_mmio.o" in makefile

@@ -86,6 +86,7 @@ void UnLockBitMap(APTR handle);
 BOOL apollo_os_here(void);
 UWORD apollo_board(void);
 const char *apollo_board_name(UWORD board);
+BOOL apollo_mmio_hit(ULONG at, ULONG n);
 #endif
 
 #define PROTOCOL_VERSION 6
@@ -6632,6 +6633,12 @@ static BOOL peek_allowed(ULONG at, ULONG n)
 
     if (!n || n > PEEK_MAX || end < at)
         return FALSE;
+#ifdef AMIGENT_APOLLO
+    /* A MemHeader that covered a SAGA, PIP, VREG or ARNE window would still
+     * be a read or write with side effects. Those windows are refused first. */
+    if (apollo_mmio_hit(at, n))
+        return FALSE;
+#endif
     if (at >= 0xF80000UL && end <= 0xFFFFFFUL)
         return TRUE;
     if (end < 0x400)  /* vectors and ExecBase at 4: chip RAM below exec's list */

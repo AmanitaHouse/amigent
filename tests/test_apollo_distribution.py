@@ -55,7 +55,7 @@ def test_the_packaged_daemon_is_the_rebuilt_protocol6_executable():
     if (staged / "amigentd.apollo").is_file():
         assert (staged / "amigentd.apollo").read_bytes() == data
         assert (staged / "amigent-apollo-probe").read_bytes() == probe
-    source = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "native" / "amiga" / "daemon" / "amigentd.c").read_text(encoding="utf-8")
     assert 't_pair(&t, "audio", 1)' in source
     assert 't_pair(&t, "pip", 0)' in source
     assert 't_pair(&t, "pip", 1)' not in source
@@ -277,8 +277,8 @@ def test_wheel_and_sdist_carry_this_daemon(tmp_path):
         assert _sha(daemon) == DAEMON[1] and _sha(probe) == PROBE[1]
         monitor = archive.extractfile(_names_ending(names, "amigent-monitor.apollo")[0]).read()
         assert monitor == _packaged("amigent-monitor.apollo")
-        assert any(name.endswith("amiga/amigentd.c") for name in names)
-        assert any(name.endswith("amiga/apollo/apollo.c") for name in names)
+        assert any(name.endswith("src/native/amiga/daemon/amigentd.c") for name in names)
+        assert any(name.endswith("src/native/amiga/platform/apollo/apollo.c") for name in names)
         folded = "\n".join(names)
         for banned in EXCLUDED:
             assert banned not in folded

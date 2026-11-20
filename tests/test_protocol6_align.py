@@ -11,8 +11,8 @@ from amigent import channel, chipset, doctor, gdb, hrtmon, journal, memory, pack
 from amigent.system import exec_coldreboot
 
 ROOT = Path(__file__).resolve().parents[1]
-DAEMON = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
-MMIO = (ROOT / "amiga" / "apollo" / "apollo_mmio.c").read_text(encoding="utf-8")
+DAEMON = (ROOT / "src" / "native" / "amiga" / "daemon" / "amigentd.c").read_text(encoding="utf-8")
+MMIO = (ROOT / "src" / "native" / "amiga" / "platform" / "apollo" / "apollo_mmio.c").read_text(encoding="utf-8")
 PROTOCOL = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
 
 UPSTREAM = {
@@ -248,4 +248,4 @@ def test_russian_catalog_is_json():
 def test_trace_is_present_and_not_claimed_for_the_68080():
     assert "trapstub" in DAEMON
     assert "68080" in DAEMON and "not been validated" in DAEMON
-    assert (ROOT / "amiga" / "trapstub.s").is_file()
+    assert (ROOT / "src" / "native" / "amiga" / "daemon" / "trapstub.s").is_file()

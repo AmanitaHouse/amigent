@@ -45,13 +45,22 @@ def test_apolloos_uses_the_optional_daemon_only_when_it_is_packaged(tmp_path, mo
 
     assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd"
     (binary / "amigentd.apollo").write_bytes(b"apollo")
-    assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd.apollo"
+    # ApolloOS alone is not 68080 core evidence.
+    assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd"
+    assert setup.select_build(0, {"os": "ApolloOS", "cpu": "68080"}) == "amigentd.apollo"
     assert setup.select_build(0, {"exec_version": "51.1", "attn_flags": "0x400"}) == "amigentd.apollo"
-    assert setup.select_build(0, {}, "ApolloOS") == "amigentd.apollo"
+    assert setup.select_build(0, {}, "ApolloOS") == "amigentd"
     assert setup.select_build(0, {}) == "amigentd"
 
 
-def test_an_unknown_cpu_stops_before_a_build_is_chosen():
+def test_an_unknown_cpu_takes_only_the_68000_build_when_it_is_packaged(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    binary = package / "bin"
+    binary.mkdir(parents=True)
+    (binary / "amigentd.000").write_bytes(b"sixty-eight-thousand")
+    monkeypatch.setattr(setup, "AMIGA", package)
+    assert setup.select_build(20, {"os": "ApolloOS"}) == "amigentd.000"
+    (binary / "amigentd.000").unlink()
     with pytest.raises(SystemExit):
         setup.select_build(20, {"os": "ApolloOS"})
 
@@ -77,6 +86,8 @@ def test_setup_keeps_the_classic_daemon_when_the_probe_or_binary_is_absent(tmp_p
     package = tmp_path / "amiga"
     binary = package / "bin"
     binary.mkdir(parents=True)
+    (binary / "amigentd").write_bytes(b"classic")
+    (binary / "amigentd.000").write_bytes(b"sixty-eight-thousand")
     monkeypatch.setattr(setup, "AMIGA", package)
     link = Link(0)
 
@@ -89,7 +100,8 @@ def test_setup_keeps_the_classic_daemon_when_the_probe_or_binary_is_absent(tmp_p
     assert "T:amigent-apollo-probe" in link.puts
 
     (binary / "amigentd.apollo").write_bytes(b"apollo")
-    assert setup.amigentd_build(Link(0, probe=0)) == "amigentd.apollo"
+    # SETUP sees only the exit code; without packaged probe core evidence keep classic.
+    assert setup.amigentd_build(Link(0, probe=0)) == "amigentd"
     assert setup.amigentd_build(Link(0, probe=5)) == "amigentd"
     assert setup.amigentd_build(Link(5, probe=0)) == "amigentd.000"
 
@@ -144,8 +156,11 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
     assert not any(cmd.startswith("Version") for cmd in identified.commands)
 
     bare = Channel(info={}, probe="ApolloOS\n")
-    assert setup.build_for_channel(bare) == "amigentd.apollo"
+    assert setup.build_for_channel(bare) == "amigentd"
     assert bare.files["T:amigent-apollo-probe"] == b"probe"
+
+    with_core = Channel(info={}, probe="ApolloOS\n68080\n")
+    assert setup.build_for_channel(with_core) == "amigentd.apollo"
 
     broken = Channel(info={}, fail_probe=True)
     assert setup.build_for_channel(broken) == "amigentd"

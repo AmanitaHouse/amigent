@@ -98,11 +98,13 @@ def _install(cpu=0, probe=0):
     return link
 
 
-def test_setup_copies_the_apollo_daemon_when_the_probe_says_so():
+def test_setup_keeps_the_general_daemon_when_the_probe_only_names_apolloos():
+    # SETUP only sees the exit code. An older probe's 0 means ApolloOS, not a
+    # verified 68080 core, so the first install uses the general daemon.
     link = _install(cpu=0, probe=0)
-    assert link.files["C:amigentd.new"] == _packaged("amigentd.apollo")
+    assert link.files["C:amigentd.new"] == _packaged("amigentd")
     assert link.files["T:amigent-apollo-probe"] == _packaged("amigent-apollo-probe")
-    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor.apollo")
+    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
     assert b"amigent-monitor.apollo" not in link.files["T:amigent-setup"]
     assert b"pip" not in link.files["T:amigent-setup"]
 
@@ -228,7 +230,7 @@ def test_apolloos_without_the_optional_monitor_keeps_the_classic_one(tmp_path, m
     (package / "bin" / "amigent-monitor.apollo").unlink()
     monkeypatch.setattr(setup, "AMIGA", package)
     link = _install(cpu=0, probe=0)
-    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd.apollo").read_bytes()
+    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd").read_bytes()
     assert link.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
     channel = _update(monkeypatch, info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
     assert channel.files["C:amigentd"] == (package / "bin" / "amigentd.apollo").read_bytes()

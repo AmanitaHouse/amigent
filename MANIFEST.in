@@ -2,7 +2,7 @@ include CHANGELOG.md
 graft docs
 graft scripts
 graft tests
-graft amiga
+graft src/native
 prune build
 prune dist
 global-exclude *.py[cod]

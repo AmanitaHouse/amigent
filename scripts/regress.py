@@ -333,6 +333,7 @@ class Run:
         time.sleep(2)
         got = self.s.amiga_read_text(f"{DIR}/typed.txt").strip()
         assert got == "äöüß ÄÖÜ @{}[]", repr(got)
+        self._shell_active()  # AmiKit's Live Update window may have taken the keys meanwhile
         start = time.monotonic()
         said = self.s.amiga_type(f"Echo >{DIR}/l1.txt eins\nWait 2\nEcho >{DIR}/l2.txt zwei\n")
         took = time.monotonic() - start

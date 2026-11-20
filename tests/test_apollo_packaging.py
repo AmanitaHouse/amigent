@@ -24,9 +24,9 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN = AMIGA / "bin"
 HUNK = b"\x00\x00\x03\xf3"
 
-# GCC 6.50 Stable outputs from the AUDIO stack. build/ is not part of the package.
+# GCC 6.50 Stable. The daemon links the MMIO guard with AUDIO. build/ is not packaged.
 APOLLO = {
-    "amigentd.apollo": (129656, "e38e2c1541cf18cca76e0638723c06ce0754b6292a28fc76e9d77f49a63e4c5f"),
+    "amigentd.apollo": (129844, "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6"),
     "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
 }
 CLASSIC = {
@@ -35,7 +35,7 @@ CLASSIC = {
     "amigent-monitor": (17180, "b897cfdf9c5bc91777c2a87a876dfa10268e602e0e81e8027d7e862f3c917b68"),
     "amigentd.080": (108896, "8022366042e0c6e970f84acd16d65231d4fa0fb8d25c83f48c0a6221cb414339"),
 }
-EXCLUDED = ("amigentd.080", "private/", ".git/", ".githooks/", "apollo_mmio", "ammx.s", "build/apollo")
+EXCLUDED = ("amigentd.080", "private/", ".git/", ".githooks/", "ammx.s", "build/apollo")
 
 
 def _sha(data: bytes) -> str:

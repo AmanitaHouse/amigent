@@ -249,8 +249,12 @@ def test_wheel_and_sdist_carry_this_daemon(tmp_path):
     )
     completed = subprocess.run(
         [sys.executable, str(script)],
-        cwd=ROOT, check=True, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True,
         env={**os.environ, "AMIGENT_DIST_DIR": str(out), "AMIGENT_BUILD_BASE": str(work)},
+    )
+    assert completed.returncode == 0, (
+        f"wheel/sdist build failed ({completed.returncode})\n"
+        f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     )
     produced = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if line.startswith(("WHEEL ", "SDIST ")))
     wheel = out / produced["WHEEL"]

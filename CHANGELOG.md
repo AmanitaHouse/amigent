@@ -34,6 +34,12 @@ Versions follow [semver](https://semver.org). The number lives in
   key, the certificate and the repair modules. The Amiga remembers it, and
   every later update renews it too.
 
+### Several Amigas
+
+- Saved Amigas now keep credentials, settings and history under a stable ID.
+  Migration keeps the original files. After a downgrade, older versions see
+  the pre-migration history. Later writes remain under the machine ID.
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

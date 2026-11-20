@@ -54,12 +54,17 @@ def setup(args):
     os.environ["AMIGENT_SCREEN_PORT"] = str(args.port)
     sys.path.insert(0, str(ROOT / "src"))
     import amigent.server as server  # noqa: E402  reads the variables above
+    from amigent.sessions import active
+    session, _ = server.sessions.resolve("")
+    active.set(session)  # the checks reach into this Amiga's connections themselves
+    server.session = session
     return server
 
 
 class Run:
     def __init__(self, server, args):
         self.s, self.args, self.results = server, args, []
+        self.session = server.session
 
     def check(self, name, fn):
         if self.args.only and name not in self.args.only:
@@ -223,7 +228,7 @@ class Run:
                 f"{locks.count(chr(10))} locks, {load.splitlines()[0]}")
 
     def drag_measure(self):
-        before = self.s.screen.ui_tree()
+        before = self.session.screen.ui_tree()
         w = next(i for i in before if i["kind"] == "window" and i["title"] == TITLE)
         said = self.s.amiga_drag(w["x"] + 60, w["y"] + 4, w["x"] + 100, w["y"] + 24)
         assert "moved from" in said, said
@@ -297,7 +302,7 @@ class Run:
         said = self.s.amiga_start(f"NewShell WINDOW CON:40/60/560/160/{TITLE}/CLOSE")
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            tree = self.s.screen.ui_tree()
+            tree = self.session.screen.ui_tree()
             win = [w for w in tree if w["kind"] == "window" and w["title"] == TITLE]
             if win:
                 w = win[0]
@@ -310,7 +315,7 @@ class Run:
     def _shell_active(self):
         """Our Shell gets the keys again: something else may have opened in between."""
         for _ in range(3):
-            tree = self.s.screen.ui_tree()
+            tree = self.session.screen.ui_tree()
             ours = [w for w in tree if w["kind"] == "window" and w["title"] == TITLE]
             if not ours:
                 self.open_shell()
@@ -345,19 +350,19 @@ class Run:
 
     def hold(self):
         self._shell_active()
-        if self.s.screen.held() == "" and self.s.screen.protocol < 4:
+        if self.session.screen.held() == "" and self.session.screen.protocol < 4:
             return "skip: amigentd too old"
-        tree = self.s.screen.ui_tree()
+        tree = self.session.screen.ui_tree()
         top = next(w for w in tree if w["kind"] == "window" and w["title"] == TITLE)
         self.s.amiga_mouse_move(top["x"] + 40, 2)  # over the screen's title bar
         self.s.amiga_button("right", True)
         try:
             time.sleep(0.8)
-            state = self.s.screen.held()
+            state = self.session.screen.held()
         finally:
             self.s.amiga_button("right", False)
         time.sleep(0.5)
-        after = self.s.screen.held()
+        after = self.session.screen.held()
         if state == "" and after == "":
             return "skip: amigentd says nothing (before 1.3.0?)"
         assert state in ("menu", "held") and after == "", (state, after)
@@ -425,7 +430,7 @@ class Run:
 
     def close_shell(self):
         for _ in range(4):  # one EndShell per Shell of ours, should there be more
-            tree = self.s.screen.ui_tree()
+            tree = self.session.screen.ui_tree()
             if not any(w["kind"] == "window" and w["title"] == TITLE for w in tree):
                 break
             self._shell_active()
@@ -434,7 +439,7 @@ class Run:
         self.s.amiga_exec(f"Delete {DIR} ALL QUIET FORCE")
         deadline = time.monotonic() + 15  # a 68000 takes a while to close a window
         while time.monotonic() < deadline:
-            tree = self.s.screen.ui_tree()
+            tree = self.session.screen.ui_tree()
             if not any(w["kind"] == "window" and w["title"] == TITLE for w in tree):
                 return "Shell closed, RAM:amigent-regress deleted"
             time.sleep(1)
@@ -444,7 +449,7 @@ class Run:
     # ---- 1.3.0 part two -------------------------------------------------
 
     def _new(self):
-        info = self.s.ctl.sysinfo()
+        info = self.session.ctl.sysinfo()
         return "text" in info
 
     def screen_text(self):
@@ -494,7 +499,7 @@ class Run:
         from amigent import pack
         if not self._new():
             return "skip: amigentd before protocol 5"
-        policy = pack.policy_for(self.s.HOST)
+        policy = pack.policy_for(self.session.host)
         before = policy.chosen
         data = random.Random(3).randbytes(20_000) + b"Workbench text that packs " * 2000
         results = {}
@@ -502,8 +507,8 @@ class Run:
             for mode in ("off", "fast", "best"):
                 policy.mode = mode
                 start = time.monotonic()
-                self.s.ctl.write_file(f"{DIR}/pack-{mode}.bin", data)
-                back = self.s.ctl.read_file(f"{DIR}/pack-{mode}.bin")
+                self.session.ctl.write_file(f"{DIR}/pack-{mode}.bin", data)
+                back = self.session.ctl.read_file(f"{DIR}/pack-{mode}.bin")
                 out = self.s.amiga_exec(f"List {DIR}")
                 results[mode] = time.monotonic() - start
                 assert back == data, f"{mode}: the file came back different"
@@ -520,7 +525,7 @@ class Run:
             return "skip: amigentd before protocol 5"
         self.s.amiga_mkdir(f"{DIR}/tree/sub")
         self.s.amiga_write_text(f"{DIR}/tree/sub/a.txt", "abc")
-        entries = self.s.ctl.tree(f"{DIR}/tree", crc=True)
+        entries = self.session.ctl.tree(f"{DIR}/tree", crc=True)
         names = {e["name"]: e for e in entries}
         import zlib
         assert names["sub/a.txt"]["crc"] == zlib.crc32(b"abc"), names

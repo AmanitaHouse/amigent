@@ -57,18 +57,19 @@ class Bench:
         from amigent.amigentd import Amigentd
         from amigent.channel import Commands
 
+        from amigent.sessions import active
+        session, _ = self.server.sessions.resolve("")
+        active.set(session)
         with contextlib.suppress(Exception):
-            self.server.ctl.close()
-            self.server.screen.close()
-        self.server.ctl = Commands("127.0.0.1", 1, self.link.port, timeout=30)
-        self.server.screen = Amigentd("127.0.0.1", self.link.port, timeout=30)
-        self.server.last_look = 0.0
-        for name in ("_last_shot",):
-            if hasattr(self.server, name):
-                setattr(self.server, name, None)
+            session.ctl.close()
+            session.screen.close()
+        session.ctl = Commands("127.0.0.1", 1, self.link.port, timeout=30)
+        session.screen = Amigentd("127.0.0.1", self.link.port, timeout=30)
+        session.last_look = 0.0
+        session.last_shot = None
         # warm up: connections are not what we measure
-        self.server.ctl.connect()
-        self.server.screen.connect()
+        session.ctl.connect()
+        session.screen.connect()
 
     def run(self, name, fn, note=""):
         self.link.reset()

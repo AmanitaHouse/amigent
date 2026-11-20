@@ -105,6 +105,7 @@
     ws.onopen = () => { socketOpen = true; showState(); };
     ws.onclose = () => {
       socketOpen = false;
+      stopHear(false);
       showState();
       setTimeout(connect, 1000);
     };
@@ -181,6 +182,19 @@
       : t(shown.apollo ? "mem_graphics" : "mem_line", { chip: shown.graphics, fast: shown.fast });
     $("about-system").textContent = system || "–";
     $("about-cpu").textContent = cpu || "–";
+    const daemon = $("about-daemon");
+    if (daemon) {
+      const family = info.daemon_family || t("not_reported");
+      const version = info.daemon_version || t("not_reported");
+      const identity = info.daemon_identity || t("not_reported");
+      daemon.textContent = identity === "named file"
+        ? `${family} (${t("named_file")}) · ${version}`
+        : `${family} · ${version}`;
+      $("about-protocol").textContent = info.daemon_protocol ? String(info.daemon_protocol) : t("not_reported");
+      $("about-daemon-cpu").textContent = info.daemon_target || t("not_reported");
+      const caps = info.daemon_capabilities || [];
+      $("about-daemon-caps").textContent = caps.length ? caps.join(", ") : t("not_reported");
+    }
     $("about-memory").textContent = memory;
     $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
     const list = $("about-volumes");
@@ -204,7 +218,15 @@
     }
     $("st-mem").textContent = t("status_fast", { size: shown.fast });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
+    showHear(info);
     showState();
+  }
+
+  function showHear(info) {
+    const button = $("hear");
+    const offered = !!(info && info.audio === "1");
+    button.hidden = !offered;
+    if (!offered && hearing) stopHear(true);
   }
 
   function showScreens(list) {
@@ -249,9 +271,14 @@
       case "online":
         amigaOnline = m.online;
         reason = m.reason || "";
+        if (!m.online) stopHear(false);
         showState();
         break;
+      case "audio":
+        if (!m.on) stopHear(false);
+        break;
       case "address":
+        stopHear(false);
         $("about-host").textContent = `${host} (${m.address})`;
         break;
       case "stats":
@@ -292,7 +319,7 @@
       drawing = drawing.then(() => drawPixels(buffer));
     } else if (kind === 4) {
       drawing = drawing.then(() => drawPip(buffer));
-    } else if (kind === 5) {
+    } else if (kind === 5 && hearing && buffer.byteLength >= 5) {
       const view = new DataView(buffer);
       playPcm(view.getUint32(1), new Uint8Array(buffer, 5));
     } else if (kind === 2) {
@@ -360,6 +387,7 @@
   }
 
   let lastPip = null;
+  let hearing = false;
   let audioCtx = null, player = null, playerBoot = null;
   const playerQueue = [];
   const WORKLET = `
@@ -421,7 +449,7 @@ registerProcessor("amigent-pcm", AmigentPcm);
 `;
 
   function playPcm(rate, pcm) {
-    if (!pcm.byteLength || pcm.byteLength % 4) return;
+    if (!hearing || !pcm.byteLength || pcm.byteLength % 4) return;
     const samples = pcm.byteLength / 4;
     const out = new Float32Array(samples * 2);
     const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
@@ -441,6 +469,7 @@ registerProcessor("amigent-pcm", AmigentPcm);
       const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
       playerBoot = audioCtx.audioWorklet.addModule(url).then(() => {
         URL.revokeObjectURL(url);
+        if (!hearing) return;
         player = new AudioWorkletNode(audioCtx, "amigent-pcm", { outputChannelCount: [2] });
         player.connect(audioCtx.destination);
         for (const queued of playerQueue) player.port.postMessage(queued, [queued.pcm.buffer]);
@@ -485,6 +514,19 @@ registerProcessor("amigent-pcm", AmigentPcm);
     }
     pipCtx.putImageData(image, 0, 0);
     placePip();
+  }
+
+  function stopHear(tell) {
+    hearing = false;
+    const button = $("hear");
+    if (button) button.setAttribute("aria-pressed", "false");
+    playerQueue.length = 0;
+    playerBoot = null;
+    if (player) {
+      player.disconnect();
+      player = null;
+    }
+    if (tell) send({ t: "audio", on: false });
   }
 
   function setSize(w, h) {
@@ -826,6 +868,18 @@ registerProcessor("amigent-pcm", AmigentPcm);
   });
 
   // ---------------------------------------------------------------- view
+
+  $("hear").addEventListener("click", () => {
+    if (hearing) {
+      stopHear(true);
+      return;
+    }
+    hearing = true;
+    $("hear").setAttribute("aria-pressed", "true");
+    if (!audioCtx) audioCtx = new AudioContext();
+    audioCtx.resume().catch(() => {});
+    send({ t: "audio", on: true });
+  });
 
   $("fit").addEventListener("click", () => {
     fit = !fit;

@@ -480,6 +480,8 @@ else.
 | 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
+| 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. |
+| 49 | PIP | | | | Apollo build only. Status, `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, then `w*h*3` RGB bytes. `w` 0 means no picture. The handler does not read PIP registers. `pip=1` in SYSINFO. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -565,12 +567,19 @@ separated by tabs.
   `poke`, `1` when amigentd runs with `ALLOWPOKE`; `probe`, `1` when LOCKS,
   CPU, DRAG and QUIET are understood; `execbase`, exec's base in hex; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
+  The Apollo build also sends `os` (`ApolloOS` or `AmigaOS`), `board`, `board_name`,
+  `cpu` `68080`, `audio=1` and `pip=1`. It does not send `modules` or `tasklist`.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.
   The vectors below $400 (with ExecBase at 4) can be read as well; Enforcer
   and MuForce may report that as a hit.
   Anything else gets status `1` and a text saying so. Packed after COMPRESS.
+  The Apollo build also refuses a request that shares any byte with a SAGA, PIP
+  or VREG window whose read can change the hardware, even when a memory header
+  covers that window. A request that only crosses the edge of such a window is
+  refused. POKE uses the same refusal, and still requires `ALLOWPOKE` first.
+  `APoke` is not command 42.
 
 ### loaded
 

@@ -32,8 +32,10 @@ from pathlib import Path
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import Commands, pc_outdated
-from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
+from .channel import PLAIN_CLOSED_TEXT, Commands, apollo_commands, audio_uses_tls, pc_outdated
+from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
+                     native_ppc, ppc_software)
+from . import tls
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -41,6 +43,101 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
                         _Handler, _Server)
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
+
+# Shown as themselves. Anything else that fails the link stays the generic
+# "not answering" line, so a greeting, a path or an OS detail is not printed.
+KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
+KEY_REFUSED = ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+               "must match S:amigent.key on the Amiga")
+CLOSED_BY_DAEMON = "connection closed by amigentd"
+STOPPED_ANSWERING = "amigentd stopped answering."
+UNEXPECTED_GREETING = "The Amiga sent an unexpected greeting."
+DID_NOT_ANSWER = "The Amiga did not answer in time."
+CONNECTION_REFUSED = "The Amiga refused the connection."
+CANNOT_BE_REACHED = "The Amiga cannot be reached on the network."
+CONNECTION_CLOSED = "The connection to the Amiga was closed."
+ADDRESS_UNRESOLVED = "The Amiga's address could not be resolved."
+
+
+def connection_reason(text: str) -> str:
+    """A connection or disconnection reason safe to show, or '' when it is not.
+
+    TLS sentences pass through unchanged so the page can keep its translations.
+    A known failure becomes one fixed sentence. An empty or unrecognised text,
+    including a greeting or an error that names a path, becomes no reason.
+    """
+    raw = text or ""
+    if "not retried in the clear" in raw:
+        return tls.TLS_HANDSHAKE_TEXT
+    if "TLS port is not available" in raw:
+        return tls.TLS_UNAVAILABLE_TEXT
+    if "only encrypted connections" in raw:
+        return PLAIN_CLOSED_TEXT
+    if "wants a key" in raw:
+        return KEY_WANTED
+    if "refused the key" in raw:
+        return KEY_REFUSED
+    if CLOSED_BY_DAEMON in raw:
+        return CLOSED_BY_DAEMON
+    if "stopped answering" in raw:
+        return STOPPED_ANSWERING
+    if "unexpected greeting" in raw:
+        return UNEXPECTED_GREETING
+    if "not answering" not in raw:
+        return ""
+    low = raw.lower()
+    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
+                                    "semaphore timeout")):
+        return DID_NOT_ANSWER
+    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
+        return CONNECTION_REFUSED
+    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
+                                    "winerror 10065", "winerror 10051")):
+        return CANNOT_BE_REACHED
+    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
+                                    "broken pipe", "winerror 10054", "winerror 10053")):
+        return CONNECTION_CLOSED
+    if any(part in low for part in ("name or service not known", "nodename nor servname",
+                                    "getaddrinfo", "no such host", "winerror 11001")):
+        return ADDRESS_UNRESOLVED
+    return ""
+
+
+def reported_bytes(info: dict, key: str) -> int | None:
+    """One SYSINFO byte count, or None when the daemon did not send it.
+
+    ``0`` and ``"0"`` are real readings. A missing key and a blank value are not.
+    """
+    if key not in info:
+        return None
+    raw = info[key]
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    return int(raw)
+
+
+def counted_bytes(info: dict, key: str) -> int:
+    """``reported_bytes``, with a missing field read as ``0``."""
+    value = reported_bytes(info, key)
+    return 0 if value is None else value
+
+
+def status_free_bytes(chip_free, fast_free) -> int:
+    """Available Chip RAM plus available Fast RAM. A missing Chip figure adds nothing."""
+    return counted_bytes({"chip_free": chip_free}, "chip_free") + counted_bytes(
+        {"fast_free": fast_free}, "fast_free")
+
+
+def pip_message(x: int, y: int, w: int, h: int, rgb: bytes) -> bytes:
+    """Binary message 4: the SAGA picture-in-picture surface, drawn over the screen."""
+    return struct.pack(">BHHHH", 4, x, y, w, h) + rgb
+
+
+def pcm_message(rate: int, pcm: bytes) -> bytes:
+    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
+    return struct.pack(">BI", 5, rate) + pcm
+
+
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
@@ -162,7 +259,8 @@ class Viewer:
                 out.write(json.dumps({"url": self.url, "host": self.host}))
         except OSError:
             pass
-        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
+        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats,
+                       self._media):
             threading.Thread(target=target, daemon=True).start()
         return self.url
 
@@ -254,7 +352,7 @@ class Viewer:
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
             self.online = online
-            self.reason = "" if online else reason
+            self.reason = "" if online else connection_reason(reason)
             self.event("online", online=online, reason=self.reason)
             # stderr: the terminal that started amigent-viewer (stdout is the MCP server's protocol)
             stamp = time.strftime("%H:%M:%S")
@@ -286,6 +384,61 @@ class Viewer:
                     pass  # the next round tries again
             seconds += 1
 
+    def _media(self) -> None:
+        """ARNE audio and the SAGA PIP, on their own command channels, only while a page is open.
+
+        AUDIO is opcode 48 and PIP is opcode 49. The screen connection is not this socket.
+        When the daemon has closed the plain port, this socket is TLS. A failed TLS
+        handshake is not retried in the clear.
+        """
+        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
+        quiet_pip = False
+        pip_at = 0.0
+        fail_until = 0.0
+        while True:
+            if not self._watching():
+                time.sleep(0.05)
+                continue
+            info = self.amiga or {}
+            now = time.monotonic()
+            offered = apollo_commands(info)
+            if "AUDIO" not in offered or now < fail_until:
+                time.sleep(0.05)
+            else:
+                try:
+                    if not link.connected:
+                        link.connect_audio(tls=audio_uses_tls(self.screen.flags, self.host))
+                    link.audio_start()
+                    while self._watching():
+                        got = link.audio_read()
+                        if got is None:
+                            break
+                        rate, pcm = got
+                        if pcm:
+                            self.broadcast(pcm_message(rate or 48000, pcm))
+                        quiet_pip, pip_at = self._poll_pip(offered, quiet_pip, pip_at)
+                    if self._watching():
+                        continue
+                    link.audio_stop()
+                    while link.audio_read() is not None:
+                        pass
+                except (AmigaError, AttributeError, OSError):
+                    link.close()
+                    fail_until = time.monotonic() + 0.5
+                    time.sleep(0.05)
+            if "AUDIO" not in offered:
+                quiet_pip, pip_at = self._poll_pip(offered, quiet_pip, pip_at)
+
+    def _poll_pip(self, offered: set, quiet_pip: bool, pip_at: float) -> tuple[bool, float]:
+        if "PIP" not in offered or quiet_pip or time.monotonic() < pip_at:
+            return quiet_pip, pip_at
+        try:
+            x, y, w, h, rgb = self._ctl(self.ctl.pip)
+        except (AmigaError, AttributeError, OSError):
+            return True, pip_at
+        self.broadcast(pip_message(x, y, w, h, rgb))
+        return False, time.monotonic() + 0.5
+
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""
         if self.screen.protocol >= 2:
@@ -311,10 +464,20 @@ class Viewer:
         info = self._ctl(self.ctl.sysinfo)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
-        number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
-        return {**self._system, "tcp": info.get("bsdsocket", ""),
-                "chip_free": number("chip_free"), "chip_total": number("chip_total"),
-                "fast_free": number("fast_free"), "fast_total": number("fast_total"),
+        facts = dict(self._system)
+        if info.get("os"):
+            facts["os"] = info["os"]
+        if str(info.get("cpu") or "") == "68080" or info.get("os") == "ApolloOS":
+            facts["cpu"] = "68080"
+        # chip_free stays None when SYSINFO omits it, so the page can tell a
+        # real zero from an older daemon. The other counts keep "missing means 0".
+        return {**facts, "tcp": info.get("bsdsocket", ""),
+                "board": info.get("board", ""), "board_name": info.get("board_name", ""),
+                "audio": info.get("audio", ""), "pip": info.get("pip", ""),
+                "chip_free": reported_bytes(info, "chip_free"),
+                "chip_total": counted_bytes(info, "chip_total"),
+                "fast_free": counted_bytes(info, "fast_free"),
+                "fast_total": counted_bytes(info, "fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
 
@@ -442,14 +605,23 @@ class Viewer:
     def _restart(self) -> None:
         self.event("toast", key="restarting")
         try:
-            # Workbench 3.0 added C:Reboot. An older system still resets from
-            # the keyboard chord, which is what the viewer sends instead.
-            if self._reboot_missing() and exec_before_os3(self._exec_version()):
-                if not self.online:
-                    raise AmigaError("the Amiga is not connected")
-                self._ctl(lambda: self.ctl.flush(self.flush_volumes))
-                self._submit_reset_chord()
-                return
+            # Workbench 3.0 added C:Reboot. Exec 36, 37 and 38 still reset
+            # from the keyboard chord. Exec below 36 is not sent the chord:
+            # the three key-downs have no key-up, and ColdReboot() is absent,
+            # so the modifiers would stay down on a machine that does not reset.
+            # The daemon still requires the three keys inside five seconds.
+            if self._reboot_missing():
+                version = self._exec_version()
+                if exec_before_os3(version):
+                    if not exec_coldreboot(version):
+                        raise AmigaError(
+                            f"unsupported operation: exec {version} cannot ColdReboot() "
+                            "and has no C:Reboot")
+                    if not self.online:
+                        raise AmigaError("the Amiga is not connected")
+                    self._ctl(lambda: self.ctl.flush(self.flush_volumes))
+                    self._submit_reset_chord()
+                    return
             if self.restart:
                 self.restart()
             else:

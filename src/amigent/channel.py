@@ -7,6 +7,7 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import re
 import struct
@@ -28,6 +29,7 @@ TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
 LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
+AUDIO, PIP = 48, 49  # ApolloOS: ARNE mix, and the SAGA picture-in-picture surface
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -56,6 +58,53 @@ SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
 DISK_RATE = 20_000  # bytes/s for the far end to settle a READ/WRITE, pessimistic on purpose
+
+
+def peer_is_loopback(host: str) -> bool:
+    """127.0.0.1 and localhost. The TLS pump is one of these. A name is not."""
+    text = str(host).split("%", 1)[0]
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def audio_uses_tls(flags: int, host: str) -> bool:
+    """Remote audio goes over TLS when the daemon has closed the plain port."""
+    return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
+
+
+def audio_request(arg: int = 0, y: int = 0) -> bytes:
+    """The 10-byte AUDIO header. arg 1 starts a stream, arg 2 stops, y is a one-shot in ms."""
+    return struct.pack(">BBHHHH", AUDIO, arg & 0xFF, 0, y & 0xFFFF, 0, 0)
+
+
+def pip_request() -> bytes:
+    """The 10-byte header of a PIP command. It carries no payload."""
+    return struct.pack(">BBHHHH", PIP, 0, 0, 0, 0, 0)
+
+
+def apollo_commands(info: dict | None) -> frozenset[str]:
+    """AUDIO and PIP when SYSINFO advertises them. loaded=1 is not either."""
+    info = info or {}
+    commands = set()
+    if info.get("audio") == "1":
+        commands.add("AUDIO")
+    if info.get("pip") == "1":
+        commands.add("PIP")
+    return frozenset(commands)
+
+
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """s16le stereo at rate, as a WAV the model can hear."""
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(pcm), b"WAVE",
+        b"fmt ", 16, 1, 2, rate, rate * 4, 4, 16,
+        b"data", len(pcm))
+    return header + pcm
 
 
 def budget(size: int, rate: float, base: float = 30.0) -> float:
@@ -261,7 +310,10 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
             if flags & PLAIN_CLOSED and not hasattr(self._sock, "version"):
-                raise AmigaError(PLAIN_CLOSED_TEXT)
+                if flags & 2:
+                    raise AmigaError(PLAIN_CLOSED_TEXT)
+                from .tls import TLS_UNAVAILABLE_TEXT
+                raise AmigaError(TLS_UNAVAILABLE_TEXT)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -276,7 +328,7 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError("amigentd refused a command channel")
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
-            self._notes = self._read_from = None  # a new amigentd may answer now
+            self._notes = self._read_from = self._audio = self._pip = None  # a new amigentd may answer now
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -673,6 +725,57 @@ class AmigaChannel(VolumeFlush):
         self._need_probe("a quiet monitor")
         self._one(Request(QUIET, "", 0, seconds))
 
+    def _need_apollo(self, what: str, flag: str) -> None:
+        self._need6(what)
+        attr = "_audio" if flag == "audio" else "_pip"
+        if getattr(self, attr, None) is None:
+            setattr(self, attr, self.sysinfo().get(flag) == "1")
+        if not getattr(self, attr):
+            raise AmigaError(f"{what} needs the Apollo build of amigentd")
+
+    def audio(self, ms: int = 0) -> tuple[int, bytes]:
+        """One shot of the AHI mix arne.audio is playing: (sample rate, s16le stereo).
+
+        ms is how long to collect, up to a fifth of a second. Zero returns the
+        newest finished half. Empty when nothing is playing through AHI. Only
+        the Apollo build answers. A viewer that wants the mix continuously
+        uses audio_start, audio_read and audio_stop instead.
+        """
+        self._need_apollo("ARNE audio", "audio")
+        self._request(AUDIO, y=max(0, min(int(ms), 200)))
+        head = self._exact(8)
+        rate, size = struct.unpack(">II", head)
+        return rate, self._exact(size) if size else b""
+
+    def audio_start(self) -> None:
+        """Ask the daemon to copy the mix into its FIFO and push it until audio_stop."""
+        self._need_apollo("ARNE audio", "audio")
+        self._request(AUDIO, arg=1)
+
+    def audio_read(self) -> tuple[int, bytes] | None:
+        """The next streamed chunk, or None when the daemon has ended the stream."""
+        rate, size = struct.unpack(">II", self._exact(8))
+        if size == 0xFFFFFFFF:
+            return None
+        if size > 256 * 1024:
+            raise AmigaError("audio chunk is too large")
+        return rate, self._exact(size) if size else b""
+
+    def audio_stop(self) -> None:
+        """Tell the daemon to finish the stream. The end marker arrives via audio_read."""
+        if not self._sock:
+            return
+        self._sock.settimeout(self.timeout)
+        self._header(AUDIO, arg=2)
+
+    def pip(self) -> tuple[int, int, int, int, bytes]:
+        """The SAGA picture-in-picture surface: x, y, w, h and RGB bytes. w is 0 when off."""
+        self._need_apollo("SAGA picture-in-picture", "pip")
+        self._request(PIP)
+        head = self._exact(12)
+        x, y, w, h, size = struct.unpack(">HHHHI", head)
+        return x, y, w, h, self._exact(size) if size else b""
+
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""
         self._need5("reading debug output")
@@ -687,6 +790,15 @@ class Commands:
                  timeout: float = 30.0):
         self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
+
+    def connect_audio(self, *, tls: bool) -> None:
+        """The music stream. A TLS failure stays a failure and does not fall through to amigactld."""
+        channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+        channel.connect()
+        if tls and not hasattr(channel._sock, "version"):
+            channel.close()
+            raise AmigaError(PLAIN_CLOSED_TEXT)
+        self.backend = channel
 
     def connect(self) -> None:
         if self.backend is None:

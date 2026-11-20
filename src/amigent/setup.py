@@ -50,13 +50,143 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
+AFF_FPGA = 1 << 10  # exec's attention bit for the Apollo core, from the Apollo NDK
+
+
+def apollo_os(info: dict | None = None, version_text: str = "") -> bool:
+    """ApolloOS, as opposed to AmigaOS on the same Vampire.
+
+    The public ApolloOS tree calls the system ApolloOS and its exec is version
+    51, and the core sets the FPGA attention bit. AmigaOS on a Vampire stays on
+    exec 45 to 47 and keeps the plain amigentd.
+    """
+    info = info or {}
+    if info.get("os") == "ApolloOS" or "ApolloOS" in (version_text or ""):
+        return True
+    try:
+        major = int(str(info.get("exec_version", "0")).split(".", 1)[0])
+    except ValueError:
+        major = 0
+    try:
+        flags = int(str(info.get("attn_flags", "0") or "0"), 0)
+    except ValueError:
+        flags = 0
+    return major >= 51 and bool(flags & AFF_FPGA)
+
+
+def select_build(cpu_rc: int, info: dict | None = None, version_text: str = "") -> str:
+    """amigentd.000 on a 68000, amigentd.apollo on ApolloOS, amigentd otherwise."""
+    if cpu_rc not in (0, 5):
+        raise SystemExit(f"C:CPU answered {cpu_rc}, so the CPU is unknown. Copy C:CPU from the "
+                         "Workbench disk and try again.")
+    if cpu_rc == 5:
+        return "amigentd.000"
+    if apollo_os(info, version_text):
+        return "amigentd.apollo"
+    return "amigentd"
+
+
+def binary_path(name: str):
+    path = AMIGA / "bin" / name
+    if not path.exists():
+        raise SystemExit(f"{name} is not in this package, so nothing was changed.")
+    return path
+
+
+def monitor_file(build: str) -> str:
+    """The packaged monitor for a build ``select_build`` already returned.
+
+    The installed name stays ``amigent-monitor``. Only ``amigentd.apollo``
+    selects the 68080 file. A 68000, AmigaOS, an unknown build, or a machine
+    that did not identify itself keeps the general-purpose monitor.
+    """
+    if build == "amigentd.apollo":
+        return "amigent-monitor.apollo"
+    return "amigent-monitor"
+
+
+def window_source(name: str, build: str):
+    """Local file to store as ``name``, or None when that window is not packaged.
+
+    A missing Apollo monitor stops the caller before anything is copied.
+    A missing general-purpose window is skipped, as the other windows are.
+    """
+    packaged = monitor_file(build) if name == "amigent-monitor" else name
+    if name == "amigent-monitor" and packaged != "amigent-monitor":
+        return binary_path(packaged)
+    path = AMIGA / "bin" / packaged
+    return path if path.exists() else None
+
+
+def _probe_output(channel) -> str:
+    """What the small ApolloOS probe printed, or '' when it cannot be run."""
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not probe.exists():
+        return ""
+    try:
+        channel.write_file("T:amigent-apollo-probe", probe.read_bytes())
+        channel.exec("Protect T:amigent-apollo-probe +e")
+        return channel.exec("T:amigent-apollo-probe").output
+    except (AmigaError, AttributeError, OSError):
+        return ""
+
+
+def _reported(info: dict) -> bool:
+    return bool(info.get("os") or info.get("exec_version") or info.get("attn_flags"))
+
+
+def build_for_channel(channel) -> str:
+    """The build an Amiga that already runs amigentd should get."""
+    cpu = channel.exec("CPU CHECK 68020").rc
+    info: dict = {}
+    version_text = ""
+    if cpu == 0:
+        try:
+            info = channel.sysinfo() or {}
+        except (AmigaError, AttributeError):
+            info = {}
+        if not apollo_os(info):
+            try:
+                version_text = channel.exec("Version FULL exec.library").output
+            except (AmigaError, AttributeError):
+                version_text = ""
+        # A daemon that already described itself is trusted. With no description,
+        # the probe reads the board register and exec's id string. A probe that
+        # is missing or does not succeed leaves the classic choice in place.
+        if not apollo_os(info, version_text) and not _reported(info):
+            version_text = _probe_output(channel) or version_text
+    return select_build(cpu, info, version_text)
+
+
+def _apollo_by_probe(link: Amigentd) -> bool:
+    """SETUP only returns a program's exit code. 0 means the probe said ApolloOS.
+
+    A missing probe is an unsuccessful probe: the caller keeps the classic binary.
+    """
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not probe.exists():
+        return False
+    link.put("T:amigent-apollo-probe", probe.read_bytes())
+    link.run("Protect T:amigent-apollo-probe +e")
+    return link.run("T:amigent-apollo-probe") == 0
+
+
 def amigentd_build(link: Amigentd) -> str:
-    """amigentd.000 for a stock 68000/68010, amigentd for 68020 and up."""
+    """amigentd.000 for a 68000, amigentd.apollo for ApolloOS, amigentd otherwise.
+
+    ApolloOS is selected only when the probe says so and the Apollo daemon is
+    in this package. A missing daemon fails before anything is replaced.
+    """
     code = link.run("CPU CHECK 68020")
-    if code not in (0, 5):
+    if code == 5:
+        return "amigentd.000"
+    if code != 0:
         raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
                          "Workbench disk and try again.")
-    return "amigentd.000" if code == 5 else "amigentd"
+    if _apollo_by_probe(link):
+        binary_path("amigentd.apollo")
+        return "amigentd.apollo"
+    return "amigentd"
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
@@ -65,8 +195,10 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         print("uploading amigactld")
         link.put("C:amigactld", binary)
     build = amigentd_build(link)
+    if monitor_file(build) != "amigent-monitor":
+        binary_path(monitor_file(build))  # missing Apollo monitor: change nothing
     print(f"uploading {build}")
-    link.put("C:amigentd.new", (AMIGA / "bin" / build).read_bytes())
+    link.put("C:amigentd.new", binary_path(build).read_bytes())
     run(link, f"MakeDir >NIL: {home}")
     print("uploading scripts")
     for name in SCRIPTS:
@@ -74,8 +206,9 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
     for name in WINDOWS:  # the little windows on the Amiga's side
-        if (AMIGA / "bin" / name).exists():
-            link.put(f"{home}/{name}", (AMIGA / "bin" / name).read_bytes())
+        source = window_source(name, build)
+        if source is not None:
+            link.put(f"{home}/{name}", source.read_bytes())
     print("setting the key")
     link.put("S:amigent.key", (key + "\n").encode())
     link.put(f"{home}/amigent.key", (key + "\n").encode())
@@ -118,8 +251,12 @@ WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-
 UPDATE_WAIT = 180.0
 
 
-def update_windows(channel, home: str | None) -> None:
-    """amigent-status and amigent-monitor into the Amigent folder, where they differ."""
+def update_windows(channel, home: str | None, build: str) -> None:
+    """amigent-status and amigent-monitor into the Amigent folder, where they differ.
+
+    ``build`` is the daemon ``build_for_channel`` already chose. The monitor
+    follows it, and the file on the Amiga is still named amigent-monitor.
+    """
     if not home:
         try:
             home = channel.read_file("ENVARC:amigent-home").decode("iso-8859-1").strip()
@@ -127,8 +264,8 @@ def update_windows(channel, home: str | None) -> None:
             home = ""
     home = home or "SYS:amigent"
     for name in WINDOWS:
-        local = AMIGA / "bin" / name
-        if not local.exists():
+        local = window_source(name, build)
+        if local is None:
             continue
         target = f"{home}/{name}"
         try:
@@ -151,16 +288,18 @@ def update(host: str, home: str | None) -> int:
     channel = AmigaChannel(host, timeout=30)
     try:
         channel.connect()
-        cpu = channel.exec("CPU CHECK 68020").rc
-        if cpu not in (0, 5):
-            print(f"C:CPU answered {cpu}, so the CPU is unknown. Copy C:CPU from the Workbench "
-                  "disk and try again.")
+        try:
+            build = build_for_channel(channel)
+            new = binary_path(build).read_bytes()
+            if monitor_file(build) != "amigent-monitor":
+                binary_path(monitor_file(build))
+        except SystemExit as e:
+            print(e)
+            channel.close()
             return 1
-        build = "amigentd.000" if cpu == 5 else "amigentd"
-        new = (AMIGA / "bin" / build).read_bytes()
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
-        update_windows(channel, home)
+        update_windows(channel, home, build)
         if channel.read_file("C:amigentd") == new:
             print(f"amigentd on {host} is already the one from Amigent {__version__}.")
             channel.close()

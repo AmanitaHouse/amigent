@@ -144,6 +144,7 @@ button.icon[aria-pressed="true"] { background: var(--control); border-color: var
 #stage.actual { overflow: auto; place-items: start; }
 
 #screen { display: block; outline: none; background: #000; touch-action: none; }
+#pip { position: absolute; z-index: 2; pointer-events: none; display: none; image-rendering: pixelated; }
 #screen.sharp { image-rendering: pixelated; }
 #screen:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
 
@@ -268,6 +269,7 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 }
 
 #st-version { margin-left: auto; }
+#st-graphics[hidden] { display: none; }
 
 /* transfers float over the screen */
 

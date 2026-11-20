@@ -65,9 +65,27 @@ extern struct Library *CyberGfxBase;
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 #else
-#include <proto/cybergraphics.h>
-#include <cybergraphx/cybergraphics.h>
+/* GCC 6.50 Stable ships no cybergraphics headers. The four calls below are
+ * the ones this file makes, implemented in gcc_support.c at the same offsets
+ * as the vbcc stubs. */
 #include <inline/macros.h>
+#include <utility/tagitem.h>
+ULONG GetCyberMapAttr(struct BitMap *bm, ULONG attr);
+void ReadPixelArray(APTR dest, ULONG destx, ULONG desty, ULONG destmod, struct RastPort *rp,
+                    ULONG srcx, ULONG srcy, ULONG sizex, ULONG sizey, ULONG format);
+APTR LockBitMapTagList(APTR bitmap, struct TagItem *tags);
+void UnLockBitMap(APTR handle);
+#define RECTFMT_RGB 0
+#define CYBRMATTR_BPPIX 0x80000002
+#define CYBRMATTR_ISCYBERGFX 0x80000008
+#endif
+
+#ifdef AMIGENT_APOLLO
+/* The 68000 probe and this daemon share the identification. AUDIO and PIP
+ * are not part of this build, so SYSINFO does not advertise them. */
+BOOL apollo_os_here(void);
+UWORD apollo_board(void);
+const char *apollo_board_name(UWORD board);
 #endif
 
 #define PROTOCOL_VERSION 6
@@ -103,6 +121,18 @@ extern struct Library *CyberGfxBase;
 
 #ifndef UNIQUE_ID
 #define UNIQUE_ID (-1)
+#endif
+
+/* GCC's bsdsocket inline takes socklen_t *, which is not LONG *. vbcc's
+ * prototype takes the length as this file already passes it. __saveds is
+ * vbcc's base-register reload; GCC ignores it unless -fbaserel, which this
+ * daemon does not use. */
+#ifndef __VBCC__
+#define AMIGENT_SOCKLEN(p) ((socklen_t *)(p))
+#define AMIGENT_SAVEDS
+#else
+#define AMIGENT_SOCKLEN(p) (p)
+#define AMIGENT_SAVEDS __saveds
 #endif
 
 enum {
@@ -1559,7 +1589,7 @@ static void refresh(void)
 }
 
 /* Reads ahead at priority -1, a few tiles at a time, whenever a frame asks for it. */
-static void __saveds reader_main(void)
+static void AMIGENT_SAVEDS reader_main(void)
 {
     struct Task *me = FindTask(NULL);
     BOOL more;
@@ -2649,7 +2679,7 @@ static struct Screen *open_screen(ULONG handle)
 
 /* ScreenToFront waits for Intuition, which holds it back while a menu is open,
  * for as long as that may be. So a helper process waits instead of us. */
-static void __saveds front_main(void)
+static void AMIGENT_SAVEDS front_main(void)
 {
     struct Screen *s;
 
@@ -2711,7 +2741,7 @@ static void helper_done(volatile BOOL *flag)
 
 /* A ScreenToFront of the screen in front changes nothing, and comes back at
  * once unless Intuition holds back new windows and screens. */
-static void __saveds held_main(void)
+static void AMIGENT_SAVEDS held_main(void)
 {
     struct Screen *s;
 
@@ -3369,7 +3399,7 @@ static void accept_pending(void)
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
 
-    fd = accept(listener, (struct sockaddr *)&addr, &len);
+    fd = accept(listener, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len));
     if (fd < 0)
         return;
     for (i = 0; i < PENDING && pend[i].fd >= 0; i++)
@@ -4210,9 +4240,28 @@ static BOOL c_sysinfo(struct link *l)
     t_version(&t, "graphics", GfxBase->LibNode.lib_Version, GfxBase->LibNode.lib_Revision);
     {
         UWORD f = SysBase->AttnFlags;
+#ifdef AMIGENT_APOLLO
+        t_pair(&t, "cpu", 68080);  /* this binary contains 68080 instructions */
+#else
         t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
                           f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
+#endif
         t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
+#ifdef AMIGENT_APOLLO
+        {
+            UWORD board = apollo_board();
+
+            t_str(&t, (const UBYTE *)"os=", FALSE);
+            t_str(&t, (const UBYTE *)(apollo_os_here() ? "ApolloOS" : "AmigaOS"), FALSE);
+            t_chr(&t, '\n');
+            t_str(&t, (const UBYTE *)"board=", FALSE);
+            t_hex(&t, board);
+            t_chr(&t, '\n');
+            t_str(&t, (const UBYTE *)"board_name=", FALSE);
+            t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
+            t_chr(&t, '\n');
+        }
+#endif
     }
     /* From protocol 5: how fast this Amiga packs, in KB/s, so the PC can tell
      * whether packing beats the line; and what amigentd records. */
@@ -4366,7 +4415,7 @@ static BPTR copy_path(void)
     return first;
 }
 
-static void __saveds runner_main(void)
+static void AMIGENT_SAVEDS runner_main(void)
 {
     struct run *r;
     BPTR in, out, old = 0;
@@ -7484,7 +7533,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     return c_fail(l, 1, "not on a command channel");
 }
 
-static void __saveds channel_main(void)
+static void AMIGENT_SAVEDS channel_main(void)
 {
     struct channel *c;
     struct link l;
@@ -7985,7 +8034,7 @@ static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
     SSL_shutdown(ssl);
 }
 
-static void __saveds pump_main(void)
+static void AMIGENT_SAVEDS pump_main(void)
 {
     struct pump *p;
     struct Library *SocketBase;
@@ -8093,7 +8142,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
     struct pump *p = NULL;
     struct Process *proc;
 
-    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, &len)) < 0)
+    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len))) < 0)
         return;
     Forbid();
     full = tls_pumps >= TLS_PUMPS;
@@ -8127,7 +8176,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
 }
 
 /* Opens AmiSSL; listens while TLS_FILE is there, and reloads it when it changes. */
-static void __saveds tls_main(void)
+static void AMIGENT_SAVEDS tls_main(void)
 {
     struct Library *SocketBase;
     SSL_CTX *ctx = NULL;
@@ -8746,21 +8795,21 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
         old = CurrentDir(arg->wa_Lock);
         if ((icon = GetDiskObject(arg->wa_Name))) {
             tt = (STRPTR *)icon->do_ToolTypes;
-            if ((v = FindToolType(tt, "PORT")) && StrToLong(v, &n) > 0)
+            if ((v = FindToolType((CONST_STRPTR *)tt, "PORT")) && StrToLong(v, &n) > 0)
                 *port = n;
-            if (FindToolType(tt, "SETUP"))
+            if (FindToolType((CONST_STRPTR *)tt, "SETUP"))
                 setup_mode = TRUE;
-            if (FindToolType(tt, "QUIET"))
+            if (FindToolType((CONST_STRPTR *)tt, "QUIET"))
                 quiet = TRUE;
-            if (FindToolType(tt, "TLSONLY"))
+            if (FindToolType((CONST_STRPTR *)tt, "TLSONLY"))
                 tls_only = TRUE;
-            if (FindToolType(tt, "NOTEXT"))
+            if (FindToolType((CONST_STRPTR *)tt, "NOTEXT"))
                 no_text = TRUE;
-            if (FindToolType(tt, "NODEBUG"))
+            if (FindToolType((CONST_STRPTR *)tt, "NODEBUG"))
                 no_debug = TRUE;
-            if (FindToolType(tt, "ALLOWPOKE"))
+            if (FindToolType((CONST_STRPTR *)tt, "ALLOWPOKE"))
                 allow_poke = TRUE;
-            if ((v = FindToolType(tt, "KEY")))
+            if ((v = FindToolType((CONST_STRPTR *)tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
         }

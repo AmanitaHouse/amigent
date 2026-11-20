@@ -29,6 +29,7 @@ APOLLO = {
     "amigentd.apollo": (129656, "e38e2c1541cf18cca76e0638723c06ce0754b6292a28fc76e9d77f49a63e4c5f"),
     "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
 }
+MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
     "amigentd": (108896, "563f19c2662a8c7e8df2f3b95aa01d224a4e8b8ba5e04178cd8492a3a6d3ecee"),
     "amigentd.000": (114768, "9b7df1aeb80a0d0e566c4128f2be840734906c223055f0efbe941f12549468f4"),
@@ -61,6 +62,8 @@ def test_the_packaged_apollo_executables_match_the_staged_build():
     assert b"arne.audio" in daemon and b"ApolloOS" in daemon and b"pip" not in daemon
     probe = _packaged("amigent-apollo-probe")
     assert b"ApolloOS" in probe and b"AmigaOS" in probe and b"arne.audio" not in probe
+    monitor = _packaged("amigent-monitor.apollo")
+    assert len(monitor) == MONITOR[0] and _sha(monitor) == MONITOR[1] and monitor.startswith(HUNK)
     for name, (size, digest) in CLASSIC.items():
         data = _packaged(name)
         assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)
@@ -99,7 +102,8 @@ def test_setup_copies_the_apollo_daemon_when_the_probe_says_so():
     link = _install(cpu=0, probe=0)
     assert link.files["C:amigentd.new"] == _packaged("amigentd.apollo")
     assert link.files["T:amigent-apollo-probe"] == _packaged("amigent-apollo-probe")
-    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
+    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor.apollo")
+    assert b"amigent-monitor.apollo" not in link.files["T:amigent-setup"]
     assert b"pip" not in link.files["T:amigent-setup"]
 
 
@@ -113,6 +117,7 @@ def test_setup_keeps_the_classic_daemon_when_the_probe_says_amigaos():
 def test_setup_on_a_68000_never_asks_the_probe():
     link = _install(cpu=5, probe=0)
     assert link.files["C:amigentd.new"] == _packaged("amigentd.000")
+    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
     assert "T:amigent-apollo-probe" not in link.files
 
 
@@ -129,6 +134,7 @@ def test_setup_falls_back_when_the_optional_files_are_absent(tmp_path, monkeypat
     (package / "bin" / "amigent-apollo-probe").write_bytes(b"probe")
     link = _install(cpu=0, probe=0)
     assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd").read_bytes()
+    assert link.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
     assert link.files["T:amigent-apollo-probe"] == b"probe"
 
 
@@ -143,6 +149,7 @@ class UpdateChannel:
         self.fail_probe = fail_probe
         self.files = {}
         self.commands = []
+        self.written = []
 
     def connect(self):
         pass
@@ -161,6 +168,7 @@ class UpdateChannel:
         return self.files[path]
 
     def write_file(self, path, data):
+        self.written.append(path)
         self.files[path] = data
 
     def exec(self, command):
@@ -193,6 +201,7 @@ def _update(monkeypatch, **kwargs):
 def test_update_on_vampire_amigaos_keeps_the_classic_daemon(monkeypatch):
     channel = _update(monkeypatch, info={"os": "AmigaOS", "exec_version": "47.4", "attn_flags": "0x400"})
     assert channel.files["C:amigentd"] == _packaged("amigentd")
+    assert channel.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
     assert "T:amigent-apollo-probe" not in channel.files
 
 
@@ -203,6 +212,38 @@ def test_update_falls_back_when_the_probe_is_unsuccessful(monkeypatch):
 
     failed = _update(monkeypatch, info={}, fail_probe=True)
     assert failed.files["C:amigentd"] == _packaged("amigentd")
+    assert failed.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
+
+
+def test_update_on_apolloos_copies_the_apollo_monitor(monkeypatch):
+    channel = _update(monkeypatch, info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
+    assert channel.files["C:amigentd"] == _packaged("amigentd.apollo")
+    assert channel.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor.apollo")
+    assert "T:amigent-apollo-probe" not in channel.files
+
+
+def test_apolloos_without_the_optional_monitor_keeps_the_classic_one(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    shutil.copytree(AMIGA, package)
+    (package / "bin" / "amigent-monitor.apollo").unlink()
+    monkeypatch.setattr(setup, "AMIGA", package)
+    link = _install(cpu=0, probe=0)
+    assert link.files["C:amigentd.new"] == (package / "bin" / "amigentd.apollo").read_bytes()
+    assert link.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
+    channel = _update(monkeypatch, info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
+    assert channel.files["C:amigentd"] == (package / "bin" / "amigentd.apollo").read_bytes()
+    assert channel.files["SYS:amigent/amigent-monitor"] == (package / "bin" / "amigent-monitor").read_bytes()
+
+
+def test_update_leaves_an_apollo_installation_that_already_matches(monkeypatch):
+    channel = UpdateChannel("192.0.2.1", info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
+    channel.files["C:amigentd"] = _packaged("amigentd.apollo")
+    channel.files["SYS:amigent/amigent-monitor"] = _packaged("amigent-monitor.apollo")
+    monkeypatch.setattr(setup.time, "sleep", lambda s: None)
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    assert setup.update("192.0.2.1", None) == 0
+    assert "SYS:amigent/amigent-monitor" not in channel.written
+    assert "C:amigentd.new" not in channel.files
 
 
 def _names_ending(names, filename):
@@ -244,7 +285,7 @@ def test_wheel_and_sdist_carry_the_apollo_executables(tmp_path):
             [member] = _names_ending(names, name)
             data = archive.read(member)
             assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)
-        for name in ("amigentd", "amigentd.000", "amigent-monitor"):
+        for name in ("amigentd", "amigentd.000", "amigent-monitor", "amigent-monitor.apollo"):
             [member] = _names_ending(names, name)
             assert archive.read(member) == _packaged(name)
         meta = archive.read(_names_ending(names, "METADATA")[0]).decode("utf-8")
@@ -259,7 +300,7 @@ def test_wheel_and_sdist_carry_the_apollo_executables(tmp_path):
             [member] = _names_ending(names, name)
             data = archive.extractfile(member).read()
             assert len(data) == size and _sha(data) == digest
-        for name in ("amigentd", "amigentd.000", "amigent-monitor"):
+        for name in ("amigentd", "amigentd.000", "amigent-monitor", "amigent-monitor.apollo"):
             [member] = _names_ending(names, name)
             assert archive.extractfile(member).read() == _packaged(name)
         folded = "\n".join(names)

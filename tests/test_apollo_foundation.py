@@ -197,9 +197,12 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_stays_68000():
     daemon = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
     names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
-    assert names == list(PROTOCOL_6)
+    assert names == list(PROTOCOL_6) + ["CMD_AUDIO"]
     assert "PROTOCOL_VERSION 6" in daemon
-    assert "CMD_AUDIO" not in daemon and "CMD_PIP" not in daemon
+    quiet = daemon.index("CMD_QUIET")
+    audio = daemon.index("CMD_AUDIO = 48", quiet)
+    assert "#ifdef AMIGENT_APOLLO" in daemon[quiet:audio]
+    assert "CMD_PIP" not in daemon
 
     detect = (ROOT / "amiga" / "apollo" / "apollo_detect.c").read_text(encoding="utf-8")
     probe = (ROOT / "amiga" / "apollo" / "apollo_probe.c").read_text(encoding="utf-8")
@@ -212,8 +215,8 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_stays_68000():
     assert "apollo.c" not in makefile and "ammx.s" not in makefile
 
 
-def test_the_apollo_daemon_reports_its_identity_and_not_audio():
-    """SYSINFO on the 68080 build names the OS and the board. AUDIO and PIP stay absent."""
+def test_the_apollo_daemon_reports_its_identity_and_audio_but_not_pip():
+    """SYSINFO on the 68080 build names the OS, the board, and audio=1. PIP stays absent."""
     daemon = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
     cpu = daemon.index('t_pair(&t, "cpu", 68080)')
     assert "#ifdef AMIGENT_APOLLO" in daemon[cpu - 80:cpu]
@@ -221,11 +224,12 @@ def test_the_apollo_daemon_reports_its_identity_and_not_audio():
     assert "#else" in daemon[cpu:ladder]
     assert "#endif" in daemon[ladder:ladder + 220]
     identity = daemon.index("apollo_board()", cpu)
-    block = daemon[identity:identity + 700]
+    block = daemon[identity:identity + 800]
     assert "apollo_os_here()" in block and '"os="' in block
     assert '"board="' in block and '"board_name="' in block
-    assert "audio" not in block and "pip" not in block
-    assert 't_pair(&t, "audio"' not in daemon and 't_pair(&t, "pip"' not in daemon
+    assert 't_pair(&t, "audio", 1)' in block
+    assert "pip" not in block
+    assert 't_pair(&t, "pip"' not in daemon
     assert "#include <inline/cybergraphics_protos.h>" in daemon
     assert "#include <proto/cybergraphics.h>" not in daemon
     support = (ROOT / "amiga" / "apollo" / "gcc_support.c").read_text(encoding="utf-8")
@@ -234,4 +238,4 @@ def test_the_apollo_daemon_reports_its_identity_and_not_audio():
     makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "amigentd.apollo" in makefile and "-m68080" in makefile and "-DAMIGENT_APOLLO" in makefile
     assert "gcc_support.o" in makefile and "div64.o" in makefile
-    assert "apollo.o" not in makefile and "apollo_mmio.o" in makefile
+    assert "apollo.o" not in makefile and "apollo_mmio.o" in makefile and "apollo_audio.o" in makefile

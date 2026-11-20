@@ -1982,6 +1982,29 @@ last_look = 0.0  # when the agent last looked at the screen; wait_change counts 
 
 
 @mcp.tool()
+def amiga_hrtmon() -> str:
+    """Start the HRTmon program under ApolloOS and use it through the screen and keyboard.
+
+    The ROM HRTMon is not used: its picture is not an Intuition screen, so the
+    remote desktop cannot see it.
+    """
+    from .hrtmon import plan
+    info = _with_ctl(ctl.sysinfo)
+    os_name = info.get("os", "")
+    version = ""
+    if os_name != "ApolloOS":
+        version = _with_ctl(lambda: ctl.exec("Version FULL exec.library")).output
+    on_path = False
+    if os_name == "ApolloOS" or "ApolloOS" in version:
+        if "hrtmon" not in info.get("tasks", "").lower():
+            on_path = _with_ctl(lambda: ctl.exec("Which HRTmon")).rc == 0
+    text, start = plan(os_name, version, info.get("tasks", ""), on_path)
+    if start:
+        _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
+    return text
+
+
+@mcp.tool()
 def amiga_viewer() -> str:
     """Open a live window of the Amiga screen on the user's desktop for manual control.
 

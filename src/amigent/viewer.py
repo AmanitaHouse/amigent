@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import Commands, pc_outdated
+from .channel import Commands, audio_uses_tls, pc_outdated
 from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -63,6 +63,11 @@ def pixels_message(regions) -> bytes:
         parts.append(struct.pack(">HHHH", x, y, w, h))
         parts.append(rgb)
     return b"".join(parts)
+
+
+def pcm_message(rate: int, pcm: bytes) -> bytes:
+    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
+    return struct.pack(">BI", 5, rate) + pcm
 
 
 _join = join_path
@@ -132,6 +137,7 @@ class Viewer:
         self.reason = ""  # why the Amiga does not answer, for the page and the terminal
         self.ever_joined = False
         self.amiga: dict = {}
+        self.hear = False  # the page asks; opening the window does not start the mix
         self.screen_list: list = []
         self._system: dict = {}
         self.alone_since = time.monotonic()
@@ -162,7 +168,8 @@ class Viewer:
                 out.write(json.dumps({"url": self.url, "host": self.host}))
         except OSError:
             pass
-        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
+        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats,
+                       self._media):
             threading.Thread(target=target, daemon=True).start()
         return self.url
 
@@ -191,6 +198,7 @@ class Viewer:
             self.clients.discard(ws)
             if not self.clients:
                 self.alone_since = time.monotonic()
+                self.hear = False
 
     def _watching(self) -> bool:
         with self.clients_lock:
@@ -235,6 +243,9 @@ class Viewer:
                 return  # malformed message from the page
             threading.Thread(target=self._pause, args=(seconds,), daemon=True).start()
             return
+        if op.get("t") == "audio":
+            self.hear = op.get("on") is True
+            return
         self.inputs.put(op)
         self.feed.ring()
 
@@ -244,6 +255,7 @@ class Viewer:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
             raise ValueError("not an address")
         machines.move(self.host, new)
+        self.hear = False
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
@@ -253,6 +265,8 @@ class Viewer:
 
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
+            if not online:
+                self.hear = False
             self.online = online
             self.reason = "" if online else reason
             self.event("online", online=online, reason=self.reason)
@@ -286,6 +300,78 @@ class Viewer:
                     pass  # the next round tries again
             seconds += 1
 
+    def _hearing(self) -> bool:
+        with self.clients_lock:
+            return bool(self.hear and self.clients)
+
+    def _audio_ready(self) -> bool:
+        """Whether SYSINFO offered AUDIO. A described machine without it drops the request."""
+        info = self.amiga or {}
+        if not info:
+            return False
+        if info.get("audio") == "1":
+            return True
+        if self.hear:
+            self.hear = False
+            self.event("audio", on=False)
+        return False
+
+    def _release_audio(self, link: Commands) -> None:
+        try:
+            if link.connected:
+                try:
+                    link.audio_stop()
+                    while link.audio_read() is not None:
+                        pass
+                except (AmigaError, OSError, AttributeError):
+                    pass
+        finally:
+            link.close()
+            self.event("audio", on=False)
+
+    def _play_audio(self, link: Commands) -> None:
+        if not link.connected:
+            link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
+        link.audio_start()
+        self.event("audio", on=True)
+        while self._hearing():
+            got = link.audio_read()
+            if got is None:
+                break
+            rate, pcm = got
+            if pcm and len(pcm) % 4:
+                raise AmigaError("audio samples are not stereo frames")
+            if pcm:
+                self.broadcast(pcm_message(rate or 48000, pcm))
+        if self._hearing():
+            return
+        self._release_audio(link)
+
+    def _media(self) -> None:
+        """ARNE audio on its own command channel, and only after the page asks.
+
+        AUDIO is opcode 48. The screen connection is not this socket. When the
+        daemon has closed the plain port, this socket is TLS. A failed TLS
+        handshake is not retried in the clear. PIP is not used.
+        """
+        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
+        while True:
+            if not self._hearing() or not self._audio_ready():
+                if link.connected:
+                    self._release_audio(link)
+                time.sleep(0.05)
+                continue
+            try:
+                self._play_audio(link)
+            except (AmigaError, AttributeError, OSError):
+                self._drop_audio(link)
+                time.sleep(0.05)
+
+    def _drop_audio(self, link: Commands) -> None:
+        link.close()
+        self.hear = False
+        self.event("audio", on=False)
+
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""
         if self.screen.protocol >= 2:
@@ -313,6 +399,7 @@ class Viewer:
                    for v in self._ctl(self.ctl.volumes)]
         number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
         return {**self._system, "tcp": info.get("bsdsocket", ""),
+                "audio": info.get("audio", ""),
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),

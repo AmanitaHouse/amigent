@@ -102,6 +102,7 @@
     ws.onopen = () => { socketOpen = true; showState(); };
     ws.onclose = () => {
       socketOpen = false;
+      stopHear(false);
       showState();
       setTimeout(connect, 1000);
     };
@@ -172,7 +173,15 @@
     }
     $("st-mem").textContent = t("status_free", { size: bytes(info.chip_free + info.fast_free) });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
+    showHear(info);
     showState();
+  }
+
+  function showHear(info) {
+    const button = $("hear");
+    const offered = !!(info && info.audio === "1");
+    button.hidden = !offered;
+    if (!offered && hearing) stopHear(true);
   }
 
   function showScreens(list) {
@@ -217,9 +226,14 @@
       case "online":
         amigaOnline = m.online;
         reason = m.reason || "";
+        if (!m.online) stopHear(false);
         showState();
         break;
+      case "audio":
+        if (!m.on) stopHear(false);
+        break;
       case "address":
+        stopHear(false);
         $("about-host").textContent = `${host} (${m.address})`;
         break;
       case "stats":
@@ -258,6 +272,9 @@
       drawing = drawing.then(() => drawTiles(buffer));
     } else if (kind === 3) {
       drawing = drawing.then(() => drawPixels(buffer));
+    } else if (kind === 5 && hearing && buffer.byteLength >= 5) {
+      const view = new DataView(buffer);
+      playPcm(view.getUint32(1), new Uint8Array(buffer, 5));
     } else if (kind === 2) {
       drawing = drawing
         .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
@@ -320,6 +337,110 @@
       }
       ctx.putImageData(image, x, y);
     }
+  }
+
+  let hearing = false;
+  let audioCtx = null, player = null, playerBoot = null;
+  const playerQueue = [];
+  const WORKLET = `
+class AmigentPcm extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = 48000 * 8;
+    this.L = new Float32Array(this.cap);
+    this.R = new Float32Array(this.cap);
+    this.w = 0;
+    this.r = 0;
+    this.rate = 48000;
+    this.started = false;
+    this.port.onmessage = (e) => {
+      const pcm = e.data.pcm;
+      const n = pcm.length >> 1;
+      if (e.data.rate) this.rate = e.data.rate;
+      if (this.w - this.r + n >= this.cap) this.r = this.w + n - this.cap + 1;
+      for (let i = 0; i < n; i++) {
+        const at = this.w % this.cap;
+        this.L[at] = pcm[i * 2];
+        this.R[at] = pcm[i * 2 + 1];
+        this.w++;
+      }
+    };
+  }
+  process(_inputs, outputs) {
+    const ch = outputs[0];
+    if (!ch || !ch[0]) return true;
+    const L = ch[0];
+    const R = ch[1] || ch[0];
+    if (!this.started) {
+      if (this.w - this.r < this.rate * 0.25) {
+        L.fill(0);
+        if (ch[1]) R.fill(0);
+        return true;
+      }
+      this.started = true;
+    }
+    const step = this.rate / sampleRate;
+    for (let i = 0; i < L.length; i++) {
+      if (this.w - this.r < 2) {
+        L[i] = 0;
+        if (ch[1]) R[i] = 0;
+        continue;
+      }
+      const i0 = Math.floor(this.r);
+      const f = this.r - i0;
+      const a = i0 % this.cap;
+      const b = (i0 + 1) % this.cap;
+      L[i] = this.L[a] * (1 - f) + this.L[b] * f;
+      if (ch[1]) R[i] = this.R[a] * (1 - f) + this.R[b] * f;
+      this.r += step;
+    }
+    return true;
+  }
+}
+registerProcessor("amigent-pcm", AmigentPcm);
+`;
+
+  function playPcm(rate, pcm) {
+    if (!hearing || !pcm.byteLength || pcm.byteLength % 4) return;
+    const samples = pcm.byteLength / 4;
+    const out = new Float32Array(samples * 2);
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    for (let i = 0; i < samples; i++) {
+      out[i * 2] = view.getInt16(i * 4, true) / 32768;
+      out[i * 2 + 1] = view.getInt16(i * 4 + 2, true) / 32768;
+    }
+    const item = { rate: rate || 48000, pcm: out };
+    if (player) {
+      player.port.postMessage(item, [out.buffer]);
+      return;
+    }
+    playerQueue.push(item);
+    if (!playerBoot) {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+      playerBoot = audioCtx.audioWorklet.addModule(url).then(() => {
+        URL.revokeObjectURL(url);
+        if (!hearing) return;
+        player = new AudioWorkletNode(audioCtx, "amigent-pcm", { outputChannelCount: [2] });
+        player.connect(audioCtx.destination);
+        for (const queued of playerQueue) player.port.postMessage(queued, [queued.pcm.buffer]);
+        playerQueue.length = 0;
+      }).catch(() => { URL.revokeObjectURL(url); playerBoot = null; });
+    }
+  }
+
+  function stopHear(tell) {
+    hearing = false;
+    const button = $("hear");
+    if (button) button.setAttribute("aria-pressed", "false");
+    playerQueue.length = 0;
+    playerBoot = null;
+    if (player) {
+      player.disconnect();
+      player = null;
+    }
+    if (tell) send({ t: "audio", on: false });
   }
 
   function setSize(w, h) {
@@ -660,6 +781,18 @@
   });
 
   // ---------------------------------------------------------------- view
+
+  $("hear").addEventListener("click", () => {
+    if (hearing) {
+      stopHear(true);
+      return;
+    }
+    hearing = true;
+    $("hear").setAttribute("aria-pressed", "true");
+    if (!audioCtx) audioCtx = new AudioContext();
+    audioCtx.resume().catch(() => {});
+    send({ t: "audio", on: true });
+  });
 
   $("fit").addEventListener("click", () => {
     fit = !fit;

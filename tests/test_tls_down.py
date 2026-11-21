@@ -22,20 +22,19 @@ def heard(amiga):
 
 
 @pytest.fixture
-def amiga(private_config):
+def amiga(private_config, monkeypatch):
     """A fake amigentd with a pinned certificate on the PC and nothing on its TLS port."""
-    for _ in range(20):  # one whose next port is free, so a connect there is refused
-        fake = FakeAmiga()
-        probe = socket.socket()
-        try:
-            probe.bind(("127.0.0.1", fake.port + 1))
-            break
-        except OSError:
-            fake.close()
-        finally:
-            probe.close()
-    else:
-        pytest.skip("no fake Amiga with a free port after its own")
+    fake = FakeAmiga()
+    dial = socket.create_connection
+
+    def refuse_tls(where, *args, **kwargs):
+        # The TLS port refuses, as on an Amiga with it shut. Left to the OS, a free port
+        # after the fake's is not refused the same way on every system.
+        if where == ("127.0.0.1", fake.port + 1):
+            raise ConnectionRefusedError(61, "Connection refused")
+        return dial(where, *args, **kwargs)
+
+    monkeypatch.setattr(tls.socket, "create_connection", refuse_tls)
     private_config.mkdir(parents=True, exist_ok=True)
     (private_config / "tls-127.0.0.1.pem").write_text("pinned")
     assert tls.wanted("127.0.0.1")

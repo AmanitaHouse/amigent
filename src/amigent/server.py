@@ -4729,10 +4729,15 @@ def _emu68_running() -> str | None:
     when amigentd is older, so the card's kernel file stands in for it."""
     from . import emu68
     try:
-        version = emu68.parse(_with_ctl(_session().ctl.emu68_info)).get("version", "")
+        info = emu68.parse(_with_ctl(_session().ctl.emu68_info))
     except (AmigaError, OSError, ValueError):
         return None
-    return version if re.match(r"\d+\.\d+", version) else None
+    # amigentd 1.5.0 reports the idstring, "Emu68 1.0.7 (08.12.2025) git:305f686"
+    m = re.match(r"\d+\.\d+[\w.+-]*", info.get("version", "")) or \
+        re.search(r"Emu68\s+(\d+\.\d+[\w.+-]*)", info.get("idstring", ""))
+    if not m:
+        return None
+    return m.group(1) if m.groups() else m.group(0)
 
 
 def _close_for_update() -> None:

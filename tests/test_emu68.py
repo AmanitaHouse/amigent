@@ -249,3 +249,22 @@ def test_amigentd_allows_exactly_the_fields_offered_here():
     # no control register is read before Emu68 was recognised
     text = daemon[daemon.index("static void emu68_text"):]
     assert text.index("emu68_present()") < text.index("emu68_read(r)")
+
+
+def test_the_running_version_comes_from_the_idstring(monkeypatch):
+    class Ctl:
+        answer = ["emu68=1", "idstring=Emu68 1.0.7 (08.12.2025) git:305f686"]
+
+        def emu68_info(self):
+            return self.answer
+
+    class Session:
+        ctl = Ctl()
+
+    monkeypatch.setattr(server, "_session", lambda: Session())
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
+    assert server._emu68_running() == "1.0.7"
+    Ctl.answer = ["emu68=1", "version=1.1.0-beta.1"]
+    assert server._emu68_running() == "1.1.0-beta.1"
+    Ctl.answer = ["emu68=0"]
+    assert server._emu68_running() is None

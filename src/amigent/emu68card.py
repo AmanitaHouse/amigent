@@ -1354,7 +1354,7 @@ def confirm_update(pc_root: Path, loaded_versions: dict[str, tuple[int, int]],
     expected = {k: tuple(v) for k, v in pending.get("modules", {}).items()}
     if running:
         good = version_tuple(running) == version_tuple(pending["version"])
-        seen = f"Emu68 {running} runs"
+        seen = "as Emu68 itself reports" if good else f"Emu68 {running} runs"
     else:
         common = [k for k in expected if k in loaded_versions]
         if not common:
@@ -1362,6 +1362,9 @@ def confirm_update(pc_root: Path, loaded_versions: dict[str, tuple[int, int]],
                     "cannot be told; check it by hand (e.g. EmuControl).")
         good = all(loaded_versions[k] == expected[k] for k in common)
         seen = ", ".join(f"{k} {loaded_versions[k][0]}.{loaded_versions[k][1]}" for k in common)
+        if not good:
+            seen += (" (drivers loaded from DEVS: or LIBS:, as AmiKit has them, stand in for the ones "
+                     "in Emu68's ROM; amigentd 1.5.0 tells the running version directly)")
     if good:
         path.rename(path.with_name(f"update-{pending['backup']}.json"))
         return (f"Confirmed: Emu68 {pending['version']} runs ({seen}). The backup {pending['backup']} "

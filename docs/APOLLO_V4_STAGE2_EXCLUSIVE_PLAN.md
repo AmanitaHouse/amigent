@@ -3,9 +3,12 @@
 **Prepared:** 2026-11-21  
 **Based on Stage 1:** `docs/APOLLO_V4_STAGE1_INVENTORY_RESULTS.md` (session `20261121T005910Z`)  
 **Docs branch tip at preparation parent:** `6c87c22`  
-**Status:** Preparation only — **no V4 contact authorised by this document**
+**Stage 2A results:** `docs/APOLLO_V4_STAGE2A_RESULTS.md` (session `20261121T010816Z`)  
+**Status:** Stage 2A executed under separate authorisation. **Stage 2B not authorised by this document.**
 
-Stage 1 established: V4-SA, ApolloOS, SYSINFO CPU 68080, AFF_FPGA bit present, Kickstart 51.51, **production protocol 5 + TLS**, `AMIGENT` public, production remained responsive, **no `self=` path / no disk hash**.
+Stage 1 established: V4-SA, ApolloOS, SYSINFO CPU 68080, AFF_FPGA bit present, Kickstart 51.51, **production protocol 5 + TLS**, `AMIGENT` public, production remained responsive, **no `self=` path**.
+
+Stage 2A established (disk-file): `C:amigentd` = `amigentd 1.3`, 113324 bytes, SHA-256 `b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3`; User-Startup `RUN >NIL: C:amigentd TLSONLY`; drawer `SYS:amigent/amigentd` matches; production still responsive after backup.
 
 ## Offline findings: startup and shutdown
 
@@ -63,13 +66,11 @@ Use existing TLS production connection (`V4SA`). Prefer AmiGent `Commands` / `ex
 
 **Caveat:** Disk bytes at `C:amigentd` are **not** proof the running image matches after an incomplete update; Stage 1 had no `self=`. After 2A.5, treat PC hash as **installed-file** identity.
 
-### Still requiring live V4 inspection
+### Still requiring live V4 / Stage 2B
 
-- Exact User-Startup amigent arguments (TLSONLY / KEY / PORT / QUIET).  
-- Actual `C:amigentd` size/SHA-256.  
-- Whether drawer copy matches `C:`.  
 - Whether QUIT is answered promptly (smoke only in 2B).  
-- Free space on staging volume for later candidate upload.
+- Free space on staging volume at the moment of candidate upload (Stage 1 had Programs: free ≈ 678 MB).  
+- Running-image ≡ disk-file proof (protocol 5 has no `self=`).
 
 ---
 

@@ -178,7 +178,9 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 1 (done):** see `docs/APOLLO_V4_STAGE1_INVENTORY_RESULTS.md`.
 
-**Stage 2A / 2B / 3:** see **`docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`**. Default for protocol-6 candidates is an **exclusive** QUIT → non-`C:` candidate → restore `C:amigentd` session. Second-PORT twins remain caveated (hooks / AUDIO / monitor) and are not the Stage 2B baseline.
+**Stage 2A (done):** see `docs/APOLLO_V4_STAGE2A_RESULTS.md` — production `C:amigentd` backed up on PC; startup `RUN >NIL: C:amigentd TLSONLY`.
+
+**Stage 2B / 3:** see **`docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`**. Default for protocol-6 candidates is an **exclusive** QUIT → non-`C:` candidate → restore `C:amigentd` session. Second-PORT twins remain caveated (hooks / AUDIO / monitor) and are not the Stage 2B baseline. **Stage 2B not authorised by Stage 2A completion.**
 
 **Exclusive / separate authorisation:** Stage 2B interruption; Stage 3 AUDIO / monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 

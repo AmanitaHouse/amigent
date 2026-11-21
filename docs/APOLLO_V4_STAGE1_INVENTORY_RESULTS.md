@@ -78,5 +78,5 @@ Public ports list includes `AMIGENT`. Task list includes `amigentd`, `amigentd r
 
 ## Next step
 
-Stage 2 preparation: **`docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`**.  
-Await **Stage 2A** authorisation before another V4 connection.
+Stage 2A completed: **`docs/APOLLO_V4_STAGE2A_RESULTS.md`**.  
+Await **Stage 2B** authorisation before any exclusive candidate session.

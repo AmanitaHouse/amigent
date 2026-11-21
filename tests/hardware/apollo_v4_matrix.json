@@ -76,8 +76,15 @@
   },
   "stage2": {
     "plan_doc": "docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md",
-    "2A": "read-only C:amigentd + User-Startup identification; V4-to-PC backup",
-    "2B": "exclusive QUIT; candidate from non-C path; restore C:amigentd",
+    "2A": "complete — see docs/APOLLO_V4_STAGE2A_RESULTS.md",
+    "2A_session": "20261121T010816Z",
+    "2A_production_path": "C:amigentd",
+    "2A_production_version": "amigentd 1.3",
+    "2A_production_size": 113324,
+    "2A_production_sha256": "b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3",
+    "2A_startup_redacted": "RUN >NIL: C:amigentd TLSONLY",
+    "2A_evidence": "amigent-evidence/stage2a-production-backup/20261121T010816Z",
+    "2B": "exclusive QUIT; candidate from non-C path; restore C:amigentd — NOT RUN",
     "stop_arexx": "ADDRESS AMIGENT QUIT",
     "avoid": "amigent-setup --update / Amigent-Update for candidate loads"
   },

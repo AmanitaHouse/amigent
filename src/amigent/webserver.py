@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from .amigactl import AmigaError
 
 WEB = Path(__file__).with_name("web")
-STATIC = {"machines.js": "text/javascript", "machines.css": "text/css", "viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
+STATIC = {"ui.js": "text/javascript", "machines.js": "text/javascript", "machines.css": "text/css", "viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
           "icon.png": "image/png", "amigent.ico": "image/x-icon"}
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_UPLOAD = 512 * 2**20

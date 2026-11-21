@@ -2,98 +2,118 @@
 (() => {
   "use strict";
 
+  const UI = window.amigentUI;
+  const { store, t, MAC } = UI;
   const $ = (id) => document.getElementById(id);
   const token = new URLSearchParams(location.search).get("t") || "";
   const canvas = $("screen");
   const ctx = canvas.getContext("2d", { alpha: false });
   const stage = $("stage");
-  // On a Mac, Cmd pastes and Option types characters such as @ and € on its own.
-  const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
+  const toast = UI.toast;
 
   // ---------------------------------------------------------------- text
 
-  const store = {
-    get(key, fallback) { try { return localStorage.getItem("amigent." + key) ?? fallback; } catch { return fallback; } },
-    set(key, value) { try { localStorage.setItem("amigent." + key, value); } catch { /* private window */ } },
-  };
-
-  // Each language is web/locales/<code>.json; English is the default and fills gaps.
-  const LANGUAGES = {
-    en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
-    fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
-  };
-
-  function pickLanguage() {
-    const chosen = store.get("lang", "auto");
-    if (LANGUAGES[chosen]) return chosen;
-    for (const tag of navigator.languages?.length ? navigator.languages : [navigator.language || "en"]) {
-      const code = tag.toLowerCase().split("-")[0];
-      if (LANGUAGES[code]) return code;
-    }
-    return "en";
-  }
-
-  const language = pickLanguage();
-  let EN = {};
-  let TEXT = {};
-
-  async function loadLanguage() {
-    const load = (code) => fetch(`locales/${code}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-    EN = await load("en");
-    TEXT = language === "en" ? EN : await load(language);
-  }
-
-  function t(key, values = {}) {
-    let text = TEXT[key] ?? EN[key] ?? key;
-    for (const [name, value] of Object.entries(values)) text = text.replaceAll(`{${name}}`, value);
-    return text;
-  }
-
   function applyLanguage() {
-    document.documentElement.lang = language;
-    if (MAC) for (const el of document.querySelectorAll('[data-i18n="tip_paste"], [data-i18n="tip_keys"]')) el.dataset.i18n += "_mac";
-    for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
-    for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
-    for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
-    for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
-    for (const el of document.querySelectorAll("[data-i18n-label]")) {
-      el.title = t(el.dataset.i18nLabel);
-      el.setAttribute("aria-label", el.title);
-    }
+    UI.translate();
     for (const el of document.querySelectorAll("[data-mod]")) {
-      const name = el.dataset.i18nLabel ? t(el.dataset.i18nLabel) : el.textContent;
+      const name = t(el.dataset.name);
+      el.setAttribute("aria-label", name);
       el.title = `${name}. ${t("mod_tip")}`;
     }
+    // "Right Amiga+O on the Amiga": what a panel button presses
     for (const el of document.querySelectorAll("[data-combo]")) {
-      el.title = el.dataset.combo.replace("lamiga", t("lamiga")).replace("ramiga", t("ramiga"))
-        .replace(/\+(.)$/, (_, k) => "+" + k.toUpperCase());
+      const keys = el.dataset.combo.split("+").map((part) => (
+        { lamiga: t("lamiga"), ramiga: t("ramiga"), ctrl: t("key_ctrl") }[part] ?? part.toUpperCase()));
+      el.title = t("combo_tip", { key: keys.join("+") });
+    }
+    for (const el of document.querySelectorAll("kbd[data-ctrl]")) el.textContent = `${t("key_ctrl")}-${el.dataset.ctrl}`;
+    for (const el of document.querySelectorAll('[data-combo^="ramiga+"] kbd')) {
+      el.insertAdjacentHTML("afterbegin", '<svg class="a" aria-hidden="true"><use href="#a-outline"/></svg>');
     }
     const select = $("language");
-    select.innerHTML = "";
-    select.append(new Option(t("language_auto"), "auto"));
-    for (const [code, name] of Object.entries(LANGUAGES)) select.append(new Option(name, code));
+    select.replaceChildren(new Option(t("language_auto"), "auto"));
+    for (const [code, name] of Object.entries(UI.LANGUAGES)) select.append(new Option(name, code));
     select.value = store.get("lang", "auto");
+    const menu = $("lang-menu");
+    menu.replaceChildren();
+    for (const [code, name] of [["auto", t("language_auto")], ...Object.entries(UI.LANGUAGES)]) {
+      const item = document.createElement("button");
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(select.value === code));
+      item.textContent = name;
+      if (code !== "auto") item.lang = code;
+      item.addEventListener("click", () => setLanguage(code));
+      menu.append(item);
+    }
+    $("m-lang-now").textContent = select.value === "auto" ? t("language_auto") : UI.LANGUAGES[select.value];
+    paintTheme();
   }
 
-  // A newer Amigent: shown once per page, until the user answers.
-  let updateShown = "";
+  function setLanguage(code) {
+    store.set("lang", code);
+    location.reload();
+  }
+
+  function paintTheme() {
+    const now = UI.theme();
+    $("theme").value = now;
+    for (const item of document.querySelectorAll("[data-theme-value]")) {
+      item.setAttribute("aria-checked", String(item.dataset.themeValue === now));
+    }
+    $("m-theme-now").textContent = t(`theme_${now}`);
+  }
+
+  function setTheme(value) {
+    UI.setTheme(value);
+    paintTheme();
+  }
+
+  // ---------------------------------------------------------------- update
+
+  // A newer Amigent: a banner until answered; Later keeps it in the More menu and in About.
+  let offer = null;
+  let bannerShown = "";
+  let version = "";
+
   function showUpdate(info) {
-    if (!info || !info.version || updateShown === info.version) return;
-    updateShown = info.version;
-    $("update-title").textContent = t("update_available", { version: info.version, current: info.current });
+    if (!info || !info.version) return;
+    offer = info;
+    const title = t("update_available", { version: info.version, current: info.current });
+    $("update-title").textContent = title;
     $("update-page").href = info.page;
-    const list = $("update-notes");
+    $("about-update-text").textContent = title;
+    $("about-update-page").href = info.page;
+    const list = $("about-update-notes");
     list.replaceChildren();
     for (const line of (info.notes || "").split("\n").filter(Boolean).slice(0, 5)) {
       const item = document.createElement("li");
       item.textContent = line.replace(/^- /, "");
       list.append(item);
     }
-    $("update").hidden = false;
+    if (bannerShown !== info.version) {
+      bannerShown = info.version;
+      $("update").hidden = false;
+    }
+    paintUpdate();
+  }
+
+  function paintUpdate() {
+    const on = !!offer;
+    $("m-update").hidden = $("m-update-sep").hidden = !on;
+    $("more-dot").hidden = !on;
+    $("about-update").hidden = !on;
+    $("about-update-notes").hidden = !on;
+    if (on) $("m-update-text").textContent = t("menu_update", { version: offer.version });
+    $("more").setAttribute("aria-label", t(on ? "more_update" : "more"));
+    $("more").title = $("more").getAttribute("aria-label");
+    $("st-version").textContent = version ? `Amigent ${version}${on ? " · " + t("update_ready") : ""}` : "";
+    $("st-version").classList.toggle("ready", on);
   }
 
   async function answerUpdate(action) {
     $("update").hidden = true;
+    if (action === "skip") offer = null;
+    paintUpdate();
     const reply = await fetch(api("/api/update"), { method: "POST", body: action }).catch(() => null);
     if (!reply || !reply.ok) {
       const said = reply ? (await reply.json().catch(() => ({}))).error : "";
@@ -105,14 +125,10 @@
   for (const action of ["now", "later", "skip"]) {
     $(`update-${action}`).addEventListener("click", () => answerUpdate(action));
   }
-
-  function toast(text, bad = false) {
-    const el = document.createElement("div");
-    el.className = "toast" + (bad ? " bad" : "");
-    el.textContent = text;
-    $("toasts").append(el);
-    setTimeout(() => el.remove(), bad ? 7000 : 3500);
-  }
+  $("about-update-now").addEventListener("click", () => {
+    $("about-dialog").close();
+    answerUpdate("now");
+  });
 
   // ---------------------------------------------------------------- link
 
@@ -122,6 +138,8 @@
   let host = "";
   let address = "";
   let reason = "";  // why the Amiga does not answer, as the PC side says it
+  let amiga = {};
+  let stats = {};
 
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
@@ -142,8 +160,11 @@
     };
   }
 
+  function where() {
+    return address && address !== host ? `${host} (${address})` : host;
+  }
+
   function showState() {
-    const pill = $("state");
     const overlay = $("overlay");
     let message = "";
     if (!socketOpen) message = t("disconnected");
@@ -153,25 +174,41 @@
     $("overlay-text").textContent = message;
     // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
     $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? reason
-      : amigaOnline === null && address ? (address !== host ? `${host} (${address})` : host) : "";
-    $("find").hidden = !(socketOpen && amigaOnline === false);
-    pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
-    $("state-text").textContent = socketOpen && amigaOnline ? [host, amiga.os, amiga.cpu].filter(Boolean).join(" · ") : t("state_offline");
+      : amigaOnline === null && address ? where() : "";
+    $("offline-actions").hidden = !(socketOpen && amigaOnline === false);
+    const up = socketOpen && amigaOnline;
+    const waiting = socketOpen && amigaOnline === null;
+    $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
+    $("machine-name").textContent = host || "Amiga";
+    const state = up ? t("machines_online") : waiting ? t("machines_checking") : t("state_offline");
+    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu].filter(Boolean).join(" · ") || state : state;
+    $("machine").setAttribute("aria-label", t("machine_switch", { name: host || "Amiga", state }));
+    $("machine").title = up ? [where(), systemLine(amiga), cpuLine(amiga)].filter(Boolean).join("\n") : "";
+    // the machine menu shows this window's own view of its Amiga, which is fresher than the list's
+    window.amigentCurrent = { online: socketOpen ? amigaOnline : false, os: amiga.os || "" };
+    document.dispatchEvent(new Event("amigent-current"));
   }
-
-  let amiga = {};
 
   function showPaused(seconds) {
     $("paused").hidden = !seconds;
-    if (!seconds) return;
     const m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, "0");
-    $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
+    if (seconds) $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
+    $("about-picture").textContent = seconds ? t("picture_paused", { time: `${m}:${s}` }) : t("picture_live");
   }
 
   function bytes(n) {
     if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
     if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
     return `${Math.round(n / 1024)} KB`;
+  }
+
+  function systemLine(info) {
+    return [info.os, info.kickstart && t("kickstart_n", { version: info.kickstart }),
+      info.workbench && t("workbench_n", { version: info.workbench })].filter(Boolean).join(", ");
+  }
+
+  function cpuLine(info) {
+    return [info.cpu, info.fpu, info.ppc].filter(Boolean).join(" + ");
   }
 
   let toldOutdated = false;
@@ -182,16 +219,13 @@
       toldOutdated = true;
       toast(t("pc_outdated"), true);
     }
-    const system = [info.os, info.kickstart && `Kickstart ${info.kickstart}`, info.workbench && `Workbench ${info.workbench}`]
-      .filter(Boolean).join(", ");
-    const cpu = [info.cpu, info.fpu, info.ppc].filter(Boolean).join(" + ");
     const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
-    $("about-system").textContent = system || "–";
-    $("about-cpu").textContent = cpu || "–";
+    $("about-system").textContent = systemLine(info) || "–";
+    $("about-cpu").textContent = cpuLine(info) || "–";
     $("about-memory").textContent = memory;
     $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
     const list = $("about-volumes");
-    list.innerHTML = "";
+    list.replaceChildren();
     for (const v of info.volumes || []) {
       const row = document.createElement("div");
       row.className = "vol";
@@ -201,21 +235,50 @@
       row.append(free);
       list.append(row);
     }
-    $("st-mem").textContent = t("status_free", { size: bytes(info.chip_free + info.fast_free) });
-    $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
+    if (!list.children.length) list.textContent = "–";
+    $("st-mem").textContent = bytes(info.chip_free + info.fast_free);
+    $("st-free").hidden = false;
+    showLink();
     showState();
   }
 
+  // the Connection tab: what the PC knows about the line to this Amiga
+  function showLink() {
+    const link = amiga.link || {};
+    $("about-address").textContent = where() || "–";
+    $("about-port").textContent = link.port || "–";
+    $("about-tls").textContent = link.tls === undefined ? "–" : t(link.tls ? "link_tls_on" : "link_tls_off");
+    $("about-protocol").textContent = link.protocol || "–";
+    const warn = amiga.pc_outdated ? t("pc_outdated") : link.amiga_outdated ? t("amiga_outdated") : "";
+    $("about-warn").textContent = warn;
+    $("about-warn").hidden = !warn;
+    $("about-versions").textContent = version
+      ? amiga.amigentd ? t("version_line", { pc: version, amiga: amiga.amigentd }) : t("version_pc", { pc: version })
+      : "–";
+  }
+
+  // The screen picker: Intuition's screens, front one first, plus the two Amiga screen keys.
+  let screenMenu = null;
+
   function showScreens(list) {
-    const select = $("screen-select");
-    select.hidden = list.length < 2;
-    select.innerHTML = "";
+    const pick = $("screen-pick");
+    pick.hidden = list.length < 2;
+    const box = $("screen-list");
+    box.replaceChildren();
     for (const s of list) {
-      const option = new Option(`${s.title || t("screen_untitled")} · ${s.w}×${s.h}`, String(s.handle));
-      option.selected = s.front;
-      select.append(option);
+      const item = document.createElement("button");
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(!!s.front));
+      item.textContent = `${s.title || t("screen_untitled")} · ${s.w}×${s.h}`;
+      item.addEventListener("click", () => {
+        send({ t: "screen", handle: s.handle });
+        canvas.focus();
+      });
+      box.append(item);
+      if (s.front) $("screen-name").textContent = item.textContent;
     }
-    select.title = t("screen_select");
+    pick.setAttribute("aria-label", `${t("screen_select")}: ${$("screen-name").textContent}`);
+    screenMenu?.refresh();
   }
 
   function onEvent(m) {
@@ -224,18 +287,20 @@
         host = m.host;
         document.title = `Amigent · ${host}`;
         if (m.version) {
-          $("st-version").textContent = `Amigent ${m.version}`;
-          $("about-version").textContent = t("version", { version: m.version });
+          version = m.version;
+          $("about-version").textContent = m.version;
         }
-        $("about-host").textContent = m.address && m.address !== host ? `${host} (${m.address})` : host;
         address = m.address || host;
+        $("about-host").textContent = where();
         reason = m.reason || "";
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
         if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
         if (m.update) showUpdate(m.update);
+        paintUpdate();
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
+        showLink();
         showState();
         break;
       case "size":
@@ -256,13 +321,18 @@
         showState();
         break;
       case "address":
-        $("about-host").textContent = `${host} (${m.address})`;
+        address = m.address;
+        $("about-host").textContent = where();
+        showLink();
         break;
       case "stats":
+        stats = m;
         $("st-size").textContent = `${m.w}×${m.h}`;
         $("about-screen").textContent = `${m.w} × ${m.h}`;
         $("st-rate").textContent = `${m.kbps.toFixed(1)} KB/s`;
         $("st-rtt").textContent = `${m.rtt.toFixed(0)} ms`;
+        $("about-speed").textContent = $("st-rate").textContent;
+        $("about-ping").textContent = $("st-rtt").textContent;
         showPaused(m.paused || 0);
         break;
       case "upload":
@@ -453,34 +523,70 @@
     canvas.focus();
   });
 
-  $("screen-select").addEventListener("change", () => {
-    send({ t: "screen", handle: Number($("screen-select").value) });
-    canvas.focus();
-  });
-
   // Games read mouse movement, not the pointer position: capture the mouse and send deltas.
   let relative = false;
   let relX = 0, relY = 0, relFrame = 0;
+  // Game mode = captured mouse + direct keys; letting the mouse go (Esc) ends it.
+  let gameMode = false;
+  let directBefore = false;
 
   for (const button of document.querySelectorAll("[data-pause]")) {
-    button.addEventListener("click", () => send({ t: "pause", seconds: Number(button.dataset.pause) }));
+    button.addEventListener("click", () => {
+      send({ t: "pause", seconds: Number(button.dataset.pause) });
+      canvas.focus();
+    });
   }
   $("resume").addEventListener("click", () => send({ t: "pause", seconds: 0 }));
 
-  $("rel-mouse").addEventListener("click", () => {
-    if (document.pointerLockElement === canvas) document.exitPointerLock();
-    else canvas.requestPointerLock();
-  });
+  function capture(on) {
+    if (on && document.pointerLockElement !== canvas) {
+      const asked = canvas.requestPointerLock();
+      if (asked && asked.catch) asked.catch(() => {});
+    } else if (!on && document.pointerLockElement === canvas) {
+      document.exitPointerLock();
+    }
+  }
+
+  function setGame(on) {
+    if (on === gameMode) return;
+    gameMode = on;
+    if (on) {
+      directBefore = direct;
+      setDirect(true, false);
+      capture(true);
+    } else {
+      setDirect(directBefore, false);
+      capture(false);
+    }
+    paintGame();
+  }
+
+  function paintGame() {
+    $("game-mode").setAttribute("aria-checked", String(gameMode));
+    $("rel-mouse").setAttribute("aria-checked", String(relative));
+    $("kb-direct").setAttribute("aria-checked", String(direct));
+    const pill = gameMode || relative;
+    $("game-pill").hidden = !pill;
+    $("game-pill-text").textContent = t(gameMode ? "game_pill" : "mouse_pill");
+    stage.classList.toggle("game", gameMode);
+  }
+
+  $("game-mode").addEventListener("click", () => setGame(!gameMode));
+  $("rel-mouse").addEventListener("click", () => capture(!relative));
 
   document.addEventListener("pointerlockchange", () => {
     relative = document.pointerLockElement === canvas;
-    $("rel-mouse").setAttribute("aria-pressed", String(relative));
-    if (relative) {
-      canvas.focus();
-      toast(t("rel_mouse_on"));
-    } else {
+    if (relative) canvas.focus();
+    else {
       send({ t: "buttons", mask: buttons() });
+      if (gameMode) setGame(false);
     }
+    paintGame();
+  });
+
+  document.addEventListener("pointerlockerror", () => {
+    if (gameMode) setGame(false);
+    toast(t("not_supported"), true);
   });
 
   canvas.addEventListener("mousemove", (event) => {
@@ -658,17 +764,19 @@
   canvas.addEventListener("blur", releaseAll);
   window.addEventListener("blur", releaseAll);
 
-  function setDirect(on) {
+
+  function setDirect(on, remember = true) {
     direct = on;
-    $("kb-text").setAttribute("aria-checked", String(!on));
-    $("kb-direct").setAttribute("aria-checked", String(on));
-    store.set("direct", on ? "1" : "0");
+    if (remember) store.set("direct", on ? "1" : "0");
     releaseAll();
+    paintGame();
     canvas.focus();
   }
 
-  $("kb-text").addEventListener("click", () => setDirect(false));
-  $("kb-direct").addEventListener("click", () => setDirect(true));
+  $("kb-direct").addEventListener("click", () => setDirect(!direct));
+
+  // Program shortcuts: a fixed chord. Panel keys: with the modifiers picked for the next key.
+  const MOD_NAMES = [[Q.lshift, "shift"], [Q.ctrl, "ctrl"], [Q.lalt, "alt"], [Q.lamiga, "lamiga"], [Q.ramiga, "ramiga"]];
 
   for (const el of document.querySelectorAll("[data-combo]")) {
     el.addEventListener("click", () => {
@@ -676,11 +784,21 @@
       canvas.focus();
     });
   }
+  for (const el of document.querySelectorAll("[data-key]")) {
+    el.addEventListener("click", () => {
+      const q = useSticky();
+      const mods = MOD_NAMES.filter(([bit]) => q & bit).map(([, name]) => name);
+      send({ t: "combo", k: [...mods, el.dataset.key].join("+") });
+      canvas.focus();
+    });
+  }
 
-  $("type").addEventListener("click", () => {
+  function openType() {
     $("type-dialog").showModal();
     $("type-text").focus();
-  });
+  }
+  $("type").addEventListener("click", openType);
+  $("m-type").addEventListener("click", openType);
 
   $("type-text").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) $("type-dialog").close("type");
@@ -697,12 +815,16 @@
 
   // ---------------------------------------------------------------- view
 
-  $("fit").addEventListener("click", () => {
+  function toggleFit() {
     fit = !fit;
     store.set("fit", fit ? "1" : "0");
     layout();
     canvas.focus();
-  });
+  }
+  $("fit").addEventListener("click", toggleFit);
+  $("m-fit").addEventListener("click", toggleFit);
+  new MutationObserver(() => $("m-fit").setAttribute("aria-checked", $("fit").getAttribute("aria-pressed")))
+    .observe($("fit"), { attributes: true, attributeFilter: ["aria-pressed"] });
 
   $("fullscreen").addEventListener("click", () => {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -716,7 +838,7 @@
     else navigator.keyboard.unlock();
   });
 
-  $("shot").addEventListener("click", () => {
+  function screenshot() {
     canvas.toBlob((blob) => {
       const a = document.createElement("a");
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
@@ -725,7 +847,9 @@
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
-  });
+  }
+  $("shot").addEventListener("click", screenshot);
+  $("m-shot").addEventListener("click", screenshot);
 
   function setPanel(on) {
     document.body.classList.toggle("no-panel", !on);
@@ -736,16 +860,42 @@
 
   $("panel-toggle").addEventListener("click", () => setPanel(document.body.classList.contains("no-panel")));
 
-  $("about").addEventListener("click", () => $("about-dialog").showModal());
-  $("language").addEventListener("change", () => {
-    store.set("lang", $("language").value);
-    location.reload();
-  });
+  UI.tabs($("panel-tabs"), { remember: "tab", onChange: () => requestAnimationFrame(layout) });
+
+  // ---------------------------------------------------------------- menus and About
+
+  const aboutTabs = UI.tabs($("about-tabs"), { remember: "about-tab" });
+
+  function openAbout(tab) {
+    if (tab) aboutTabs.select(tab);
+    showLink();
+    if (!$("about-dialog").open) $("about-dialog").showModal();
+  }
+
+  screenMenu = UI.menu($("screen-pick"), $("screen-menu"), { align: "start" });
+  UI.menu($("more"), $("more-menu"), { align: "end" });
+
+  $("m-update").addEventListener("click", () => openAbout("ab-tab-amigent"));
+  $("m-keys").addEventListener("click", () => openAbout("ab-tab-keys"));
+  $("m-about").addEventListener("click", () => openAbout("ab-tab-amigent"));
+  $("status-link").addEventListener("click", () => openAbout("ab-tab-link"));
+  $("st-version").addEventListener("click", () => openAbout("ab-tab-amigent"));
+  $("about-close").addEventListener("click", () => $("about-dialog").close());
   $("about-dialog").addEventListener("close", () => canvas.focus());
+  $("language").addEventListener("change", () => setLanguage($("language").value));
+  $("theme").addEventListener("change", () => setTheme($("theme").value));
+  for (const item of document.querySelectorAll("[data-theme-value]")) {
+    item.addEventListener("click", () => setTheme(item.dataset.themeValue));
+  }
+
+  // the offline overlay: somewhere else to go
+  $("try-other").addEventListener("click", () => window.amigentMachines?.openMenu());
+  $("try-address").addEventListener("click", () => window.amigentMachines?.open({ connect: true }));
+  $("try-manage").addEventListener("click", () => window.amigentMachines?.open());
 
   // ---------------------------------------------------------------- restart
 
-  $("restart").addEventListener("click", () => $("restart-dialog").showModal());
+  $("m-restart").addEventListener("click", () => $("restart-dialog").showModal());
   $("restart-dialog").addEventListener("close", () => {
     if ($("restart-dialog").returnValue === "ok") send({ t: "restart" });
     canvas.focus();
@@ -778,17 +928,25 @@
     return folder.endsWith(":") || folder.endsWith("/") ? folder + name : `${folder}/${name}`;
   }
 
+  function note(text) {
+    const li = document.createElement("li");
+    li.className = "note";
+    li.textContent = text;
+    return li;
+  }
+
   async function browse(path) {
     folderPath = path;
     $("folder").value = path;
+    pickFile(null);
     const list = $("folders");
-    list.innerHTML = `<li class="note">${t("loading")}</li>`;
+    list.replaceChildren(note(t("loading")));
     try {
       const reply = await fetch(api("/api/folders", { path }));
       const data = await reply.json();
       if (!reply.ok) throw new Error(data.error);
       const chips = $("volumes");
-      chips.innerHTML = "";
+      chips.replaceChildren();
       for (const volume of ["RAM:", ...data.volumes.filter((v) => v !== "RAM Disk:")]) {
         const chip = document.createElement("button");
         chip.type = "button";
@@ -797,16 +955,14 @@
         chip.addEventListener("click", () => browse(volume));
         chips.append(chip);
       }
-      list.innerHTML = "";
+      list.replaceChildren();
       const parent = parentOf(path);
       if (parent) list.append(folderItem("..", parent, true));
       for (const name of data.folders) list.append(folderItem(name, joinPath(path, name)));
       if (getting) for (const file of data.files) list.append(fileItem(file, joinPath(path, file.name)));
-      if (!data.folders.length && !(getting && data.files.length)) {
-        list.insertAdjacentHTML("beforeend", `<li class="note">${t(getting ? "no_files" : "no_folders")}</li>`);
-      }
+      if (!data.folders.length && !(getting && data.files.length)) list.append(note(t(getting ? "no_files" : "no_folders")));
     } catch {
-      list.innerHTML = `<li class="note">${t("folder_error")}</li>`;
+      list.replaceChildren(note(t("folder_error")));
       const parent = parentOf(path);
       if (parent) list.prepend(folderItem("..", parent, true));
     }
@@ -814,51 +970,60 @@
 
   function folderItem(name, path, up = false) {
     const li = document.createElement("li");
-    li.textContent = name;
-    li.tabIndex = 0;
-    if (up) li.className = "up";
-    li.addEventListener("click", () => browse(path));
-    li.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        browse(path);
-      }
-    });
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = up ? "row up" : "row";
+    button.textContent = name;
+    button.addEventListener("click", () => browse(path));
+    li.append(button);
     return li;
   }
 
-  // A file in the folder list while getting: a click downloads it to the PC.
+  // A file in the folder list while getting: select it, then Get (or double-click).
+  let picked = null;
+
+  function pickFile(item) {
+    picked = item;
+    for (const el of $("folders").querySelectorAll("button.file")) {
+      el.setAttribute("aria-pressed", String(item !== null && el === item.button));
+    }
+    $("get-go").disabled = !item;
+  }
+
   function fileItem(file, path) {
     const li = document.createElement("li");
-    li.className = "file";
-    li.textContent = file.name;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "row file";
+    button.setAttribute("aria-pressed", "false");
+    button.textContent = file.name;
     const size = document.createElement("span");
     size.textContent = sizeText(file.size);
-    li.append(size);
-    li.tabIndex = 0;
-    const get = async () => {
-      toast(t("getting", { path }));
-      try {
-        const reply = await fetch(api("/api/download", { path }));
-        if (!reply.ok) throw new Error((await reply.json()).error);
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(await reply.blob());
-        link.download = file.name;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-      } catch (error) {
-        toast(t("failed", { path, error: error.message }), true);
-      }
-    };
-    li.addEventListener("click", get);
-    li.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        get();
-      }
-    });
+    button.append(size);
+    const item = { button, file, path };
+    button.addEventListener("click", () => pickFile(item));
+    button.addEventListener("dblclick", () => { pickFile(item); getPicked(); });
+    li.append(button);
     return li;
   }
+
+  async function getPicked() {
+    if (!picked) return;
+    const { file, path } = picked;
+    toast(t("getting", { path }));
+    try {
+      const reply = await fetch(api("/api/download", { path }));
+      if (!reply.ok) throw new Error((await reply.json()).error);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(await reply.blob());
+      link.download = file.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    } catch (error) {
+      toast(t("failed", { path, error: error.message }), true);
+    }
+  }
+  $("get-go").addEventListener("click", getPicked);
 
   let getting = false;
 
@@ -867,6 +1032,8 @@
     $("send-title").textContent = t(get ? "get_title" : "send_title");
     $("send-files").hidden = get;
     $("send-go").hidden = get;
+    $("get-go").hidden = !get;
+    $("get-hint").hidden = !get;
     $("send-cancel").textContent = t(get ? "close" : "cancel");
   }
 
@@ -881,7 +1048,7 @@
     if (!chosen.length) return;
     setMode(false);
     const list = $("send-files");
-    list.innerHTML = "";
+    list.replaceChildren();
     for (const f of chosen) {
       const li = document.createElement("li");
       li.textContent = f.name;
@@ -919,7 +1086,9 @@
       });
       const data = await reply.json();
       if (reply.status === 409) {
-        if (confirm(t("exists", { path: data.path }))) await upload(file, folder, true);
+        const yes = await UI.ask({ title: t("exists_title"), text: t("exists", { path: data.path }), ok: t("replace") });
+        canvas.focus();
+        if (yes) await upload(file, folder, true);
         return;
       }
       if (!reply.ok) throw new Error(data.error);
@@ -947,35 +1116,23 @@
     else if (m.state === "sending") status.textContent = `${percent}% · ${sizeText(m.size)}`;
     else if (m.state === "done") {
       row.classList.add("done");
-      status.textContent = `✓ ${sizeText(m.size)}`;
+      status.textContent = t("upload_done", { size: sizeText(m.size) });
       toast(t("saved", { path: m.path }));
       setTimeout(() => { row.remove(); rows.delete(m.id); }, 10000);
     } else if (m.state === "failed") {
       row.classList.add("failed");
-      status.textContent = "✗";
+      status.textContent = t("upload_failed");
       toast(t("failed", { path: m.path, error: m.error }), true);
     }
   }
 
   $("upload").addEventListener("click", () => $("file").click());
   $("download").addEventListener("click", openGet);
-
-  // ---------------------------------------------------------------- address
-
-  $("find").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const address = $("find-address").value.trim();
-    if (!address) return;
-    const reply = await fetch(api("/api/address"), { method: "POST", body: address }).catch(() => null);
-    if (!reply) return toast(t("find_bad"), true);
-    const result = await reply.json();
-    if (!reply.ok) return toast(result.error || t("find_bad"), true);
-    location.assign(result.url);
-  });
+  $("m-get").addEventListener("click", openGet);
 
   // ---------------------------------------------------------------- clipboard
 
-  $("clip-get").addEventListener("click", async () => {
+  async function clipGet() {
     try {
       const reply = await fetch(api("/api/clipboard"));
       const data = await reply.json();
@@ -985,11 +1142,12 @@
       toast(t("clip_got"));
     } catch (error) {
       toast(t("clip_failed", { error: error.message }), true);
+    } finally {
+      canvas.focus();
     }
-    canvas.focus();
-  });
+  }
 
-  $("clip-put").addEventListener("click", async () => {
+  async function clipPut() {
     try {
       const text = await navigator.clipboard.readText();
       if (!text) return toast(t("clip_empty"));
@@ -998,9 +1156,15 @@
       toast(t("clip_put_done"));
     } catch (error) {
       toast(t("clip_failed", { error: error.message }), true);
+    } finally {
+      canvas.focus();
     }
-    canvas.focus();
-  });
+  }
+
+  for (const el of document.querySelectorAll("[data-clip]")) {
+    el.addEventListener("click", el.dataset.clip === "get" ? clipGet : clipPut);
+  }
+
   $("file").addEventListener("change", () => {
     openSend($("file").files);
     $("file").value = "";
@@ -1030,8 +1194,11 @@
   layout();
   canvas.focus();
   // Texts first: state messages before that would show their keys.
-  loadLanguage().then(() => {
+  UI.ready.then(() => {
     applyLanguage();
+    paintGame();
+    paintUpdate();
+    showPaused(0);
     showState();
     connect();
   });

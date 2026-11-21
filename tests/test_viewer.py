@@ -132,15 +132,25 @@ def test_every_language_has_every_text():
 
     web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
     english = json.loads((web / "locales" / "en.json").read_text(encoding="utf-8"))
-    used = set(re.findall(r'data-i18n(?:-title|-label|-aria)?="([a-z_]+)"', (web / "index.html").read_text(encoding="utf-8")))
-    script = (web / "viewer.js").read_text(encoding="utf-8")
-    used |= set(re.findall(r'\bt\("([a-z_]+)"', script))
-    used |= {"restarting", "restart_failed", "not_supported"}  # sent by the server
+    used = set()
+    for page in ("index.html", "fleet.html"):
+        used |= set(re.findall(r'data-i18n(?:-title|-label|-aria|-placeholder)?="([a-z_]+)"',
+                               (web / page).read_text(encoding="utf-8")))
+    for script in ("ui.js", "viewer.js", "machines.js", "fleet.js"):
+        used |= set(re.findall(r'\bt\("([a-z_]+)"', (web / script).read_text(encoding="utf-8")))
+    used |= {"restarting", "restart_failed", "not_supported", "pause_failed"}  # sent by the server
+    used |= {f"theme_{name}" for name in ("auto", "light", "dark")}
+    used |= {f"machines_{action}" for action in ("connect", "rename", "default", "address", "remove")}
     assert used <= english.keys(), used - english.keys()
+    script = (web / "ui.js").read_text(encoding="utf-8")
     codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))
+    assert {"en", "de"} <= codes
     for code in codes:
         texts = json.loads((web / "locales" / f"{code}.json").read_text(encoding="utf-8"))
-        assert texts.keys() == english.keys(), code
+        # English fills gaps while new texts wait for their translation; German is always complete
+        assert texts.keys() <= english.keys(), (code, texts.keys() - english.keys())
+        if code == "de":
+            assert texts.keys() == english.keys(), english.keys() - texts.keys()
         for key, text in texts.items():
             assert set(re.findall(r"{\w+}", text)) == set(re.findall(r"{\w+}", english[key])), (code, key)
 

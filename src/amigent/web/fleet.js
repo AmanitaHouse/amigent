@@ -3,28 +3,12 @@
 (() => {
   "use strict";
 
+  const UI = window.amigentUI;
+  const { t } = UI;
   const $ = (id) => document.getElementById(id);
   const token = new URLSearchParams(location.search).get("t") || "";
-  const LANGUAGES = ["en", "de", "pl", "fr", "es", "it", "fi", "sv", "da", "cs", "sk", "hu"];
-  let EN = {}, TEXT = {};
-
-  function pick() {
-    let chosen = "auto";
-    try { chosen = localStorage.getItem("amigent.lang") || "auto"; } catch { /* private window */ }
-    if (LANGUAGES.includes(chosen)) return chosen;
-    for (const tag of navigator.languages || [navigator.language || "en"]) {
-      const code = tag.toLowerCase().split("-")[0];
-      if (LANGUAGES.includes(code)) return code;
-    }
-    return "en";
-  }
-
-  const language = pick();
-  const t = (key, values = {}) => {
-    let text = TEXT[key] ?? EN[key] ?? key;
-    for (const [k, v] of Object.entries(values)) text = text.replaceAll(`{${k}}`, v);
-    return text;
-  };
+  // The page asks every few seconds; the fleet itself greets each Amiga every 20 (PREVIEW_EVERY).
+  const POLL_MS = 5000;
 
   function bytes(n) {
     if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
@@ -39,11 +23,14 @@
   function details(a) {
     const i = a.info || {};
     const rows = [
-      [t("about_system"), [i.os, i.kickstart && `Kickstart ${i.kickstart}`, i.workbench && `Workbench ${i.workbench}`].filter(Boolean).join(", ")],
+      [t("about_system"), [i.os, i.kickstart && t("kickstart_n", { version: i.kickstart }),
+        i.workbench && t("workbench_n", { version: i.workbench })].filter(Boolean).join(", ")],
       [t("about_cpu"), [i.cpu, i.fpu, i.ppc].filter(Boolean).join(" + ")],
-      [t("about_memory"), i.chip_total ? `Chip ${bytes(i.chip_free)} / ${bytes(i.chip_total)}, Fast ${bytes(i.fast_free)} / ${bytes(i.fast_total)}` : ""],
+      [t("about_memory"), i.chip_total ? t("mem_detail", {
+        chip: bytes(i.chip_free), chip_total: bytes(i.chip_total),
+        fast: bytes(i.fast_free), fast_total: bytes(i.fast_total) }) : ""],
       [t("about_network"), i.tcp ? `bsdsocket.library ${i.tcp}` : ""],
-      ...(i.volumes || []).map((v) => [v.name + ":", `${bytes(v.free)} / ${bytes(v.size)}`]),
+      ...(i.volumes || []).map((v) => [v.name + ":", t("free_of", { free: bytes(v.free), size: bytes(v.size) })]),
     ].filter(([, v]) => v);
     const dl = document.createElement("dl");
     for (const [k, v] of rows) {
@@ -54,20 +41,31 @@
     return dl;
   }
 
+  async function restart(el) {
+    const name = el.amiga.name;
+    const yes = await UI.ask({ title: t("fleet_restart_title", { name }), text: t("restart_text"),
+      ok: t("restart_go"), danger: true });
+    if (!yes) return;
+    const reply = await fetch(api(`/api/restart/${el.amiga.id}`), { method: "POST", body: "{}" }).catch(() => null);
+    const data = reply && reply.ok ? await reply.json() : { ok: false, error: reply ? reply.statusText : t("fleet_offline") };
+    if (data.ok) UI.toast(t("restarting"));
+    else UI.toast(t("failed", { path: name, error: data.error }), true);
+  }
+
   function tile(a) {
     let el = tiles.get(a.id);
     if (!el) {
       el = document.createElement("article");
       el.className = "tile";
       el.innerHTML = `<button class="open"><div class="shot"><img alt=""></div>
-        <div class="meta"><b></b><span class="state"><i></i><em></em></span><small></small></div></button>
+        <div class="meta"><b><span class="name"></span> <span class="star" hidden>★</span></b><span class="state"><i class="dot"></i><em></em></span><small></small></div></button>
         <div class="tools"><button class="manage"></button><button class="more" aria-expanded="false"></button><button class="reboot"></button></div>`;
       el.querySelector(".open").addEventListener("click", async () => {
         const reply = await fetch(api(`/api/open/${a.id}`));
         if (reply.ok) location.assign((await reply.json()).url);
         else window.amigentMachines?.open(a.id);
       });
-      el.querySelector(".manage").textContent = t("machines_manage");
+      el.querySelector(".manage").textContent = t("fleet_manage");
       el.querySelector(".manage").addEventListener("click", () => window.amigentMachines?.open(a.id));
       el.querySelector(".more").addEventListener("click", (event) => {
         const open = event.currentTarget.getAttribute("aria-expanded") !== "true";
@@ -75,19 +73,19 @@
         el.querySelector("dl")?.remove();
         if (open) el.append(details(el.amiga));
       });
-      el.querySelector(".reboot").addEventListener("click", async () => {
-        if (!confirm(t("fleet_restart_confirm", { name: el.amiga.name }))) return;
-        const reply = await fetch(api(`/api/restart/${a.id}`), { method: "POST", body: "{}" });
-        const data = reply.ok ? await reply.json() : { ok: false, error: reply.statusText };
-        if (!data.ok) alert(`${el.amiga.name}: ${data.error}`);
-      });
+      el.querySelector(".reboot").addEventListener("click", () => restart(el));
+      const star = el.querySelector(".star");
+      star.title = t("machines_is_default");
+      star.setAttribute("aria-label", star.title);
       $("tiles").append(el);
       tiles.set(a.id, el);
     }
     el.amiga = a;
-    el.querySelector("b").textContent = a.name + (a.default ? " ★" : "");
+    el.querySelector(".name").textContent = a.name;
+    el.querySelector(".star").hidden = !a.default;
     const state = el.querySelector(".state");
-    state.className = "state " + (a.online ? "ok" : a.online === false ? "bad" : "");
+    el.querySelector(".dot").className = "dot " + (a.online ? "ok" : a.online === false ? "bad" : "");
+    state.classList.toggle("bad", a.online === false);
     state.querySelector("em").textContent = a.conflicts?.length ? t("machines_conflict") : a.online ? a.host : a.online === false ? t("fleet_offline") : t("connecting");
     el.querySelector("small").textContent = a.online
       ? [a.os, a.cpu, a.free ? t("status_free", { size: bytes(a.free) }) : ""].filter(Boolean).join(" · ")
@@ -127,7 +125,7 @@
         const head = document.createElement("header");
         const name = document.createElement("b"); name.textContent = r.name;
         const rc = document.createElement("span"); rc.className = "rc";
-        rc.textContent = r.ok ? `rc ${r.rc}` : r.error;
+        rc.textContent = r.ok ? t("fleet_rc", { rc: r.rc }) : r.error;
         head.append(name, rc);
         art.append(head);
         if (r.ok && r.output) {
@@ -143,23 +141,22 @@
 
   async function refresh() {
     try {
-      const list = await (await fetch(`/api/fleet?t=${encodeURIComponent(token)}`)).json();
+      const list = await (await fetch(api("/api/fleet"))).json();
       list.forEach(tile);
       const live = new Set(list.map(a => a.id));
       for (const [id, el] of tiles) if (!live.has(id)) { el.remove(); tiles.delete(id); }
       const up = list.filter((a) => a.online).length;
-      $("summary").textContent = t("fleet_summary", { up, total: list.length });
+      const summary = t("fleet_summary", { up, total: list.length });
+      $("machine-sub").textContent = summary;
+      $("machine-dot").className = "dot " + (up ? "ok" : list.length ? "bad" : "");
+      $("machine").setAttribute("aria-label", t("machine_switch", { name: t("fleet_title"), state: summary }));
     } catch { /* fleet process gone; freeze the last frame */ }
   }
 
-  (async () => {
-    const load = (code) => fetch(`locales/${code}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-    EN = await load("en");
-    TEXT = language === "en" ? EN : await load(language);
-    document.documentElement.lang = language;
-    for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
-    for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
+  UI.ready.then(() => {
+    UI.translate();
+    document.title = `Amigent · ${t("fleet_title")}`;
     refresh();
-    setInterval(refresh, 5000);
-  })();
+    setInterval(refresh, POLL_MS);
+  });
 })();

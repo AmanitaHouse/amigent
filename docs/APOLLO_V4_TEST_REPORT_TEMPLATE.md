@@ -65,8 +65,8 @@ Copy rows from the plan as needed.
 | Test ID | Class (SW/HW/UNV) | Binary IDs | Expected | Actual | Pass? | Evidence files | Notes |
 |---------|-------------------|------------|----------|--------|-------|----------------|-------|
 | D1 MMIO harness | SW | — | refuse windows | | | | |
-| A2 probe F-PRB | HW | F-PRB | | | | | NOT RUN |
-| A2 probe U-PRB | HW | U-PRB | | | | | NOT RUN |
+| A2 probe F-PRB | HW | F-PRB | 3224 / 96ca1b38… | ApolloOS+68080 / rc 0 | Stage 3A | 20261121T021031Z | PASSED ON HW |
+| A2 probe U-PRB | HW | U-PRB | 3112 / ab454b39… | ApolloOS / rc 0 | Stage 3A | 20261121T021031Z | PASSED ON HW |
 | A3 SYSINFO | HW | | | | | | NOT RUN |
 | B1 handshake | HW | | | | | | NOT RUN |
 | B4 TLSONLY | HW | | | | | | NOT RUN |

@@ -1,6 +1,6 @@
 # Apollo V4 Stage 3A — Apollo probe hardware-test runbook
 
-**Status:** Prepared offline — **Stage 3A hardware execution not authorised**  
+**Status:** **EXECUTED** — see `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` (session `20261121T021031Z`)  
 **Docs parent tip:** `dd81a39` (validation/apollo-v4-evidence-prep)  
 **Fork `main`:** `79880b8` (unchanged)  
 **Production:** leave `C:amigentd` / protocol 5 / `TLSONLY` running
@@ -60,7 +60,7 @@ Order in `apollo_detect.c`:
 
 On the Stage 1/2 V4 (ApolloOS + `attn_flags` 42111 incl. AFF_FPGA), steps 1 or 3 succeed → **`$DFF3FC` not read** on the expected path.
 
-### Expected on this V4 (from SYSINFO evidence, not yet HW-proven for probes)
+### Expected on this V4 (HW-confirmed in Stage 3A results)
 
 | Probe | Expected stdout | Expected exit |
 |-------|-----------------|--------------:|
@@ -148,4 +148,4 @@ Stage 3A results apply to **these** binaries only.
 
 ## Authorisation gate
 
-Requires explicit Stage 3A execution approval (V4 contact + staging writes + probe `exec`). This document does **not** authorise that contact.
+Stage 3A execution was authorised and completed. Re-runs still require separate approval.

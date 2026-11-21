@@ -35,12 +35,13 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  
-- Native Apollo probe **execution** (Stage 3A prepared — `docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md`; not yet run on V4)  
 - First-install automatic daemon selection  
 - Upgrade / fallback / Amigent-Update  
 - Fork-specific AMMX / live PIP picture paths  
+- `$DFF3FC` fallback path / non-Apollo negative detection / unpublished 1.5.0 detect  
 
-**F-DAE** protocol-6 smoke is now separately documented in `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md` (same narrow scope as U-DAE; AUDIO/MMIO/probe still NOT RUN).
+**F-DAE** protocol-6 smoke: `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md`.  
+**Stage 3A probes:** U-PRB + F-PRB executed on V4 while production stayed up — `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` (PASSED ON HW; does not validate install selection).
 
 Software unit tests and host harnesses are **not** substitutes for the untested rows above.
 
@@ -48,12 +49,12 @@ Software unit tests and host harnesses are **not** substitutes for the untested 
 
 | Contribution | What this HW session supports | What it does **not** prove |
 |--------------|-------------------------------|----------------------------|
-| Upstream **#31** ApolloOS identify | Board/OS context consistent with ApolloOS on V4-SA; AFF_FPGA present in daemon SYSINFO | Probe binary stdout/exit not run this session |
+| Upstream **#31** ApolloOS identify | Board/OS context; **U-PRB** HW stdout `ApolloOS` / rc 0 | Negative detection / 1.5.0 private detect not proven |
 | Fork review **#4** daemon foundation | U-DAE launches; protocol 6; SYSINFO OS/CPU/board | Not a substitute for #5–#8 feature tests |
 | Fork **#5** MMIO | `poke=0` observed only | No live PEEK/POKE refusal trial |
 | Fork **#6** / **#8** AUDIO | Capability `audio=1` only | No opcode 48 / Hear |
 | Fork **#7** packaging | Exact U-DAE hash exercised | Installer/update paths not run |
-| Fork **#10** probe AFF_FPGA | FPGA bit in daemon `attn_flags` | Probe executable not launched |
+| Fork **#10** probe AFF_FPGA | **F-PRB** HW: `ApolloOS`+`68080` / rc 0 (OS∧AFF_FPGA) | Installer consumption of exit code; `$DFF3FC` fallback |
 | Fork **F-DAE** | Proto-6 exclusive smoke PASSED ON HW | AUDIO/MMIO/probe/PIP still NOT RUN |
 
 Draft PR comment text: `docs/APOLLO_V4_DRAFT_UPSTREAM_HW_COMMENT.md` (**not posted**).

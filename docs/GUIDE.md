@@ -213,6 +213,11 @@ folder on another disk, with the scripts, amigentd, the key, the certificate and
 the repair modules, to repair from when the first disk is gone; the Amiga
 remembers the folder, so later updates renew it without the option.
 
+`amigent-setup --update` never puts an older amigentd over a newer one: with the
+same version number the date in its version string decides, and a build of your
+own with the same number stays. `--force` replaces it anyway, for instance to go
+back to the released build.
+
 Either way key, certificate and the start line in `S:User-Startup` (`TLSONLY`
 included) stay, and so does the copy for `amigent-repair` in the scripts folder,
 which gets the new amigentd too. Should the new amigentd not start, the Amiga

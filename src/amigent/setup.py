@@ -68,7 +68,12 @@ def amigentd_build(link: Amigentd) -> str:
     A missing 68020 build falls back to the 68000 build when that file is
     packaged. An unknown CPU may take only the 68000 build on a fresh install.
     """
-    return _chosen(Machine(detect_cpu(link.run)))
+    cpu = detect_cpu(link.run)
+    if cpu is None:
+        print("C:CPU did not say whether this is a 68020 or better (it may be missing), so the "
+              "68000 build of amigentd goes on; it runs on every Amiga. amigent-setup --update "
+              "--force puts the faster one on once C:CPU answers.")
+    return _chosen(Machine(cpu))
 
 
 def build_for_channel(channel) -> str:
@@ -235,7 +240,7 @@ def update_windows(channel, home: str | None) -> None:
             return
 
 
-def update(host: str, home: str | None, spare: str | None = None) -> int:
+def update(host: str, home: str | None, spare: str | None = None, force: bool = False) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
     try:
@@ -252,9 +257,14 @@ def update(host: str, home: str | None, spare: str | None = None) -> int:
         update_windows(channel, home)
         try:
             installed = channel.read_file("C:amigentd")
-        except AmigaError:
-            installed = None
-        replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
+        except AmigaError as e:
+            if e.code is None:
+                raise  # the line went dead; that says nothing about C:amigentd
+            installed = None  # the Amiga answered: there is no C:amigentd to read
+        if force and installed != new:
+            replace, reason = True, ""
+        else:
+            replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
         if not replace:
             # the scripts are renewed all the same; the folders get the amigentd that runs
             update_folders(channel, home, spare, installed or new)
@@ -324,9 +334,13 @@ def main() -> int:
                         "key, repair modules), to repair from when the first is gone; remembered")
     parser.add_argument("--update", action="store_true",
                         help="replace the amigentd that already runs with this version's, by network")
+    parser.add_argument("--force", action="store_true",
+                        help="with --update: put this version's amigentd on even when the one there "
+                        "looks newer or is a build of its own")
     args = parser.parse_args()
     if args.update:
-        return update(machines.identity(machines.pick(args.host or "")), args.home, args.spare)
+        return update(machines.identity(machines.pick(args.host or "")), args.home, args.spare,
+                      args.force)
     args.home = args.home or "SYS:amigent"
     if args.serve:
         from .serve import serve

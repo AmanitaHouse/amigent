@@ -25,15 +25,75 @@ def _answers(table):
     return run
 
 
-def test_cpu_checks_stop_at_the_first_cpu_the_machine_lacks():
-    assert detect_cpu(_answers([("CPU CHECK 68020", 5), ("CPU CHECK 68010", 5)])) == CPU_68000
-    assert detect_cpu(_answers([("CPU CHECK 68020", 5), ("CPU CHECK 68010", 0)])) == CPU_68010
-    assert detect_cpu(_answers([("CPU CHECK 68020", 0), ("CPU CHECK 68030", 5)])) == CPU_68020
-    assert detect_cpu(_answers([
-        ("CPU CHECK 68020", 0), ("CPU CHECK 68030", 0), ("CPU CHECK 68040", 0), ("CPU CHECK 68060", 5),
-    ])) == CPU_68040
-    assert detect_cpu(_answers([("CPU CHECK 68020", 0), ("CPU CHECK 68030", 10)])) == CPU_68020
-    assert detect_cpu(_answers([("CPU CHECK 68020", 20)])) is None
+def test_one_cpu_check_is_all_a_choice_needs():
+    asked = []
+
+    def run(command):
+        asked.append(command)
+        return {"CPU CHECK 68020": answer}.get(command, 10)
+
+    for answer, cpu in ((5, CPU_68000), (0, CPU_68020), (20, None)):
+        asked.clear()
+        assert detect_cpu(run) == cpu
+        assert asked == ["CPU CHECK 68020"]
+    # the builds part at the 68020 only: every CPU on either side gets the same file
+    present = available_names(BIN)
+    assert {choose(Machine(c), present).name for c in (CPU_68000, CPU_68010)} == {"amigentd.000"}
+    assert {choose(Machine(c), present).name
+            for c in (CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080)} == {"amigentd"}
+
+
+def test_the_build_date_breaks_a_tie_and_force_overrides(tmp_path, monkeypatch):
+    from amigent.daemons import embedded_date
+
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    packaged = b"$VER: amigentd 1.5.0 (21.11.2026)\x00 rebuilt"
+    (binary / "amigentd").write_bytes(packaged)
+    earlier = b"$VER: amigentd 1.5.0 (19.11.2026)\x00 first build"
+    later = b"$VER: amigentd 1.5.0 (2.12.2026)\x00 own build"
+    assert embedded_date(packaged) == (2026, 11, 21) and embedded_date(b"no version") is None
+    replace, reason = consider_replacement(earlier, packaged, "amigentd", binary)
+    assert replace and reason == ""
+    keep, reason = consider_replacement(later, packaged, "amigentd", binary)
+    assert not keep and "later date" in reason and "--force" in reason
+
+    package = tmp_path
+    (package / "amigent-update.rexx").write_bytes(b"/* stand-in */")
+    monkeypatch.setattr(setup, "AMIGA", package)
+    monkeypatch.setattr(setup.time, "sleep", lambda _seconds: None)
+    channel = Channel(later)
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    monkeypatch.setattr(setup, "update_folders", lambda *a: None)
+    monkeypatch.setattr(setup, "UPDATE_WAIT", 0)
+    assert setup.update("192.0.2.1", None) == 0
+    assert "C:amigentd.new" not in channel.files
+    setup.update("192.0.2.1", None, force=True)
+    assert channel.files["C:amigentd.new"] == packaged
+
+
+def test_a_dead_line_while_reading_c_amigentd_is_not_a_missing_file(monkeypatch, capsys):
+    class Dead(Channel):
+        def read_file(self, path):
+            raise AmigaError("connection closed by amigentd")
+
+    monkeypatch.setattr(setup, "update_windows", lambda *a: None)
+    channel = Dead(b"$VER: amigentd 1.4.0 (1.1.2026)")
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    monkeypatch.setattr(setup, "update_folders", lambda *a: (_ for _ in ()).throw(AssertionError("no")))
+    assert setup.update("192.0.2.1", None) == 1
+    assert "connection closed by amigentd" in capsys.readouterr().out
+    assert "C:amigentd.new" not in channel.files
+
+
+def test_a_fresh_install_with_an_unknown_cpu_says_why_it_takes_the_68000_build(capsys):
+    class Link:
+        def run(self, command):
+            return 20
+
+    assert setup.amigentd_build(Link()) == "amigentd.000"
+    out = capsys.readouterr().out
+    assert "68000 build" in out and "C:CPU" in out
 
 
 def test_each_cpu_gets_a_verified_compatible_daemon():
@@ -94,7 +154,7 @@ def test_updates_keep_unknown_or_newer_and_skip_identical_bytes(tmp_path, monkey
     keep, reason = consider_replacement(classic, classic, "amigentd", binary)
     assert not keep and "same executable" in reason
     keep, reason = consider_replacement(None, classic, "amigentd", binary)
-    assert not keep and "could not be read" in reason
+    assert not keep and "no C:amigentd" in reason
     replace, reason = consider_replacement(experimental, classic, "amigentd", binary)
     assert replace and reason == ""
     assert embedded_version(older) == (1, 3, 0)

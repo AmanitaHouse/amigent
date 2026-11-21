@@ -78,22 +78,19 @@ def available_names(directory: Path) -> set[str]:
 
 
 def detect_cpu(run) -> int | None:
-    """CPU CHECK results: 0 means this CPU or better, 5 means less, anything else stops.
+    """CPU CHECK 68020: 0 means this CPU or better, 5 means less, anything else stops.
 
-    ``run`` returns the exit code. An unrecognised first answer is an unknown CPU.
+    ``run`` returns the exit code. The supported builds only part at the 68020,
+    so one check is all a choice needs; a 68000 here stands for a 68010 too,
+    which runs the same build. A build that needs more adds its check here.
+    An unrecognised answer is an unknown CPU.
     """
     code = run("CPU CHECK 68020")
     if code == 5:
-        return CPU_68010 if run("CPU CHECK 68010") == 0 else CPU_68000
+        return CPU_68000
     if code != 0:
         return None
-    found = CPU_68020
-    for cpu in (CPU_68030, CPU_68040, CPU_68060):
-        got = run(f"CPU CHECK {cpu}")
-        if got != 0:
-            break
-        found = cpu
-    return found
+    return CPU_68020
 
 
 def identify(data: bytes, directory: Path) -> Spec | None:
@@ -105,19 +102,39 @@ def identify(data: bytes, directory: Path) -> Spec | None:
     return None
 
 
-def embedded_version(data: bytes) -> tuple[int, ...] | None:
-    """The ``$VER: amigentd`` number in a binary, when it has one."""
+def _ver_text(data: bytes) -> bytes | None:
     mark = b"$VER: amigentd "
     at = data.find(mark)
     if at < 0:
         return None
-    raw = data[at + len(mark):at + len(mark) + 24].split(b" ", 1)[0].split(b"\x00", 1)[0]
+    return data[at + len(mark):at + len(mark) + 40].split(b"\x00", 1)[0]
+
+
+def embedded_version(data: bytes) -> tuple[int, ...] | None:
+    """The ``$VER: amigentd`` number in a binary, when it has one."""
+    raw = _ver_text(data)
+    if raw is None:
+        return None
+    raw = raw.split(b" ", 1)[0]
     parts: list[int] = []
     for piece in raw.decode("ascii", "replace").split("."):
         if not piece.isdigit():
             break
         parts.append(int(piece))
     return tuple(parts) if parts else None
+
+
+def embedded_date(data: bytes) -> tuple[int, int, int] | None:
+    """The date in ``$VER: amigentd 1.4.0 (18.11.2026)`` as (year, month, day)."""
+    raw = _ver_text(data)
+    if raw is None or b"(" not in raw:
+        return None
+    inside = raw.split(b"(", 1)[1].split(b")", 1)[0].decode("ascii", "replace")
+    parts = inside.split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return None
+    day, month, year = (int(p) for p in parts)
+    return year, month, day
 
 
 def consider_replacement(installed: bytes | None, candidate: bytes, candidate_name: str,
@@ -129,7 +146,8 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
     supported candidate solely by its CPU target.
     """
     if installed is None:
-        return False, "C:amigentd could not be read, so the installed daemon was left in place."
+        return False, ("there is no C:amigentd on the Amiga to compare with (amigentd runs from "
+                       "elsewhere), so nothing was replaced; --force puts this one there.")
     if installed == candidate:
         return False, "already the same executable"
     installed_spec = identify(installed, directory)
@@ -143,8 +161,17 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
     installed_version = embedded_version(installed)
     candidate_version = embedded_version(candidate)
     if installed_version and candidate_version and installed_version > candidate_version:
-        return False, "the installed amigentd reports a newer version, so it was left in place."
+        return False, ("the installed amigentd reports a newer version, so it was left in place; "
+                       "--force replaces it anyway.")
+    if installed_version and candidate_version and installed_version == candidate_version:
+        # the same number: the date of the build decides, so a rebuilt one gets in
+        installed_date, candidate_date = embedded_date(installed), embedded_date(candidate)
+        if installed_date and candidate_date and installed_date != candidate_date:
+            if installed_date > candidate_date:
+                return False, ("the installed amigentd reports the same version from a later date, "
+                               "so it was left in place; --force replaces it anyway.")
+            return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
-                       "reports the same version, so it was left in place.")
+                       "reports the same version, so it was left in place; --force replaces it anyway.")
     return True, ""

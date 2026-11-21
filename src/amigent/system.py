@@ -86,6 +86,35 @@ def native_ppc(facts: dict) -> bool:
     return facts.get("os", "").startswith(("AmigaOS 4", "MorphOS"))
 
 
+def reconcile_system(facts: dict, info: dict | None) -> dict:
+    """Correct Version/CPU fallthroughs using daemon SYSINFO when it is clearer.
+
+    Kickstart 50+ with an empty or unparseable C:CPU line is labelled AmigaOS 4
+    by describe_system (AmigaOS 4 is PPC). ApolloOS on a V4 often prints the
+    same Kickstart line without the word ApolloOS, while SYSINFO already has
+    os=ApolloOS, cpu=68080 and AttnFlags bit 10. Prefer that evidence so the
+    host does not skip FPU reporting under the 68k-emulation note.
+    """
+    if not info:
+        return facts
+    flags = attn_flags(info) or 0
+    sys_os = str(info.get("os") or "")
+    sys_cpu = str(info.get("cpu") or "")
+    apollo = (
+        sys_os == "ApolloOS"
+        or bool(flags & AFF_68080)
+        or sys_cpu.endswith("68080")
+    )
+    if not apollo:
+        return facts
+    out = dict(facts)
+    if out.get("os", "").startswith("AmigaOS 4") or not out.get("os"):
+        out["os"] = "ApolloOS"
+    if not out.get("cpu") and sys_cpu:
+        out["cpu"] = sys_cpu
+    return out
+
+
 def ppc_software(run) -> str:
     """'WarpOS powerpc.library 17.10' or the like on a 68k Amiga with a PowerPC board, else ''.
 

@@ -407,6 +407,10 @@ def _system_facts() -> dict:
     if not _session().system_seen:
         run = lambda c: (lambda r: (r.rc, r.output))(_with_ctl(lambda: _session().ctl.exec(c)))  # noqa: E731
         facts = system.describe_system(run("Version")[1], run("CPU")[1])
+        try:
+            facts = system.reconcile_system(facts, _with_ctl(_session().ctl.sysinfo))
+        except AmigaError:
+            pass
         if system.native_ppc(facts):
             facts["note"] = system.EMULATED_NOTE
         else:

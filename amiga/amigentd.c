@@ -623,6 +623,38 @@ static struct Screen *front(ULONG *lock)
 
 #define rgb332(r, g, b) ((UBYTE)(((r) >> 5) | ((g) >> 5 << 3) | ((b) & 0xC0)))
 
+/* rgb332() through lookups for red and green, 256 bytes each; blue is a mask
+ * anyway (#43). The tables reach rgb_to_332() through a pointer, so the
+ * compiler keeps them in a register instead of loading the address a pixel. */
+static UBYTE to332[2 * 256];
+static UBYTE *to332_at;
+static UBYTE islot[256];  /* index_tile(): colour to index, 0xFF for none, so again after each tile */
+
+static void tables_init(void)
+{
+    LONG i;
+
+    for (i = 0; i < 256; i++) {
+        islot[i] = 0xFF;
+        to332[i] = (UBYTE)(i >> 5);
+        to332[256 + i] = (UBYTE)(i >> 5 << 3);
+    }
+    to332_at = to332;
+}
+
+/* n RGB888 pixels to RGB332. */
+static void rgb_to_332(const UBYTE *src, UBYTE *dst, LONG n)
+{
+    const UBYTE *r = to332_at, *g = r + 256;
+    UBYTE *end = dst + n, c;
+
+    while (dst < end) {
+        c = r[*src++];
+        c |= g[*src++];
+        *dst++ = c | (*src++ & 0xC0);
+    }
+}
+
 /* One row of HAM6 or HAM8 pens from the left edge; RGB888 out from pixel skip on.
  * Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits replace the
  * top bits of that component, the low bits stay from the pixel before. */
@@ -797,6 +829,7 @@ static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYT
     UBYTE *pens = AllocVec(pw * h, MEMF_ANY);
     struct BitMap *line = AllocBitMap(pw, 1, 8, 0, NULL);
     struct RastPort temp;
+    UBYTE pal[3 * 256];
     BOOL ok = table && pens && line;
 
     if (ok) {
@@ -808,14 +841,16 @@ static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYT
         temp.Layer = NULL;
         temp.BitMap = line;
         ReadPixelArray8(&scr->RastPort, x0, y0, x0 + w - 1, y0 + h - 1, pens, &temp);
+        for (x = 0; x < 3 * 256; x++)  /* the palette as bytes once, not three shifts a pixel */
+            pal[x] = table[x] >> 24;
         for (y = 0; y < h; y++) {
             const UBYTE *p = pens + y * pw;
             UBYTE *o = out + 3 * y * w;
             for (x = 0; x < w; x++, o += 3) {
-                const ULONG *c = table + 3 * p[x];
-                o[0] = c[0] >> 24;
-                o[1] = c[1] >> 24;
-                o[2] = c[2] >> 24;
+                const UBYTE *c = pal + 3 * p[x];
+                o[0] = c[0];
+                o[1] = c[1];
+                o[2] = c[2];
             }
         }
     }
@@ -1456,7 +1491,7 @@ static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
  * through the card, zz_sync() has put them there already. */
 static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 {
-    LONG y0 = ty * TILE, x, n, i, t0;
+    LONG y0 = ty * TILE, x, n, t0;
     LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
     ULONG ms = now_ms();
 
@@ -1467,11 +1502,8 @@ static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 
         read_rgb(scr, x0, y0, cw, th, rgb);
         zz.cur = NULL;  /* cur holds what the card's mirror doesn't */
-        for (n = 0; n < th; n++) {
-            UBYTE *dst = cur + (y0 + n) * ref_w + x0;
-            for (i = 0; i < cw; i++, src += 3)
-                dst[i] = rgb332(src[0], src[1], src[2]);
-        }
+        for (n = 0; n < th; n++, src += 3 * cw)
+            rgb_to_332(src, cur + (y0 + n) * ref_w + x0, cw);
     }
     for (x = tx0; x <= tx1; x++) {
         UBYTE *v = valid + ty * cols + x;
@@ -1721,8 +1753,9 @@ static UBYTE ppal[3 * 256];
 static LONG pcolours = -1;
 static ULONG prgb[3 * 256];
 /* ULONG backed: the XOR and the row copies go a long at a time, and a 68000
- * takes an odd address as a personal insult. */
-#define PENC_LONGS ((8 * 8 * TILE + 8 * TILE / 128 + 16) / 4)
+ * takes an odd address as a personal insult. PackBits of noise is a byte in
+ * 128 longer than the tile, and a scrolled delta two more. */
+#define PENC_LONGS ((8 * 8 * TILE + 8 * 8 * TILE / 128 + 16) / 4)
 static ULONG penc_mem[2][PENC_LONGS], ptile_mem[8 * 8 * TILE / 4];
 static ULONG pwork_mem[8 * 8 * TILE / 4], pold_mem[8 * 8 * TILE / 4];
 #define penc(i) ((UBYTE *)penc_mem[i])
@@ -1878,32 +1911,45 @@ static void grab_tile(struct BitMap *bm, LONG tx, LONG ty)
 }
 
 /* PackBits: n < 128 then n+1 literals, n > 128 then the next byte 257-n times.
- * A literal byte costs two compares, the bookkeeping only happens at a run:
- * the 68000 has no time for second looks. */
+ * The search for a run keeps to a few registers and one load a byte; the
+ * bookkeeping only happens at a run: the 68000 has no time for second looks. */
 static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
 {
     const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *lim;
-    UBYTE *start = d, c;
+    UBYTE *start = d, c, n;
     LONG k;
 
-    while (s < stop) {
-        c = *s;
-        if (s[1] != c || s[2] != c) {  /* no run of three here: literal */
-            s++;
-            continue;
+    if (len >= 3) {
+        c = *s++;  /* s is one past the byte a run might start at, c */
+        for (;;) {
+            while (s <= stop) {
+                if ((n = *s++) != c) {
+                    c = n;
+                    continue;
+                }
+                if (*s == c)  /* three alike */
+                    goto run;
+                c = *s++;  /* two alike, then another: look on from there */
+            }
+            break;
+run:
+            s -= 2;
+            while (lit < s) {  /* literals waiting in front of the run */
+                k = s - lit > 128 ? 128 : s - lit;
+                *d++ = (UBYTE)(k - 1);
+                memcpy(d, lit, k);
+                d += k, lit += k;
+            }
+            lim = end - s > 128 ? s + 128 : end;
+            for (r = s + 3; r < lim && *r == c; r++)
+                ;
+            *d++ = (UBYTE)(257 - (r - s));
+            *d++ = c;
+            s = lit = r;
+            if (s >= stop)
+                break;
+            c = *s++;
         }
-        while (lit < s) {  /* literals waiting in front of the run */
-            k = s - lit > 128 ? 128 : s - lit;
-            *d++ = (UBYTE)(k - 1);
-            memcpy(d, lit, k);
-            d += k, lit += k;
-        }
-        lim = end - s > 128 ? s + 128 : end;
-        for (r = s + 3; r < lim && *r == c; r++)
-            ;
-        *d++ = (UBYTE)(257 - (r - s));
-        *d++ = c;
-        s = lit = r;
     }
     while (lit < end) {
         k = end - lit > 128 ? 128 : end - lit;
@@ -1913,6 +1959,11 @@ static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
     }
     return d - start;
 }
+
+/* No PackBits of n bytes is shorter than this: every code covers 128 bytes at
+ * most and takes two at least. A method that cannot beat the best so far is
+ * not tried, and the tile comes out the same, only sooner. */
+#define PB_MIN(n) ((((n) + 127) >> 7) << 1)
 
 /* A tile's bytes, plane after plane, row after row, bw bytes a row. */
 static LONG tile_bytes(const UBYTE *planes, LONG tx, LONG ty, LONG bw, LONG th, UBYTE *dst)
@@ -2084,6 +2135,50 @@ static UBYTE *pack_tile(UBYTE *data, LONG *len, LONG *method)
     return zpack_out(frame_z);
 }
 
+/* Every way we know for planar tile ttx, tty, the shortest wins, as
+ * chunky_tile() does it. ext: row XOR too. */
+static LONG planar_tile(LONG ttx, LONG tty, LONG bw, LONG th, BOOL ext, BOOL had, LONG dy,
+                        LONG *pmethod, LONG *pb)
+{
+    LONG size, raw, best, method, k, b = 0;
+
+    raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
+    best = packbits(ptile, raw, penc(0));
+    method = 1;
+    if (ext && best > raw / 4) {  /* rows against rows: text, borders, patterns.
+         * Not for tiles PackBits already squeezed: a 68000 pays a second
+         * pass for a percent or two. */
+        row_xor(ptile, pwork, bw, th);
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 1 | 4, b = 1 - b;
+    }
+    if (had && PB_MIN(raw) < best) {  /* the client has the old tile: send the difference */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        tile_bytes(pref, ttx, tty, bw, th, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 2, b = 1 - b;
+    }
+    if (dy && PB_MIN(raw) + 2 < best) {  /* scrolled: the old rows, moved */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        shifted_bytes(ttx, tty, bw, th, dy, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+            be16(penc(1 - b), (UWORD)dy);
+            best = size, method = 2 | 8, b = 1 - b;
+        }
+    }
+    if (best >= raw) {  /* noise beats every trick: raw then */
+        memcpy(penc(b), ptile, raw);
+        best = raw, method = 0;
+    }
+    *pmethod = method;
+    *pb = b;
+    return best;
+}
+
 static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2174,46 +2269,15 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         return FALSE;
     dy = ext && !force ? find_dy(n) : 0;
     for (i = 0; i < n; i++) {
-        LONG t = ((UWORD *)porder)[i], size, raw, best, method, p, k, b = 0;
+        LONG t = ((UWORD *)porder)[i], best, method, p, b;
         LONG ttx = t % pcols, tty = t / pcols, px = ttx * TILE, py = tty * TILE;
         LONG tw = px + TILE < pw ? TILE : pw - px, th = py + TILE < ph ? TILE : ph - py;
         LONG bw = (tw + 7) >> 3;
         BOOL had = !force && (pvalid[t] & 1);
         UBYTE *data;
 
-        /* Every way we know, the shortest wins; penc(b) holds it. */
-        raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
-        best = packbits(ptile, raw, penc(0));
-        method = 1;
-        if (ext && best > raw / 4) {  /* rows against rows: text, borders, patterns.
-             * Not for tiles PackBits already squeezed: a 68000 pays a second
-             * pass for a percent or two. */
-            row_xor(ptile, pwork, bw, th);
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 1 | 4, b = 1 - b;
-        }
-        if (had) {  /* the client has the old tile: send the difference */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            tile_bytes(pref, ttx, tty, bw, th, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 2, b = 1 - b;
-        }
-        if (had && dy && shift_ok(ttx, tty, th, dy)) {  /* scrolled: the old rows, moved */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            shifted_bytes(ttx, tty, bw, th, dy, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
-                be16(penc(1 - b), (UWORD)dy);
-                best = size, method = 2 | 8, b = 1 - b;
-            }
-        }
-        if (best >= raw) {  /* noise beats every trick: raw then */
-            memcpy(penc(b), ptile, raw);
-            best = raw, method = 0;
-        }
+        best = planar_tile(ttx, tty, bw, th, ext, had, had && dy && shift_ok(ttx, tty, th, dy) ? dy : 0,
+                           &method, &b);
         data = ext ? pack_tile(penc(b), &best, &method) : penc(b);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
@@ -2270,35 +2334,134 @@ static LONG chunky_bytes(const UBYTE *pic, LONG px, LONG py, LONG tw, LONG th, U
 
 /* Up to 16 colours: u8 k, k colours, then rows of indices, 1/2/4 bits, top
  * bits first, each row on a byte. Returns the index rows' size, 0 if the tile
- * has too many colours; *head gets 1 + k. */
+ * has too many colours; *head gets 1 + k. A pixel like the one before costs a
+ * compare; the rows go through idx_row1/2/4(), with the shifts fixed and the
+ * lookup table in a register. */
+
+/* n pixels of a row as 1 bit indices through slot, top bits first. */
+static UBYTE *idx_row1(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    UBYTE a;
+
+    for (; n >= 8; n -= 8) {
+        a = slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        *o++ = (a + a) | slot[*p++];
+    }
+    if (n > 0) {
+        LONG i;
+        for (a = 0, i = 0; i < 8; i++)
+            a = (a + a) | (i < n ? slot[p[i]] : 0);
+        *o++ = a;
+    }
+    return o;
+}
+
+static UBYTE *idx_row2(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    UBYTE a;
+
+    for (; n >= 4; n -= 4) {
+        a = slot[*p++] << 2;
+        a = (a | slot[*p++]) << 2;
+        a = (a | slot[*p++]) << 2;
+        *o++ = a | slot[*p++];
+    }
+    if (n > 0) {
+        LONG i;
+        for (a = 0, i = 0; i < 4; i++)
+            a = a << 2 | (i < n ? slot[p[i]] : 0);
+        *o++ = a;
+    }
+    return o;
+}
+
+static UBYTE *idx_row4(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    for (; n >= 2; n -= 2, p += 2)
+        *o++ = slot[p[0]] << 4 | slot[p[1]];
+    if (n > 0)
+        *o++ = slot[p[0]] << 4;
+    return o;
+}
+
+/* The colours of n pixels into col, in the order they come, k known so far,
+ * through slot; the new k, or 17 at the 17th. px is long aligned: four pixels
+ * like the last one cost one compare. */
+#define IDX_PIXEL(v)                            \
+    if ((c = (v)) != last && slot[last = c] == 0xFF) { \
+        if (k == 16)                            \
+            return 17;                          \
+        slot[c] = (UBYTE)k;                     \
+        col[k++] = c;                           \
+    }
+
+static LONG idx_colours(const UBYTE *px, LONG n, UBYTE *col, LONG k, UBYTE *slot)
+{
+    const ULONG *q = (const ULONG *)px, *qend = q + (n >> 2);
+    const UBYTE *p, *end;
+    UBYTE last = col[k - 1], c;
+    ULONG four = last;
+
+    four |= four << 8;
+    four |= four << 16;
+    for (;;) {
+        while (q < qend && *q == four)
+            q++;
+        if (q == qend)
+            break;
+        p = (const UBYTE *)q++;
+        IDX_PIXEL(p[0])
+        IDX_PIXEL(p[1])
+        IDX_PIXEL(p[2])
+        IDX_PIXEL(p[3])
+        four = last;
+        four |= four << 8;
+        four |= four << 16;
+    }
+    for (p = (const UBYTE *)q, end = px + n; p < end; p++)  /* the odd few at the end */
+        IDX_PIXEL(*p)
+    return k;
+}
+
 static LONG index_tile(const UBYTE *px, LONG tw, LONG th, UBYTE *dst, LONG *head)
 {
-    UBYTE slot[256], *rows;
-    LONG k = 0, i, y, bits, rb;
+    UBYTE *rows, *col = dst + 1;
+    LONG k, i, y, rb;
 
-    memset(slot, 0xFF, sizeof(slot));
-    for (i = 0; i < tw * th; i++)
-        if (slot[px[i]] == 0xFF) {
-            if (k == 16)
-                return 0;
-            slot[px[i]] = k;
-            dst[1 + k++] = px[i];
-        }
-    dst[0] = k;
-    *head = 1 + k;
-    bits = k <= 2 ? 1 : k <= 4 ? 2 : 4;
-    rb = (tw * bits + 7) >> 3;
-    rows = dst + *head;
-    memset(rows, 0, rb * th);
-    for (y = 0; y < th; y++, px += tw, rows += rb) {
-        LONG x, shift = 8 - bits;
-        UBYTE *o = rows;
-        for (x = 0; x < tw; x++) {
-            *o |= slot[px[x]] << shift;
-            if ((shift -= bits) < 0)
-                shift = 8 - bits, o++;
-        }
+    col[0] = *px;
+    islot[*px] = 0;
+    if ((k = idx_colours(px, tw * th, col, 1, islot)) > 16) {
+        for (i = 0; i < 16; i++)
+            islot[col[i]] = 0xFF;
+        return 0;
     }
+    dst[0] = (UBYTE)k;
+    *head = 1 + k;
+    rows = dst + *head;
+    if (k == 1) {  /* one colour: nothing but zeros */
+        rb = (tw + 7) >> 3;
+        memset(rows, 0, rb * th);
+    } else if (k == 2) {
+        rb = (tw + 7) >> 3;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row1(px, tw, rows, islot);
+    } else if (k <= 4) {
+        rb = (tw + 3) >> 2;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row2(px, tw, rows, islot);
+    } else {
+        rb = (tw + 1) >> 1;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row4(px, tw, rows, islot);
+    }
+    for (i = 0; i < k; i++)
+        islot[col[i]] = 0xFF;
     return rb * th;
 }
 
@@ -2353,6 +2516,73 @@ static LONG chunky_find_dy(const UWORD *order, LONG n)
     return 0;
 }
 
+/* Every way we know for the tile at px, py, the shortest wins: its size, and
+ * in *pmethod and *pb how it went and which penc() holds it. had: the client
+ * has the old tile in ref; dy: it scrolled by that much, 0 for not. A way that
+ * cannot beat the best so far (PB_MIN) is not tried. */
+static LONG chunky_tile(LONG px, LONG py, LONG tw, LONG th, BOOL had, LONG dy, LONG *pmethod, LONG *pb)
+{
+    LONG raw, best, size, method, k, b = 0, ihead, irows;
+
+    raw = chunky_bytes(cur, px, py, tw, th, ptile);
+    if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
+        /* A few colours: indices win nine times out of ten, so the full
+         * bytes don't even get a PackBits pass. Saves the slow CPUs half. */
+        UBYTE *o = penc(0);
+        memcpy(o, pold, ihead);
+        best = ihead + packbits(pold + ihead, irows, o + ihead);
+        method = 1 | 16;
+        if (ihead + PB_MIN(irows) < best) {
+            o = penc(1 - b);
+            memcpy(o, pold, ihead);
+            xor_rows(pold + ihead, pwork, irows / th, th);
+            if ((size = ihead + packbits(pwork, irows, o + ihead)) < best)
+                best = size, method = 1 | 4 | 16, b = 1 - b;
+        }
+    } else {
+        best = packbits(ptile, raw, penc(0));
+        method = 1;
+        if (best > raw / 4) {  /* as for planar: only where there is room to win */
+            xor_rows(ptile, pwork, tw, th);
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 1 | 4, b = 1 - b;
+        }
+    }
+    if (had && PB_MIN(raw) < best) {  /* the client has the old tile */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        chunky_bytes(ref, px, py, tw, th, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 2, b = 1 - b;
+    }
+    if (dy && PB_MIN(raw) + 2 < best) {  /* scrolled */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *ol = (ULONG *)pold;
+        UBYTE *o = pold;
+        LONG yy;
+        for (yy = 0; yy < th; yy++, o += tw) {
+            LONG sy = py + yy + dy;
+            if (sy < 0 || sy >= ref_h)
+                memset(o, 0, tw);
+            else
+                memcpy(o, ref + sy * ref_w + px, tw);
+        }
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *ol++;
+        if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+            be16(penc(1 - b), (UWORD)dy);
+            best = size, method = 2 | 8, b = 1 - b;
+        }
+    }
+    if (best >= raw) {
+        memcpy(penc(b), ptile, raw);
+        best = raw, method = 0;
+    }
+    *pmethod = method;
+    *pb = b;
+    return best;
+}
+
 static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2395,65 +2625,12 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
     for (i = 0; i < n; i++) {
         LONG t = order[i], ttx = t % cols, px = ttx * TILE, py = (t / cols) * TILE;
         LONG tw = px + TILE < sw ? TILE : sw - px, th = py + TILE < sh ? TILE : sh - py;
-        LONG raw, best, size, method, k, b = 0, ihead, irows;
+        LONG best, method, b;
         BOOL had = !force && (valid[t] & 1);
         UBYTE *data;
 
-        raw = chunky_bytes(cur, px, py, tw, th, ptile);
-        if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
-            /* A few colours: indices win nine times out of ten, so the full
-             * bytes don't even get a PackBits pass. Saves the slow CPUs half. */
-            UBYTE *o = penc(0);
-            memcpy(o, pold, ihead);
-            best = ihead + packbits(pold + ihead, irows, o + ihead);
-            method = 1 | 16;
-            o = penc(1 - b);
-            memcpy(o, pold, ihead);
-            xor_rows(pold + ihead, pwork, irows / th, th);
-            if ((size = ihead + packbits(pwork, irows, o + ihead)) < best)
-                best = size, method = 1 | 4 | 16, b = 1 - b;
-        } else {
-            best = packbits(ptile, raw, penc(0));
-            method = 1;
-            if (best > raw / 4) {  /* as for planar: only where there is room to win */
-                xor_rows(ptile, pwork, tw, th);
-                if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                    best = size, method = 1 | 4, b = 1 - b;
-            }
-        }
-        if (had) {  /* the client has the old tile */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            chunky_bytes(ref, px, py, tw, th, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 2, b = 1 - b;
-        }
-        if (had && dy && chunky_shift_ok(ttx, py, th, dy)) {  /* scrolled */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile;
-            UBYTE *o = pold;
-            LONG yy;
-            for (yy = 0; yy < th; yy++, o += tw) {
-                LONG sy = py + yy + dy;
-                if (sy < 0 || sy >= sh)
-                    memset(o, 0, tw);
-                else
-                    memcpy(o, ref + sy * ref_w + px, tw);
-            }
-            {
-                ULONG *ol = (ULONG *)pold;
-                for (k = (raw + 3) >> 2; k > 0; k--)
-                    *a++ = *c++ ^ *ol++;
-            }
-            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
-                be16(penc(1 - b), (UWORD)dy);
-                best = size, method = 2 | 8, b = 1 - b;
-            }
-        }
-        if (best >= raw) {
-            memcpy(penc(b), ptile, raw);
-            best = raw, method = 0;
-        }
+        best = chunky_tile(px, py, tw, th, had, had && dy && chunky_shift_ok(ttx, py, th, dy) ? dy : 0,
+                           &method, &b);
         data = pack_tile(penc(b), &best, &method);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
@@ -8904,6 +9081,7 @@ int main(int argc, char **argv)
     }
     os39 = GfxBase->LibNode.lib_Version >= 39;
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
+    tables_init();
     zz_open();  /* a ZZ9000 looks at its own screen */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;

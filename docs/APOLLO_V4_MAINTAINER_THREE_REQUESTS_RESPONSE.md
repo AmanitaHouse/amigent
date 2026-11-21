@@ -1,106 +1,116 @@
 # Maintainer three Apollo V4 requests — evidence status
 
 **Date:** 2026-11-21  
-**Scope:** Offline review + **authorised Session A hardware** for requests 1–2. Request 3 (`--update`) **not** run.  
-**1.5.0 public tip:** `upstream/feature/1.5.0` @ `651a357b6aae8800c314799347b257e9884e2773`  
+**Hardware session:** authorised Session A (requests 1–2). Request 3 not run.  
+**1.5.0 tip tested:** `651a357b6aae8800c314799347b257e9884e2773`  
+**Daemon under test:** `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` (128744 B) staged as `Programs:AmiGent-Stage4/amigentd.d4`  
 **Evidence:** `~/amigent-evidence/stage4-maintainer-150-regress-cpu/20261121T113257Z`  
-**HW candidate:** `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` (128744 B) — staged `Programs:AmiGent-Stage4/amigentd.d4`  
-**Production restored:** `b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3` · protocol 5 TLS · SYSINFO ×2 PASS  
+**Production restored:** `b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3` · protocol 5 · SYSINFO ×2 PASS  
 
-**Distinction:** 1.5.0 `regress.py` / host tools against our Apollo-packaged daemon `63db83ff…` does **not** validate the maintainer’s packaged classic 1.5.0 native daemon.
+**Distinction:** 1.5.0 host tools / safe `regress.py` against our Apollo-packaged daemon ≠ hardware pass of packaged classic 1.5.0 `amigentd`.
 
 ---
 
 ## Summary table
 
-| Maintainer request | Status | Actual evidence | Remaining requirement |
+| Maintainer request | Status | Actual evidence | Remaining |
 |---|---|---|---|
-| Native build + `regress.py` | **PARTIAL** — safe subset run | Exact command below; **14 PASS / 3 FAIL / 0 SKIP** on 17 allowlisted checks; full unrestricted script **not** run | Optional follow-up on `version`/`job`/`live_output` only; still no full `regress.py` |
-| `amiga_status` / `amiga_cpu` / FPU | **PARTIAL** | Verbatim 1.5.0 outputs captured; SYSINFO CPU **68080** PASS; load sampler PASS; live FPU line **missing** (host mistook ApolloOS Version as AmigaOS 4) | Host `describe_system` ApolloOS path fix; re-capture FPU line after that |
-| `amigent-setup --update` | **NOT HARDWARE TESTED — APOLLO PACKAGING/SELECTION BLOCKER** | Offline only; 1.5.0 package has no `amigentd.apollo` | Separate auth + packaging/policy |
+| Native build + `regress.py` | **PARTIAL** | Safe `--only` **14 PASS / 3 FAIL / 0 SKIP**; unrestricted script not run | Optional follow-up on job/FOLLOW/`self` path; no full regress |
+| `amiga_status` / `amiga_cpu` / FPU | **PARTIAL** | CPU **68080** via SYSINFO PASS; load sampler PASS; live FPU field absent (root cause offline) | Apply/review SYSINFO reconcile patch; **do not** claim live FPU verified |
+| `amigent-setup --update` | **NOT HARDWARE TESTED — APOLLO PACKAGING/SELECTION BLOCKER** | 1.5.0 package has no `amigentd.apollo` | Separate auth + packaging/policy |
 
 ---
 
-## Session A results (2026-11-21T113257Z)
+## Offline root causes (post-session)
 
-### Offline GO
-- Source pinned `651a357…`; `regress.py` SHA-256 `faad890aa4ee6dc229c1dd2209fe0048f6188d6f57cb7e862e431577a26ed988`
-- Allowlist 17 names; no prohibited intersection; **OFFLINE GO**
+### 1. AmigaOS 4 misclassification
 
-### Preflight (after operator reboot)
-- Protocol 5 TLS verified; plaintext rejected; ApolloOS / 68080 / Kickstart 51.51; SYSINFO ×2 stable
-- Production live hash `b00fef0e…`; staged `.d4` hash `63db83ff…` (128744)
-- Backup `…/20261121T010816Z/v4-production-C-amigentd.bin` OK
+**Exact path:** `amiga_status` → `_system_facts()` → `describe_system(Version, CPU)` → `native_ppc` → skip `_read_fpu`.
 
-### Handover / launch / restore
-- Physical MessageBox confirmation: operator_ready → awaiting quit
-- Production QUIT → candidate `…/amigentd.d4 TLSONLY` → protocol **6**, `audio=1` `poke=0` `trace=0` `pip=0`
-- Candidate QUIT → production restore → protocol **5** TLS, ApolloOS/68080, SYSINFO ×2 PASS
-- Mid-session network outage after hung read required reboot (recorded); session continued after recovery
+Captured live `system` block: `os=AmigaOS 4`, `kickstart=51.51`, `workbench=40.0`, no `cpu`/`fpu`/`processor`, plus the 68k-emulation note.
 
-### Request 1 — exact regression command
+Offline reproduction (pinned 1.5.0):
 
 ```text
-/home/ami/amigent-test/bin/python scripts/regress.py V4SA --only \
-  status,version,exec,missing_volume,job,live_output,loaded,journal,gurus,screen,state,files,tree,packing,notes,screen_diff,close_shell \
-  --report <evidence>/private/regress-report.md
+describe_system("Kickstart 51.51, Workbench 40.0\n", "")
+  → os=AmigaOS 4, cpu='', native_ppc=True
 ```
 
-(from worktree `/mnt/d/Development/per/amigent-worktrees/inspect-150` @ `651a357…`)
+When `C:CPU` yields a `68080` token, the same Kickstart line becomes ApolloOS. Foundation tests already document Kickstart ≥50 + empty CPU → AmigaOS 4.
 
-| Verdict | Checks |
+**Meanwhile SYSINFO** (same session) correctly had `os=ApolloOS`, `cpu=68080`, `attn_flags=42111`. `describe_system` never consults SYSINFO. This is **detection precedence / host-tool vs daemon SYSINFO mismatch**, not a cached stale value and not a daemon protocol error.
+
+Aligns with PR #31 intent (ApolloOS ≠ AmigaOS 4; 68080 / exec 51 evidence) but the host Version/CPU path lagged SYSINFO.
+
+### 2. Missing live FPU field
+
+Because `native_ppc(AmigaOS 4)` was true, `_system_facts` took the emulation branch and **never called** `_read_fpu` / `describe_fpu`. Offline `describe_fpu(42111)` → `68080 with FPU` (FPU AttnFlags bits, **not** bit 10 alone). Correcting OS classification restores the FPU code path (proven with FakeAmiga + reconcile).
+
+| Layer | Result |
 |---|---|
-| PASS (14) | status, exec, missing_volume, loaded, journal, state, gurus, screen_diff, files, screen, packing, tree, notes, close_shell |
-| FAIL (3) | **version** (`Version` on `Programs:AmiGent-Stage4/amigentd` → rc=20 object not found; staged file is `amigentd.d4`), **job**, **live_output** (job still running) |
-| SKIP (0) | — |
-| Not run | All excluded RISK/UI/INST/TRACE/monitor/clipboard/takeover/… |
+| Raw AttnFlags `42111` | Observed on HW |
+| Software-inferred FPU | Offline OK; **live field not emitted** |
+| FPU instruction execution | **Not tested** |
 
-Daemon remained responsive after the subset. Full unrestricted `regress.py` remains untested.
+### 3. Prepared fix (not published as PR)
 
-### Request 2 — CPU / FPU / load
+Branch `review/apolloos-sysinfo-reconcile` @ `7a45c57` (from `651a357…`):
 
-**SYSINFO (daemon):** `os=ApolloOS`, `cpu=68080`, `attn_flags=42111`, board V4-SA.
+- `system.reconcile_system(facts, sysinfo)` — if SYSINFO shows ApolloOS / 68080 / `AFF_68080`, override false AmigaOS 4 and fill `cpu`
+- `_system_facts` applies reconcile before `native_ppc` / FPU
+- Tests: Session A shape + end-to-end FakeAmiga status; **47 passed** (`test_apollo_foundation` + `test_fpu`)
 
-**`amiga_status` anomaly:** `system.os` reported **AmigaOS 4** with 68k-emulation note; **no** `fpu` / `processor` fields. Cause: 1.5.0 `describe_system`/`native_ppc` path on `Version`/`CPU` text skipped `_read_fpu`. Offline reinterpret of the same flags: `describe_fpu(42111)` → `68080 with FPU` (FPU bits present; **not** inferred from bit 10 alone).
+No upstream PR opened.
 
-| Classification | Result |
+### 4. Regression failures (preserve **14 / 3 / 0**)
+
+| Check | Expected | Actual | Verdict |
+|---|---|---|---|
+| `version` | `Version "{self}"` rc=0 | `self=Programs:AmiGent-Stage4/amigentd`; Version rc=20 object not found; file on disk is `amigentd.d4` (SHA verified) | **Test / Amiga `self` path-form quirk** — known since D4; not wrong binary |
+| `job` | Echo/Search/break job pipeline | `AssertionError` with empty detail (failed assert message was empty output) | **Likely follow-on of bad `self` path** — job scripts `Run "{self}" FOLLOW …`; unresolved without re-run |
+| `live_output` | Early output contains `rwed` while still running | `[job 2 still running]` only (no listing yet / empty out) | **Same FOLLOW/`self` compatibility** — PIPE live path needs runnable `self`; timing secondary |
+
+Not assertion rewrites; product/compat issue when `GetProgramName`/`self` omits `.d4`.
+
+### 5. Reboot / network chronology (UTC)
+
+| Time | Event |
 |---|---|
-| CPU model identification | **PASS** (SYSINFO `cpu=68080` + bit 10) |
-| FPU reporting (live host field) | **INCONCLUSIVE** (field absent due to AmigaOS 4 mis-ID) |
-| CPU-load sampling (`amiga_cpu` 2 s) | **PASS** (idle 97.5 %; task breakdown returned) |
+| ~11:36 | Offline GO |
+| ~11:39 | First post-TLS-pin connect reached channel; preflight **read timed out** |
+| 11:41:40 | `network-outage.json` — ARP present, ICMP/TLS dead (errno 113) |
+| *(operator)* | **Operator-initiated reboot** (stated in chat) during recovery — **not** mid-candidate-session |
+| 11:42 | Preflight PASS after reboot; shell check PASS |
+| 11:43:40 | Physical handover MessageBox Yes (“after reboot”) |
+| 11:44 | Production QUIT → candidate proto-6 |
+| 11:45 | Safe regress + status/cpu on candidate |
+| 11:46–11:52 | Candidate QUIT; production restore (second prompt); verify PASS |
 
-`amiga_cpu` is a load sampler, not a CPU-model tool.
+Session was **not** reboot-free: reboot occurred **before** candidate launch, after preflight network loss.
 
-### Request 3
-**Not run.** Public 1.5.0 package lacks `amigentd.apollo`; live update remains NO-GO.
+### 6. Updater
+
+**Not run.** Public 1.5.0 package still has **no** `amigentd.apollo`; ApolloOS selection falls back to classic `amigentd` — live-update **NO-GO**.
 
 ---
 
-## A. PR #10 relevance verdict
+## Draft GitHub comment (**NOT POSTED**)
 
-**NO NEW UPSTREAM PR for #10.** Unchanged from prior review. Bit 10 ≠ FPU.
-
----
-
-## Draft maintainer response (**NOT POSTED**)
-
-> Thanks — we ran an authorised exclusive V4 session against public `feature/1.5.0` @ `651a357…` using our previously validated Apollo daemon `63db83ff…` (not the packaged classic 1.5.0 binary).
+> We completed an authorised exclusive V4 session against public `feature/1.5.0` @ `651a357…` using our previously validated Apollo daemon `63db83ff…` (not the packaged classic 1.5.0 binary). Production was restored afterward.
 >
-> **1. `regress.py`**  
-> Safe `--only` subset (17 checks; no TRACE/UI/monitor/clipboard/installer/MMIO): **14 passed, 3 failed**. Failures: `version` (SYSINFO `self` path `Programs:AmiGent-Stage4/amigentd` vs staged `amigentd.d4`), plus `job` and `live_output`. Full unrestricted regression was not run. This does not claim a hardware pass of the maintainer’s packaged 1.5.0 daemon.
+> **1. `regress.py`** — Safe `--only` subset (17 checks; no TRACE/UI/monitor/clipboard/installer/MMIO): **14 passed, 3 failed** (`version`, `job`, `live_output`). Full unrestricted regression was not run. The `version` failure matches a known `SYSINFO self=` path form (`…/amigentd` vs staged `amigentd.d4`); SHA-256 of the staged file was verified independently. `job` / `live_output` look like follow-ons when job FOLLOW uses that `self` path. This is not a hardware pass of packaged 1.5.0 `amigentd`.
 >
-> **2. `amiga_status` / `amiga_cpu` / FPU**  
-> Daemon SYSINFO: ApolloOS, **68080**, `attn_flags=42111`. `amiga_cpu` (2 s load sample) OK. Live `amiga_status` `system` block incorrectly labelled the machine **AmigaOS 4** (68k-emulation note) and therefore omitted the FPU line; offline `describe_fpu(42111)` yields `68080 with FPU` from FPU AttnFlags bits (not from bit 10 alone). Happy to re-test after an ApolloOS Version-parsing fix.
+> **2. `amiga_status` / `amiga_cpu` / FPU** — Daemon SYSINFO: ApolloOS, **68080**, `attn_flags=42111`. `amiga_cpu` (2 s load sample) OK. Live `amiga_status` `system` incorrectly said **AmigaOS 4** (and omitted FPU) because `describe_system(Version, CPU)` with Kickstart 51.51 and an empty/unparsed CPU line falls through to AmigaOS 4 and then skips AttnFlags FPU reporting — even though SYSINFO was already correct. Offline, `describe_fpu(42111)` yields `68080 with FPU` from FPU bits (not bit 10 alone). We prepared a small local reconcile of SYSINFO→`system` facts on `review/apolloos-sysinfo-reconcile` (tests green); no PR opened yet. We do **not** claim live FPU reporting was verified on hardware.
 >
-> **3. `amigent-setup --update`**  
-> Still not run on production. Public 1.5.0 ships no `amigentd.apollo`, so selection would favour classic `amigentd` — blocker until packaging/policy is agreed.
+> **3. `amigent-setup --update`** — Not run on production. Public 1.5.0 still ships no `amigentd.apollo`, so an ApolloOS update would select classic `amigentd` — packaging/policy blocker before any live update test.
 >
-> Production was restored to protocol 5 / `b00fef0e…` with SYSINFO ×2 after the session.
+> Chronology note: PC lost the V4 briefly during preflight; the operator rebooted **before** candidate launch; the candidate session itself then completed and production was restored.
 
 ---
 
 ## Confirmations
 
-- Fork `main`, upstream PRs, and production `C:amigentd` bytes **unchanged** (exclusive staged candidate only).  
-- No upstream comment posted.  
-- No `--update`. No native rebuild.
+- Fork `main`, upstream PRs, production bytes: **unchanged** by the offline investigation.  
+- No hardware contact for this follow-up.  
+- No `--update`. No upstream comment posted.  
+- Review branch local (+ optional fork push): `review/apolloos-sysinfo-reconcile` @ `7a45c57`.

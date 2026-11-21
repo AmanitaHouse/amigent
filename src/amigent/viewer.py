@@ -33,8 +33,8 @@ from . import __version__, machines, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
-from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
-                     native_ppc, ppc_software)
+from .system import (OS_NAMES, attn_flags, describe_fpu, describe_system,  # noqa: F401
+                     exec_before_os3, exec_coldreboot, native_ppc, ppc_software)
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -462,6 +462,10 @@ class Viewer:
                 if ppc:
                     self._system["ppc"] = ppc
         info = self._ctl(self.ctl.sysinfo)
+        if not native_ppc(self._system) and "processor" not in self._system:
+            # exec's AttnFlags tell the FPU better than C:CPU's text; amiga_status adds the library check
+            fpu = describe_fpu(attn_flags(info), self._system.get("cpu", ""), self._system.get("fpu", ""))
+            self._system.update(fpu=fpu.short(), processor=fpu.line())
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
         # chip_free stays None when SYSINFO omits it, so a page can tell a real

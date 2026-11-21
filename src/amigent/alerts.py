@@ -87,7 +87,20 @@ CPU = {
     0x0E: "format error",
     0x0F: "uninitialized interrupt",
     0x18: "spurious interrupt",
+    0x30: "FPU branch or set on unordered",
+    0x31: "FPU inexact result",
+    0x32: "FPU division by zero",
+    0x33: "FPU underflow",
+    0x34: "FPU operand error",
+    0x35: "FPU overflow",
+    0x36: "FPU signaling NaN",
+    0x37: "FPU unimplemented data type (68040/060 without its support library)",
+    0x3C: "unimplemented effective address (a 68060 FPU without 68060.library)",
+    0x3D: "unimplemented integer instruction (a 68060 without 68060.library)",
 }
+# CPU exceptions an FPU, or its missing support library, explains
+LINE_F = 0x0B
+SUPPORT_TRAPS = (0x37, 0x3C, 0x3D)
 
 
 def describe(code: int | str, where: int | str | None = None) -> str:
@@ -125,6 +138,47 @@ def describe(code: int | str, where: int | str | None = None) -> str:
     return text
 
 
+def cpu_exception(code: int | str) -> int | None:
+    """The exception number of a CPU guru ('0000000B' -> 11), else None."""
+    if isinstance(code, str):
+        try:
+            code = int(code.strip().lstrip("#$").split(".")[0], 16)
+        except ValueError:
+            return None
+    plain = code & 0x7FFFFFFF
+    return plain if plain & 0x7FFF0000 == 0 and plain in CPU else None
+
+
+def fpu_hint(code: int | str, fpu) -> str:
+    """For a line-F or FPU-support guru: what this Amiga's FPU says about it, or ''.
+
+    fpu is a system.Fpu. No FPU: the program needs one. A 68040/060 FPU
+    without its library: the library is missing. An FPU with its library:
+    probably not the FPU (an MMU instruction, or code that ran into data).
+    """
+    number = cpu_exception(code)
+    if fpu is None or number not in (LINE_F, *SUPPORT_TRAPS):
+        return ""
+    if fpu.present is None:
+        return ("the FPU is not known here (amigentd did not report exec's AttnFlags); an FPU "
+                "instruction without an FPU, or without 68040/68060.library, gives this guru"
+                if number == LINE_F else "")
+    if not fpu.present:
+        if number == LINE_F:
+            return (f"this Amiga has no FPU ({fpu.line()}): the program most likely needs an FPU "
+                    "this Amiga lacks. Look for a version built without FPU code, or an FPU "
+                    "emulator such as SoftIEEE")
+        return ""
+    if fpu.support_missing:
+        return (f"{fpu.line()}. The support library is missing: put {fpu.library} into LIBS: "
+                "(it comes with the CPU card or the OS); SetPatch in the Startup-Sequence "
+                "normally loads it")
+    if number == LINE_F:
+        return (f"this Amiga has an FPU ({fpu.line()}), so the cause is more likely an MMU or "
+                "other coprocessor instruction, or code that ran into data")
+    return ""
+
+
 def gurudat(text: str) -> dict[int, str]:
     """MCP's S:MCP.gurudat: 'XXXXXXXX description' per line."""
     out = {}
@@ -136,6 +190,14 @@ def gurudat(text: str) -> dict[int, str]:
             except ValueError:
                 pass
     return out
+
+
+def codes(text: str) -> list[int]:
+    """The guru codes in a guru log, in order."""
+    import re
+
+    return [int(m.group(1), 16) for line in text.splitlines()
+            if (m := re.search(r"\b([0-9A-Fa-f]{8})(?:\.[0-9A-Fa-f]{8})?\b", line))]
 
 
 def history(text: str, extra: dict[int, str] | None = None) -> list[str]:

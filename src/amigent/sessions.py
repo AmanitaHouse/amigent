@@ -25,6 +25,7 @@ class MachineSession:
         self.others_seen = {'at': -1e9, 'text': '', 'told': ''}
         self.outdated_told = False
         self.system_seen = {}
+        self.fpu = None  # system.Fpu, with system_seen
         self.last_started = ''
         self.windows_at_start = (0.0, [])
         self.last_shot = None
@@ -67,6 +68,7 @@ class MachineSession:
             conn.close()
             self.gdb.pop("where", None)
         self.system_seen.clear()
+        self.fpu = None
         self.others_seen.update(at=-1e9, text='', told='')
         self.last_shot = None
         self.last_look = 0.0

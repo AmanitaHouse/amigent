@@ -59,6 +59,9 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
+        self.info: dict[str, str] = {}  # more SYSINFO lines, such as attn_flags
+        self.answers: dict[str, tuple[int, str]] = {}  # EXEC: command -> (rc, output)
+        self.loaded: list[str] = []  # LOADED lines, answered from protocol 6 on
         self.hello_flags = 0  # 4 (TLSONLY): the hello, then the line is closed, as amigentd does
         self.received: list[bytes] = []  # every byte a client sent, per connection
         self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
@@ -166,8 +169,9 @@ class FakeAmiga:
             where = rd.read(y)
             if self.exec_delay:
                 time.sleep(self.exec_delay)
-            out = f"ran {path} in {where.decode() or '-'}".encode()
-            return self.ok(struct.pack(">iI", 0, len(out)) + out)
+            rc, text = self.answers.get(path, (0, f"ran {path} in {where.decode() or '-'}"))
+            out = text.encode("iso-8859-1")
+            return self.ok(struct.pack(">iI", rc, len(out)) + out)
         if cmd == 22:
             if path not in self.files:
                 return self.fail("Objekt nicht gefunden", 1)
@@ -207,7 +211,10 @@ class FakeAmiga:
                 time.sleep(len(self.files[path]) / self.crc_rate)
             return self.ok(struct.pack(">I", zlib.crc32(self.files[path])))
         if cmd == 30:
-            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n")
+            extra = "".join(f"{k}={v}\n" for k, v in self.info.items())
+            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n{extra}")
+        if cmd == 38 and self.protocol >= 6:
+            return self.text("".join(line + "\n" for line in self.loaded))
         if cmd == 31:
             return self.text("RAM Disk:\t10\t20\t30\t512\n")
         if cmd == 6:

@@ -124,8 +124,9 @@ def test_unsupported_audio_capability_clears_request():
     viewer = _page()
     viewer.amiga = {}
     viewer.submit({"t": "audio", "on": True})
-    assert viewer._hearing() and not viewer._audio_ready()
-    assert viewer.hear is False
+    assert viewer._hearing() and not viewer._audio_ready()  # empty info: not ready, hear unchanged
+    viewer.amiga = {"os": "AmigaOS", "audio": ""}
+    assert not viewer._audio_ready() and viewer.hear is False
 
 
 def test_last_client_leave_clears_hear():

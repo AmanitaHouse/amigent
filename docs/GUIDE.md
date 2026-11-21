@@ -461,6 +461,73 @@ Adding a machine never replaces an existing machine's address. Use the explicit
 address control to correct a saved mapping. `amigent-fleet` also opens the
 overview directly.
 
+### Saving several and choosing the default
+
+Run `amigent-setup --name NAME` for each Amiga (with its address, for example
+`amigent-setup 192.0.2.11 --name A500`), or add one that is already set up with
+`amigent-fleet --add A500 192.0.2.11`. The first Amiga saved becomes the
+default. Change it with `amigent-fleet --default A500` or **Manage Amigas… →
+Set default**. Removing the default makes the first remaining Amiga the
+default. `amiga_machines()` lists every saved Amiga with its ID and marks the
+default.
+
+### Naming one in a tool call
+
+Every tool that works on one Amiga takes `machine`, a saved name or ID:
+
+```python
+amiga_status(machine="A500")
+```
+
+Without `machine` a tool uses `AMIGENT_HOST`, then the default, then the only
+saved Amiga. With several saved and none of these (for example after editing
+`amigas.json` by hand), it refuses and asks to name one. An unknown name or
+address is refused too. Earlier addresses of an Amiga no longer find it; its
+name, ID, current address and earlier names do.
+
+`AMIGENT_POWER_CMD` and `AMIGENT_GDB` belong to the Amiga that `AMIGENT_HOST`
+names. With several saved and no `AMIGENT_HOST`, `amiga_power` refuses, even
+for the default, and `amiga_restart` does not cycle the power. For a smart
+plug, add a second MCP server entry with `AMIGENT_HOST` and
+`AMIGENT_POWER_CMD` for that Amiga; for WinUAE, set `"gdb"` in its entry in
+`amigas.json`. `AMIGENT_KEY`, when set, is used for every Amiga, so leave it
+unset with several.
+
+### The remote desktop without an address
+
+`amigent-viewer` without an address connects straight away only when exactly
+one Amiga is saved. Otherwise, also with none saved, it opens **Your Amigas**,
+whatever the default is. `amigent-viewer A500` opens that Amiga. An address,
+such as `amigent-viewer 192.0.2.10`, opens a one-off connection, even when it
+is a saved Amiga's address: it is not searched for when the Amiga moves. Use the
+name in shortcuts and in `AMIGENT_HOST`.
+
+### Files per Amiga
+
+Everything lives in `~/.config/amigent/` (or `$XDG_CONFIG_HOME/amigent/`).
+`amigas.json` holds the saved Amigas, each with an ID such as
+`amiga-0123456789abcdef0123456789abcdef`. Key and certificate are
+`key-<id>` and `tls-<id>.pem`; notes, installation records, the inventory, the
+journal and `amiga_follow`'s copies (`follow/<id>/`) are filed under the same
+ID. The ID is made on each PC, so the same Amiga has a different ID on another
+PC.
+
+`amigas.json` is checked when it is read. A damaged file is reported with its
+path and what is wrong, and the tools refuse until it is mended; it is not
+treated as empty.
+
+Updating from 1.4 or earlier copies the files named after an Amiga's name or
+address (`key-A1200`, `tls-192.0.2.10.pem`) to the new names. The old files
+stay where they were, and the registry as it was is kept as
+`amigas.pre-id.json`. Files whose name two Amigas could claim, such as an
+address both had, are not copied; save the right one as `tls-<id>.pem` by hand.
+The common `key` serves only an address that is not saved; on migration it is
+copied to the Amiga only when just one was saved.
+
+To use an Amiga from a second PC, copy its key and certificate there as
+`key-<address>` and `tls-<address>.pem` and then run
+`amigent-fleet --add NAME ADDRESS`; adding copies them to the new ID.
+
 ## How it works
 
 ```

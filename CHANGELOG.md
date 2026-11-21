@@ -61,6 +61,34 @@ Versions follow [semver](https://semver.org). The number lives in
 - Saved Amigas now keep credentials, settings and history under a stable ID.
   Migration keeps the original files. After a downgrade, older versions see
   the pre-migration history. Later writes remain under the machine ID.
+- One MCP server drives every saved Amiga; each tool takes `machine` (a saved
+  name or ID). Without it a tool uses `AMIGENT_HOST`, then the saved default,
+  then the only saved Amiga. With several saved and none of these, the tool
+  refuses and says to name one; `amigent-fleet --default NAME` or *Set default*
+  in **Manage Amigas…** sets the default. (#12, #13)
+- `AMIGENT_POWER_CMD` and `AMIGENT_GDB` belong to the Amiga named by
+  `AMIGENT_HOST`. With several saved and no `AMIGENT_HOST`, `amiga_power`
+  refuses, even for the default, and `amiga_restart` no longer cycles the
+  power; put the power command into an MCP entry with `AMIGENT_HOST`, and the
+  debugger address into the Amiga's `"gdb"` in `amigas.json`. (#40)
+- `amigent-viewer` without an address opens **Your Amigas** unless exactly one
+  Amiga is saved, also when none is (it used to stop with a message). Give a
+  name to open one directly. (#40)
+- Addresses an Amiga had earlier no longer find it; only its name, ID, current
+  address or an earlier name do. A tool call with an unknown name or address
+  is refused; an address given to `amigent-viewer` opens a one-off connection
+  that is not searched for when the Amiga moves. Use the name in
+  `AMIGENT_HOST` and in shortcuts. (#40)
+- `amigas.json` is checked strictly. A damaged file is reported with its path
+  and what is wrong, and tools refuse until it is mended, instead of acting as
+  if no Amiga were saved. (#40)
+- Key and certificate are read from `key-<id>` and `tls-<id>.pem` in
+  `~/.config/amigent/`. The files named after the name or address, the common
+  `key`, and `amigas.pre-id.json` (the registry before the IDs) stay where they
+  were. The common `key` now only serves an address that is not saved; on
+  migration it is copied to the Amiga only when just one was saved. (#40)
+- `amiga_follow` copies into `follow/<id>/` in `~/.config/amigent/` by default,
+  one folder per Amiga, instead of `follow/` itself. (#40)
 
 ### Installing and updating
 

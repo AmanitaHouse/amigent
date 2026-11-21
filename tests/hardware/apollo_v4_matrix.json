@@ -361,7 +361,7 @@
     "fork_packaged_matches_hw": true,
     "viewer_hear_ui_safety_review": "docs/APOLLO_V4_VIEWER_HEAR_UI_SAFETY.md",
     "viewer_hear_ui_branch": "contrib/viewer-hear-ui-safety",
-    "viewer_hear_ui_sha": "e187e6e70249c374e94d96c33126b1ba6e63e4a0",
+    "viewer_hear_ui_sha": "e187e6e70249c374e94d96c33126b1ba6e63e4a4",
     "audio_distribution_viewer_closure": "docs/APOLLO_V4_AUDIO_DISTRIBUTION_AND_VIEWER_CLOSURE.md",
     "fork_stream_session_audio_starts": 1,
     "fork_stream_wall_s": 7.114,

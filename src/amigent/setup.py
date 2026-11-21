@@ -135,6 +135,16 @@ def build_for_channel(channel) -> str:
     return _chosen(_machine(cpu, apollo))
 
 
+APOLLO_KEPT = ("{name} runs ApolloOS, and this package has no amigentd.apollo, so the amigentd "
+               "there (likely a build for the 68080) was left in place; the scripts were renewed. "
+               "--force puts the classic amigentd on all the same.")
+
+
+def apollo_without_build(channel) -> bool:
+    """ApolloOS, but no Apollo daemon in this package: an update must not swap the one there."""
+    return not _apollo_packaged() and _apollo_by_channel(channel)
+
+
 def _apollo_packaged() -> bool:
     """Only an Apollo build makes ApolloOS matter; without one nothing is asked."""
     return (AMIGA / "bin" / "amigentd.apollo").is_file()
@@ -364,6 +374,8 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             installed = None  # the Amiga answered: there is no C:amigentd to read
         if force and installed != new:
             replace, reason = True, ""
+        elif installed is not None and installed != new and apollo_without_build(channel):
+            replace, reason = False, APOLLO_KEPT.format(name=shown)
         else:
             replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
         if not replace:

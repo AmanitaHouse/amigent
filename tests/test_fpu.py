@@ -352,3 +352,15 @@ def test_the_remote_desktop_tells_emu68_and_nofpu():
     assert facts["fpu_state"] == "missing" and facts["fpu_library"] == "68040.library"
     facts = _viewer({"attn_flags": hex(A1200_030_882)}, [])
     assert facts["fpu_state"] == "chip" and facts["fpu_chip"] == "68882"
+
+
+def test_a_self_path_that_is_not_there_turns_follow_off(on):
+    """A build of its own reported self= a name it was not started under; jobs must not
+    then pipe through a FOLLOW helper that cannot be found."""
+    fake = on(amiga(0x47, "68040"))
+    fake.info["self"] = "C:amigentd"
+    fake.dirs.add("PIPE:")
+    assert server._amigentd_path() == ""
+    server._session().self_path.clear()
+    fake.files["C:amigentd"] = b"\0\0\x03\xf3"
+    assert server._amigentd_path() == "C:amigentd"

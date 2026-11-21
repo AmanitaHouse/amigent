@@ -96,6 +96,12 @@ class Run:
         # the running amigentd may live elsewhere than C: (an emulator's own folder)
         where = self.session.ctl.sysinfo().get("self", "") or "C:amigentd"
         out = self.s.amiga_exec(f'Version "{where}"')
+        if not out.startswith("rc=0"):
+            try:
+                self.session.ctl.stat(where)
+            except Exception:  # noqa: BLE001
+                raise AssertionError(f"amigentd reports self={where}, which is not there; "
+                                     "jobs then run without FOLLOW") from None
         assert out.startswith("rc=0"), out
         return f"running {where}: {out.splitlines()[-1]}"
 

@@ -695,6 +695,11 @@ def _amigentd_path() -> str:
             return ""
         if me:
             try:
+                _with_ctl(lambda: _session().ctl.stat(me))
+            except AmigaError:
+                me = ""  # a self= that is not there (a build of its own): jobs as before 1.4.0
+        if me:
+            try:
                 _with_ctl(lambda: _session().ctl.stat("PIPE:"))
             except AmigaError as e:
                 if "not mounted" in str(e) or "isn't there" in str(e):

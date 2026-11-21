@@ -149,6 +149,13 @@ Versions follow [semver](https://semver.org). The number lives in
 
 - A viewer that takes over from another one keeps the screen picture instead
   of starting from black. (#29)
+- On ApolloOS, `amiga_status` takes the system from amigentd's own report when
+  the version text alone looks like AmigaOS 4, so the FPU is described again.
+  (#49, thanks to AmanitaHouse)
+- `amigent-setup --update` leaves the amigentd on an ApolloOS machine in place
+  when the package has no Apollo build; `--force` replaces it all the same.
+- Jobs no longer pipe through amigentd's FOLLOW helper when the path amigentd
+  reports for itself does not exist; they run as before 1.4.0 then.
 - A screen pause of 120 s is reported as 120 s, not 121. (#32)
 - `amigent-doctor --help` exits with 0. (#34)
 - The remote desktop no longer sends the reset chord to Kickstart 1.3 and

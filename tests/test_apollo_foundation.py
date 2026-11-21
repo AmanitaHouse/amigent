@@ -154,8 +154,9 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
     assert setup.build_for_channel(broken) == "amigentd"
 
 
-def test_update_on_apolloos_keeps_the_packaged_68020_daemon(monkeypatch):
-    """The published package has no Apollo daemon, so the copy must stay the classic one."""
+def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, capsys):
+    """The published package has no Apollo daemon. The one on an ApolloOS machine may be a
+    68080 build of its own, so an update leaves it; --force puts the classic one on."""
     assert not (AMIGA / "bin" / "amigentd.apollo").is_file()
     amiga = {"C:amigentd": b"old", "commands": []}
 
@@ -191,6 +192,9 @@ def test_update_on_apolloos_keeps_the_packaged_68020_daemon(monkeypatch):
     monkeypatch.setattr(setup.time, "sleep", lambda s: None)
     monkeypatch.setattr(setup, "AmigaChannel", Live)
     assert setup.update("192.0.2.1", None) == 0
+    assert amiga["C:amigentd"] == b"old" and "C:amigentd.new" not in amiga
+    assert "has no amigentd.apollo" in capsys.readouterr().out
+    assert setup.update("192.0.2.1", None, force=True) == 0
     assert amiga["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
     assert "T:amigent-apollo-probe" not in amiga
 

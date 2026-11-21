@@ -65,10 +65,16 @@ extern struct Library *CyberGfxBase;
 #define RECTFMT_RGB 0
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
+#elif !defined(AMIGENT_APOLLO)
+/* Classic and Emu68 GCC builds take the toolchain's own cybergraphics
+ * headers and inline stubs. */
+#include <proto/cybergraphics.h>
+#include <cybergraphx/cybergraphics.h>
+#include <inline/macros.h>
 #else
-/* GCC 6.50 Stable ships no cybergraphics headers. The four calls below are
- * the ones this file makes, implemented in gcc_support.c at the same offsets
- * as the vbcc stubs. */
+/* ApolloCrossDev's GCC 6.50 Stable ships no cybergraphics headers. The four
+ * calls below are the ones this file makes, implemented in gcc_support.c at
+ * the same offsets as the vbcc stubs. Apollo builds only. */
 #include <inline/macros.h>
 #include <utility/tagitem.h>
 ULONG GetCyberMapAttr(struct BitMap *bm, ULONG attr);

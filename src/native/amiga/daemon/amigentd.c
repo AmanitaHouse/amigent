@@ -4371,6 +4371,11 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
+#ifdef AMIGENT_APOLLO
+    t_pair(&t, "trace", 0);  /* TRACE set refused on Apollo/68080 until validated */
+#else
+    t_pair(&t, "trace", 1);
+#endif
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
     t_str(&t, (const UBYTE *)"execbase=", FALSE);
@@ -6930,8 +6935,8 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
  * happened: it fires once, and the program never stops.
  *
  * The trap stub is the upstream 1.4.0 handler. Its behaviour on a 68080 has
- * not been validated on hardware. The command is implemented; that is not a
- * claim that a tracepoint has been shown to fire on ApolloOS. */
+ * not been validated on hardware. Apollo builds (AMIGENT_APOLLO) refuse TRACE
+ * set before any code or trap-handler change; list and clear still work. */
 
 static const UBYTE trap_code[68] = {
     0x0c, 0x97, 0x00, 0x00, 0x00, 0x2f, 0x66, 0x2a, 0x48, 0xe7, 0xff, 0xfe,
@@ -7129,6 +7134,11 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
     }
     if (op != 1)
         return c_fail(l, 1, "unknown trace operation");
+#ifdef AMIGENT_APOLLO
+    /* 68080 trap stub not hardware-validated: refuse before patching code or tc_TrapCode. */
+    (void)at;
+    return c_fail(l, 1, "tracepoints are not supported on this Apollo build yet");
+#endif
     if (at & 1)
         return c_fail(l, 1, "code starts at an even address");
     for (i = 0; i < TRACES; i++)  /* a second one would take our TRAP for the instruction */

@@ -99,7 +99,7 @@ def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int
         if feature == "TASKCTL" and info.get("loaded") == "1":
             return TASKCTL
         if feature == "TRACE" and info.get("loaded") == "1":
-            return TRACE
+            return None if info.get("trace") == "0" else TRACE
         if feature == "POKE":
             return POKE
         return None

@@ -4710,7 +4710,7 @@ def amiga_emu68_update(archive: str = "", confirm: bool = False, after_restart: 
     from . import emu68card
     if after_restart:
         versions = {lib.name: (lib.version, lib.revision) for lib in _loaded().libraries}
-        return emu68card.confirm_update(_emu68_root(), versions)
+        return emu68card.confirm_update(_emu68_root(), versions, running=_emu68_running())
     if not archive.strip():
         raise AmigaError("archive: the Emu68 release zip or folder on this PC")
     path = Path(archive.strip()).expanduser()
@@ -4720,7 +4720,19 @@ def amiga_emu68_update(archive: str = "", confirm: bool = False, after_restart: 
     files = emu68card.read_archive(path)
     root = _emu68_root()
     root.mkdir(parents=True, exist_ok=True)
-    return emu68card.update(card, files, root, videocore=_videocore_version(), confirm=confirm)
+    return emu68card.update(card, files, root, videocore=_videocore_version(),
+                            running=_emu68_running(), confirm=confirm)
+
+
+def _emu68_running() -> str | None:
+    """The version of the Emu68 that runs now, from amigentd 1.5.0's EMU68 answer; None
+    when amigentd is older, so the card's kernel file stands in for it."""
+    from . import emu68
+    try:
+        version = emu68.parse(_with_ctl(_session().ctl.emu68_info)).get("version", "")
+    except (AmigaError, OSError, ValueError):
+        return None
+    return version if re.match(r"\d+\.\d+", version) else None
 
 
 def _close_for_update() -> None:

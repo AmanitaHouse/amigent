@@ -59,7 +59,7 @@ F-DAE was **not** tested. Stage 3 was **not** started. `C:amigentd` was **not** 
 | `exec_version` | 51.3 |
 | `attn_flags` | 42111 (AFF_FPGA bit present) |
 | Shell `Version` | Kickstart 51.51, Workbench 40.0 |
-| `self` (protocol 6) | `Programs:AmiGent-Stage2B/amigentd` |
+| `self` (protocol 6) | `Programs:AmiGent-Stage2B/amigentd` — staged file was `…/amigentd.udae`; see `docs/APOLLO_V4_SELF_PATH_NOTE.md` |
 | `poke` | 0 |
 | `probe` | 1 |
 | `loaded` | 1 |

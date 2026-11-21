@@ -2,6 +2,8 @@
 
 **Prepared:** 2026-11-21  
 **Status:** First U-DAE exclusive session **executed** — see `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`  
+**Maintainer summary:** `docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md`  
+**F-DAE next:** `docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md` (not authorised)  
 **Parent docs tip:** `cc2907e`  
 **Based on:** Stage 1 inventory, Stage 2A backup (`docs/APOLLO_V4_STAGE2A_RESULTS.md`), `docs/PROTOCOL.md`, `src/amigent/tls.py`, `src/amigent/amiga/amigent-update.rexx`, `src/native/amiga/daemon/amigentd.c`
 

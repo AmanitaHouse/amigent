@@ -112,5 +112,21 @@
     "viewer_http_default": 6810,
     "ctl_env": "AMIGENT_CTL_PORT",
     "screen_env": "AMIGENT_SCREEN_PORT"
+  },
+  "hardware_coverage": {
+    "note": "Software unit tests are not substitutes for these rows",
+    "U-DAE_protocol6_smoke": "PASSED_ON_HARDWARE",
+    "F-DAE_protocol6": "NOT_RUN",
+    "U-DAE_AUDIO": "NOT_RUN",
+    "F-DAE_AUDIO": "NOT_RUN",
+    "native_apollo_probe_execution": "NOT_RUN",
+    "viewer_Hear_playback": "NOT_RUN",
+    "apollo_monitor": "NOT_RUN",
+    "HRTmon": "NOT_RUN",
+    "live_MMIO": "NOT_RUN",
+    "installer_update_fallback": "NOT_RUN",
+    "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
+    "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
+    "self_path_note": "docs/APOLLO_V4_SELF_PATH_NOTE.md"
   }
 }

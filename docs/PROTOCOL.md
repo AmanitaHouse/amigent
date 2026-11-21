@@ -114,7 +114,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 9 | RUN | | x = command length | return code |
 | 10 | SETUP_END | | | ok |
 | 11 | SCREENS | | | screens |
-| 12 | SCREEN_FRONT | | x = handle high word, y = handle low word | ok |
+| 12 | SCREEN_FRONT | 1 = aim FRAME_RGB only (1.5.0) | x = handle high word, y = handle low word | ok |
 | 13 | FRAME_RGB | 1 = packed | region | rgb |
 | 14 | MOVE_REL | | x = dx, y = dy, signed | ok |
 | 15 | UITREE | | | text |
@@ -325,10 +325,28 @@ title is the screen's default title, or its current one if it has none. The
 handle is the screen's address; it means nothing but the screen, and only as
 long as that screen stays open.
 
+From 1.5.0 the flags also say what is on display. `0x8000` is set on every
+screen when these bits are filled in; an older amigentd never sets it.
+`0x4000`, on every screen: `GfxBase->ActiView` is not Intuition's `ViewLord`, so
+the chipset shows a view a program loaded itself (or none). `32`: a chipset
+screen whose ViewPort is in `ActiView` and not hidden. `16`: the frontmost of
+those, the screen the chipset output shows. A graphics card screen never has
+`16` or `32`; the card shows its own frontmost screen, which with a second
+monitor is visible next to the chipset output. A copper list written straight
+to the hardware leaves `ActiView` alone and does not show here.
+
 SCREEN_FRONT brings the screen with that handle to the front, after checking that
 it is still open. `1` if it isn't. The next FRAME then reads everything fresh.
 The answer comes at once; while a menu is open, Intuition only switches screens
 once it closes.
+
+SCREEN_FRONT with arg `1` (from 1.5.0, only where SCREENS sets `0x8000`) moves
+nothing: it aims FRAME_RGB at that screen, which then reads that screen's bitmap
+and clips to its size, whether it is in front or not. Handle `0` aims at the
+front screen again, as every new connection starts. `1` if the screen has
+closed; a screen that closes after the aim gives the front one. An older
+amigentd would take this for a plain SCREEN_FRONT, so a client checks `0x8000`
+first.
 
 ## rgb
 

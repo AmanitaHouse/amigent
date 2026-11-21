@@ -2596,24 +2596,49 @@ static const UBYTE *screen_title(struct Screen *s)
     return s->DefaultTitle ? s->DefaultTitle : s->Title;
 }
 
+/* Whether vp is one of the view's viewports and not hidden; under LockIBase. */
+static BOOL in_view(struct View *v, struct ViewPort *vp)
+{
+    struct ViewPort *p;
+    WORD n = 0;
+
+    for (p = v ? v->ViewPort : NULL; p && n < 256; p = p->Next, n++)
+        if (p == vp)
+            return !(vp->Modes & VP_HIDE);
+    return FALSE;
+}
+
 static BOOL screens(void)
 {
     struct text t = {0};
     struct Screen *s;
+    struct View *shown;
     ULONG lock;
     UBYTE b[16] = {0};
-    UWORD count = 0;
-    BOOL ok;
+    UWORD count = 0, all;
+    BOOL ok, chip = FALSE;
 
     t_add(&t, b, 2);  /* count, filled in below */
     lock = LockIBase(0);
+    /* What the chipset puts out is GfxBase->ActiView. Intuition's own is ViewLord;
+     * anything else is a program's LoadView. A copper list poked straight into
+     * the hardware leaves ActiView alone and can't be seen from here. */
+    shown = GfxBase->ActiView;
+    all = 0x8000;  /* these display bits are filled in */
+    if (shown != &IntuitionBase->ViewLord) all |= 0x4000;
     for (s = IntuitionBase->FirstScreen; s; s = s->NextScreen) {
         const UBYTE *title = screen_title(s);
-        UWORD flags = 0, n = title ? strlen((const char *)title) : 0;
+        UWORD flags = all, n = title ? strlen((const char *)title) : 0;
+        BOOL rtg = is_rtg(s);
         if (s == IntuitionBase->FirstScreen) flags |= 1;
         if ((s->Flags & SCREENTYPE) == WBENCHSCREEN) flags |= 2;
-        if (is_rtg(s)) flags |= 4;
+        if (rtg) flags |= 4;
         if (GetVPModeID(&s->ViewPort) & HAM_KEY) flags |= 8;
+        if (!rtg && in_view(shown, &s->ViewPort)) {
+            flags |= 32;  /* its ViewPort is in the view on display */
+            if (!chip) flags |= 16;  /* the frontmost of those: what the chipset shows */
+            chip = TRUE;
+        }
         be32(b, (ULONG)s);
         be16(b + 4, s->Width);
         be16(b + 6, s->Height);
@@ -2804,6 +2829,11 @@ static ULONG pack_rgb(const UBYTE *p, ULONG len, UBYTE *out)
     return n;
 }
 
+/* The screen FRAME_RGB reads: a handle from SCREENS, set by SCREEN_FRONT with
+ * arg 1; 0 for the front one. Ends with the connection. A screen that has
+ * closed meanwhile gives the front one. */
+static ULONG aim;
+
 static BOOL frame_rgb(BOOL packed, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2812,7 +2842,10 @@ static BOOL frame_rgb(BOOL packed, LONG x, LONG y, LONG w, LONG h)
     BOOL ok;
 
     lock = LockIBase(0);
-    scr = IntuitionBase->FirstScreen;
+    for (scr = IntuitionBase->FirstScreen; aim && scr && (ULONG)scr != aim; scr = scr->NextScreen)
+        ;
+    if (!scr)
+        scr = IntuitionBase->FirstScreen;
     if (!w || x + w > scr->Width) w = scr->Width - x;
     if (!h || y + h > scr->Height) h = scr->Height - y;
     if (w <= 0 || h <= 0 || w * h > RGB_MAX || !(buf = AllocVec(w * h * 3, MEMF_ANY)))
@@ -3159,6 +3192,7 @@ static void drop_client(void)
     }
     out_len = 0;
     in_have = nacks = 0;
+    aim = 0;
     set_buttons(0);
     ObtainSemaphore(&picture);
     if (want)
@@ -7729,6 +7763,14 @@ static BOOL command(const UBYTE *c)
     case CMD_SCREENS:
         return screens();
     case CMD_SCREEN_FRONT:
+        if (c[1] & 1) {  /* from 1.5.0 (0x8000 in SCREENS): aim FRAME_RGB, move nothing */
+            aim = (ULONG)x << 16 | y;
+            if (aim && !open_screen(aim)) {
+                aim = 0;
+                return reply(1);
+            }
+            return reply(0);
+        }
         return screen_front((ULONG)x << 16 | y);
     case CMD_FRAME_RGB:
         return frame_rgb(c[1] & 1, x, y, w, h);

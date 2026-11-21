@@ -24,6 +24,9 @@ CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = rang
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
 CMD_AUTH, CMD_CLIENT, CMD_PAUSE = 17, 18, 19
+AIM = 1  # SCREEN_FRONT arg, when SCREENS carries DISPLAY_KNOWN: FRAME_RGB reads that screen
+# SCREENS flags from 1.5.0: what the display shows. See "screens" in PROTOCOL.md.
+CHIP_SHOWN, IN_VIEW, FOREIGN_VIEW, DISPLAY_KNOWN = 16, 32, 0x4000, 0x8000
 PAUSE_PROTOCOL = 4  # INFO tells the seconds of screen pause left, PAUSE sets them
 RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
 FRAME_PLANAR = 2 | 4  # FRAME arg bits: planes or chunky tiles, all methods; PROTOCOL.md "planar"
@@ -438,6 +441,11 @@ class Amigentd:
             found.append({"handle": handle, "width": w, "height": h, "depth": depth,
                           "front": bool(flags & 1), "workbench": bool(flags & 2),
                           "rtg": bool(flags & 4), "ham": bool(flags & 8),
+                          # None: an amigentd before 1.5.0 doesn't say what is on display
+                          "display": bool(flags & DISPLAY_KNOWN),
+                          "chip_shown": bool(flags & CHIP_SHOWN) if flags & DISPLAY_KNOWN else None,
+                          "in_view": bool(flags & IN_VIEW) if flags & DISPLAY_KNOWN else None,
+                          "foreign_view": bool(flags & FOREIGN_VIEW) if flags & DISPLAY_KNOWN else None,
                           "title": (yield size).decode("iso-8859-1")})
         return found
 
@@ -757,8 +765,29 @@ class Amigentd:
 
         return self._retry(call)
 
-    def capture_rgb(self, x: int, y: int, w: int, h: int) -> Image.Image:
-        """A region in full colour, fetched packed in pieces of at most RGB_AREA pixels."""
+    def capture_screen(self, screen: dict) -> Image.Image:
+        """The whole of a screen from screens(), in front or not, in full colour.
+
+        Needs an amigentd that can aim FRAME_RGB (DISPLAY_KNOWN in SCREENS; an older
+        one would take the aim for SCREEN_FRONT and bring the screen forward).
+        FRAME_RGB reads that screen's bitmap; the front picture and its tiles stay."""
+        if not screen.get("display"):
+            raise AmigentdError("amigentd on the Amiga can only picture the front screen; "
+                                "run amigent-setup --update, or bring it to the front with "
+                                "amiga_screen_front")
+        try:
+            return self.capture_rgb(0, 0, screen["width"], screen["height"], aim=screen["handle"])
+        finally:
+            try:
+                self._ok(CMD_SCREEN_FRONT, AIM, 0, 0)
+            except (AmigentdError, OSError):
+                pass  # a new connection starts aimed at the front anyway
+
+    def capture_rgb(self, x: int, y: int, w: int, h: int, aim: int = 0) -> Image.Image:
+        """A region in full colour, fetched packed in pieces of at most RGB_AREA pixels.
+
+        aim: a screen handle; each piece aims at it first, so a new connection
+        on the way can't hand back the front screen instead."""
         self._need(2)
         picture = Image.new("RGB", (w, h))
         piece_w = min(w, RGB_AREA)
@@ -768,6 +797,10 @@ class Amigentd:
                 pw, ph = min(piece_w, w - left), min(piece_h, h - top)
 
                 def call():
+                    if aim:
+                        self._send(CMD_SCREEN_FRONT, AIM, aim >> 16 & 0xFFFF, aim & 0xFFFF)
+                        if self._exact(1) != b"\0":
+                            raise AmigentdRefused("that screen has just closed")
                     self._send(CMD_FRAME_RGB, 1, x + left, y + top, pw, ph)
                     gw, gh, size = struct.unpack(">HHI", self._exact(8))
                     return gw, gh, self._exact(size)

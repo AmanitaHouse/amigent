@@ -699,7 +699,16 @@ class Commands:
             except AmigaError as e:
                 if "refused the key" in str(e) or "wants a key" in str(e):
                     raise
-            self.backend = AmigaCtl(self.host, self.ctl_port, self.timeout)
+                first = e
+            legacy = AmigaCtl(self.host, self.ctl_port, self.timeout)
+            try:
+                legacy.connect()
+            except AmigaError as e:
+                # Neither answered: try amigentd again next time. Settling on amigactld here
+                # would keep a session on the old daemon after one short outage.
+                raise AmigaError(f"{first}; the older amigactld does not answer either ({e})") from e
+            self.backend = legacy
+            return
         self.backend.connect()
 
     def close(self) -> None:

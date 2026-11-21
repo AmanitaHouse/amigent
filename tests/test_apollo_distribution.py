@@ -301,10 +301,7 @@ def test_update_replaces_known_superseded_fdae_apollo(tmp_path, monkeypatch):
     from amigent.daemons import SUPERSEDED_APOLLO_SHA256, consider_replacement
 
     assert "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca" in SUPERSEDED_APOLLO_SHA256
-    fdae = subprocess.check_output(
-        ["git", "show", "065c112:src/amigent/amiga/bin/amigentd.apollo"],
-        cwd=ROOT,
-    )
+    fdae = (ROOT / "tests/fixtures/amigentd.apollo.fdae-1e0e3f65").read_bytes()
     assert _sha(fdae) == "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca"
     candidate = _packaged("amigentd.apollo")
     assert _sha(candidate) == DAEMON[1]

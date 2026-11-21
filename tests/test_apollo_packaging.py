@@ -27,7 +27,8 @@ HUNK = b"\x00\x00\x03\xf3"
 # GCC 6.50 Stable. The daemon links the MMIO guard with AUDIO. build/ is not packaged.
 APOLLO = {
     "amigentd.apollo": (129844, "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6"),
-    "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
+    # Rebuilt with GCC 6.50 Stable to report AFF_FPGA core evidence.
+    "amigent-apollo-probe": (3224, "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265"),
 }
 MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
@@ -61,7 +62,7 @@ def test_the_packaged_apollo_executables_match_the_staged_build():
     daemon = _packaged("amigentd.apollo")
     assert b"arne.audio" in daemon and b"ApolloOS" in daemon and b"pip" not in daemon
     probe = _packaged("amigent-apollo-probe")
-    assert b"ApolloOS" in probe and b"AmigaOS" in probe and b"arne.audio" not in probe
+    assert b"ApolloOS" in probe and b"AmigaOS" in probe and b"68080" in probe and b"arne.audio" not in probe
     monitor = _packaged("amigent-monitor.apollo")
     assert len(monitor) == MONITOR[0] and _sha(monitor) == MONITOR[1] and monitor.startswith(HUNK)
     for name, (size, digest) in CLASSIC.items():

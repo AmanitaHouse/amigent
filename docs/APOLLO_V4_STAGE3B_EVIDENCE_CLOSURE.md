@@ -32,7 +32,7 @@ Bounded supervised streaming on the stream-safe U-HEAR candidate is **hardware-v
 
 940704 bytes ÷ 4 ÷ 47931 Hz ≈ **4.91 s** of PCM inside **7.078 s** wall time — overhead unexplained as loss; expected for pump/start/stop.
 
-## Follow-on work (offline / later HW)
+## Follow-on work
 
-- Fork `main` diagnostic-dump removal (separate branch; not HW-validated until tested).  
+- Fork stream-safety branch `contrib/fork-audio-stream-safety` @ `496f142` — offline candidate `00443719…` (129944 B); **not HW-validated**. See `docs/APOLLO_V4_STAGE3B_FORK_STREAM_SAFETY_NEXT_HW.md`.  
 - Optional future: stock Viewer UI Hear; F-DAE AUDIO; longer soak — each needs explicit authorisation.

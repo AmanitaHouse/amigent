@@ -4,16 +4,18 @@
 **Purpose:** Smoke + one nonempty `audio(0)` on a **new** fork-built candidate after diagnostic-dump removal.  
 **Do not** treat as Hear UI validation unless separately named.
 
-## Candidate (to be filled after offline build)
+## Candidate (offline build — **not** hardware-validated)
 
-| Field | Placeholder |
-|-------|-------------|
+| Field | Value |
+|-------|-------|
 | Branch | `contrib/fork-audio-stream-safety` |
-| Source commit | *(build provenance)* |
-| Size / SHA-256 | *(build provenance)* |
-| Staging path | e.g. `Programs:AmiGent-Stage3B/amigentd.ffork` |
+| Source commit | `496f142` |
+| Size | **129944** bytes |
+| SHA-256 | `004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c` |
+| Staging path (suggested) | `Programs:AmiGent-Stage3B/amigentd.ffork` |
+| Evidence copy | `~/amigent-evidence/fork-audio-stream-safety/20261121T033004Z` |
 
-Must **not** overwrite U-DAE, F-DAE, or U-HEAR `983fd853…`.
+Must **not** overwrite U-DAE `456fce26…`, F-DAE `1e0e3f65…`, or U-HEAR `983fd853…`.
 
 ## Prioritised tests (single exclusive session)
 

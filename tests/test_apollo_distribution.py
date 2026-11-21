@@ -23,7 +23,7 @@ from amigent.serve import FILES
 ROOT = Path(__file__).resolve().parent.parent
 BIN = AMIGA / "bin"
 HUNK = b"\x00\x00\x03\xf3"
-DAEMON = (129944, "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c")  # stream-safe HW-validated packaging
+DAEMON = (128308, "6765f090c4e92898c479cac36bb0021872f6c046238a3d7a670b906ae82c9f85")  # D3+TRACE combined; NOT HARDWARE VALIDATED
 PROBE = (3224, "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265")
 MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
@@ -43,7 +43,7 @@ def _packaged(name: str) -> bytes:
     return (BIN / name).read_bytes()
 
 
-def test_the_packaged_daemon_is_the_stream_safe_protocol6_executable():
+def test_the_packaged_daemon_is_the_d3_trace_combined_protocol6_executable():
     size, digest = DAEMON
     data = _packaged("amigentd.apollo")
     assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)

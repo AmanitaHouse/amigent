@@ -367,7 +367,7 @@
     "fork_stream_wall_s": 7.114,
     "fork_stream_aggregate_pcm_bytes": 948352,
     "stage3b": {
-      "status": "phase6_stock_viewer_hear_executed",
+      "status": "CLOSED",
       "phase5_results": "docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md",
       "phase5_evidence": "amigent-evidence/stage3b-fork-stream/20261121T034526Z",
       "phase5_sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
@@ -412,11 +412,14 @@
       "phase6_chunks": 160,
       "phase6_rate": 47931,
       "phase6_human_audible": "YES",
-      "phase6_production_restored": true
+      "phase6_production_restored": true,
+      "final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
+      "closure_docs_tip": "78a68c54ab1905caf6dc166b1c97ac990cfcf4d0",
+      "human_audible_final": "YES_BRIEF"
     },
     "apollo_monitor": "NOT_RUN",
     "HRTmon": "NOT_RUN",
-    "live_MMIO": "NOT_RUN",
+    "live_MMIO": "NOT_RUN — Stage 4 Phase 1 proposed (D2 PEEK refuse)",
     "installer_update_fallback": "NOT_RUN",
     "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
     "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
@@ -440,6 +443,18 @@
     "stock_viewer_hear_pcm_bytes": 611840,
     "stock_viewer_hear_chunks": 160,
     "stock_viewer_hear_wall_s": 7.628,
-    "stock_viewer_hear_audio_starts": 1
+    "stock_viewer_hear_audio_starts": 1,
+    "stage3b_final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
+    "stage3b_status": "CLOSED",
+    "stage4_safety_assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
+    "stage4_status": "offline_assessment_complete_no_hw",
+    "upstream_1_5_0_public": "NOT_PUBLISHED — no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
+    "stage4": {
+      "status": "offline_assessment_complete",
+      "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
+      "proposed_next": "D2 live PEEK refuse into one protected SAGA window",
+      "authorised_hw": false,
+      "upstream_1_5_0": "still_private"
+    }
   }
 }

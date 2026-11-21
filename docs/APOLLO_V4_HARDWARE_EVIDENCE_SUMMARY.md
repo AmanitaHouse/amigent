@@ -1,8 +1,9 @@
 # Apollo V4 hardware evidence summary (maintainer-facing)
 
 **Public-safe.** No hosts, keys, credentials, or raw logs.  
-**Session:** Stage 2B exclusive U-DAE — 2026-11-21  
-**Detail report:** `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`  
+**Stage 3B AUDIO:** **CLOSED** — `docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md`  
+**Stage 4:** Offline safety assessment only — `docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md`  
+**Early exclusive smoke detail:** `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`  
 **Docs branch:** `validation/apollo-v4-evidence-prep`
 
 ## What was tested on hardware
@@ -31,12 +32,13 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 
 ## Explicitly **not** hardware-validated by this session
 
-- F-DAE AUDIO / long-duration Hear soak / fork streaming — still **NOT RUN ON HW**  
-- Viewer Hear (stream-safe U-HEAR `983fd853…`): **PASSED ON HW** (bounded supervised session) — `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md`  
-- Corrected fork oneshot (`00443719…`): **PASSED ON HW** — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md`  
+- F-DAE (`1e0e3f65…`) AUDIO streaming — still **NOT RUN ON HW**  
+- Long-duration Hear soak / reference fidelity — **NOT RUN**  
+- Viewer Hear supervised (U-HEAR `983fd853…`): **PASSED ON HW** — `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md`  
+- Corrected fork oneshot + supervised stream + stock Viewer Hear (`00443719…`): **PASSED ON HW** — Phase 4–6; human-audible **YES (brief)**  
 - Apollo monitor  
 - HRTmon  
-- Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  
+- Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`) — Stage 4 Phase 1 proposed, not authorised 
 - First-install automatic daemon selection  
 - Upgrade / fallback / Amigent-Update  
 - Fork-specific AMMX / live PIP picture paths  

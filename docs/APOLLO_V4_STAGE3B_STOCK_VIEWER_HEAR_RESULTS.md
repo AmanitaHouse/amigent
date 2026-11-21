@@ -77,9 +77,10 @@ Instrumentation observed and forced OFF only through `submit(audio,on=false)` �
 | Format | s16le stereo |
 | Nonzero PCM | **Yes** — 160 nonempty chunks, 0 empty keepalives (peak/RMS not computed; PCM not retained) |
 | PC playback path | Stock Viewer Web Audio (`AudioContext`) path active during Hear |
-| Human-confirmed audible | **YES** — operator reported brief audible PC playback |
+| Human-confirmed audible | **YES** — brief operator-confirmed PC playback (final). Earlier post-session state was “not yet reported / inconclusive” until that confirmation; do not treat the interim state as the close result. |
 | Hear OFF | Watchdog via normal UI path (`audio on=false`); `hear_final=false` |
 | `audio_stop` + end-marker | **Yes** |
+| `AudioContext.close()` | **Source-verified** in merged Viewer stop/error path; no separate runtime closure probe logged |
 | Automatic restart | **None** (starts remain 1) |
 | Second `audio_start` attempt | **None** |
 | Raw PCM in Git | **No** |

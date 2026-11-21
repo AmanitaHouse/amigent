@@ -23,9 +23,11 @@ The stream path wrote `T:audio-mem` via `MODE_NEWFILE` once `audio_seq` reached 
 
 Only `983fd853…` carries the Hear/stream hardware claim. Do not attribute streaming results to `456fce26…` (oneshot only) or the fork’s packaged `1e0e3f65…` (not stream-tested).
 
-## Limitations
+## Limitations (historical draft — superseded for close claims)
 
-- Human-confirmed PC loudspeaker hearing: not confirmed in evidence.  
-- Stock Viewer Hear UI button path: not tested (harness used the same opcodes).  
-- Reference fidelity / long soak / F-DAE streaming: not tested.  
-- Unpublished 1.5.0 tree: not compared live.
+This draft predates Phase 6. **Final campaign close:** `docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md`.
+
+- Human-confirmed PC loudspeaker hearing: later **YES (brief)** in Phase 6 — do not cite this draft’s “not confirmed” as final.  
+- Stock Viewer Hear UI: later **PASSED ON HW** (Phase 6 ♪ path).  
+- Reference fidelity / long soak / F-DAE streaming: still not tested.  
+- Unpublished 1.5.0 tree: still not public / not compared live (audit 2026-11-21).

@@ -319,7 +319,7 @@
       "evidence": "amigent-evidence/stage3a-probe/20261121T021031Z",
       "production_after": "protocol 5 TLS responsive"
     },
-    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 Stage 3B Phase 2; requires separate authorisation after Phase 1",
+    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 Phase 2 plan; stream residual T:audio-mem once",
     "stage3b": {
       "status": "phase1_executed_valid_empty",
       "session_evidence": "amigent-evidence/stage3b-audio-phase1/20261121T022512Z",
@@ -340,6 +340,15 @@
     "installer_update_fallback": "NOT_RUN",
     "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
     "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
-    "self_path_note": "docs/APOLLO_V4_SELF_PATH_NOTE.md"
+    "self_path_note": "docs/APOLLO_V4_SELF_PATH_NOTE.md",
+    "stage3b_phase2": {
+      "status": "prepared_awaiting_authorisation",
+      "plan": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2_PLAN.md",
+      "phase1_preserved": "valid_empty",
+      "recommended_next": "nonempty_oneshot_with_AHI_source",
+      "viewer_hear": "prepared_separate_auth_accepts_T_audio_mem_residual",
+      "nonempty_capture": "NOT_RUN_ON_HARDWARE",
+      "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE"
+    }
   }
 }

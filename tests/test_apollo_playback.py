@@ -262,6 +262,21 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     assert server.amiga_listen(1) == ["nothing is playing through AHI"]
 
 
+def test_nonempty_oneshot_pcm_contract_and_empty_framing():
+    """Structural rules for Phase 2 nonempty capture — not hardware evidence."""
+    max_n = 48000
+    # Phase 1 shaped empty framed success
+    rate, pcm = 0, b""
+    assert rate == 0 and len(pcm) == 0
+    # nonempty s16le stereo bounds matching native windows / c_audio cap
+    rate, pcm = 48000, b"\x00\x01\x00\xff" * 100
+    assert 8000 <= rate <= 96000
+    assert len(pcm) >= 4 and len(pcm) % 4 == 0 and len(pcm) <= max_n
+    wav = pcm_wav(pcm, rate)
+    assert wav.startswith(b"RIFF") and struct.unpack("<I", wav[24:28]) == (rate,)
+    assert len(pcm_message(rate, pcm)) == 1 + 4 + len(pcm)
+
+
 def test_the_protected_daemon_is_unchanged():
     data = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
     assert len(data) == DAEMON[0]

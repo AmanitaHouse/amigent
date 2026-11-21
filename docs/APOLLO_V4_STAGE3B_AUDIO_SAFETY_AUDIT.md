@@ -102,7 +102,7 @@ Do not rebuild for Stage 3B.
 | Persistent hardware state after QUIT? | **No** (driver unchanged; optional `T:` diagnostic files from stream dumps only) |
 | Safe concurrent with production? | **No** — exclusive session (same as Stage 2B) |
 | Safe bounded first test? | **Yes** — exclusive candidate + **one-shot** `audio(0)` |
-| Stream / Hear residual? | May write `T:audio-mem` after ~4 captured halves; document; do not treat as MMIO |
+| Stream / Hear residual? | Writes `T:audio-mem` once when stream `audio_seq==4` (`MODE_NEWFILE`, `static done`); cannot avoid with useful Hear duration — see Phase 2 plan |
 
 **Conclusion for authorisation gate:** source supports a **bounded exclusive** Phase 1 one-shot on a verified Apollo daemon. Not safe as a concurrent add-on to production.
 

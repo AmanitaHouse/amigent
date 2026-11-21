@@ -115,12 +115,14 @@ enum {
     CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
-    CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET  /* protocol 6, "probe" in SYSINFO */
+    CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
+    CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
 };
 
 const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
+static BOOL emu68_present(void);
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -4474,6 +4476,7 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
+    t_pair(&t, "emu68", emu68_present());  /* EMU68 is understood; 1: Emu68 runs here */
     t_str(&t, (const UBYTE *)"execbase=", FALSE);
     t_hex(&t, (ULONG)SysBase);
     t_chr(&t, '\n');
@@ -7819,6 +7822,429 @@ static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD 
     return c_text(l, &t);
 }
 
+/* ---- Emu68: what runs on the Raspberry Pi, and its JIT settings ---------
+ *
+ * Emu68 (the 68k JIT on a PiStorm and other Pi boards) offers the Amiga side
+ * devicetree.resource with its own /emu68 node, the Pi firmware's mailbox,
+ * and control registers that MOVEC reads and writes (docs/internals/
+ * ControlRegisters.md in the Emu68 sources). Nothing here touches a control
+ * register before /emu68 with an idstring was found: on any other 68k the
+ * MOVEC would be an illegal instruction. Only the JIT fields Emu68 documents
+ * as changeable can be written, and only in memory: nothing goes to the SD card.
+ * Built with vbcc only; other builds answer emu68=0. */
+
+#ifdef __VBCC__
+#define EMU68_BUILT 1
+APTR __DT_OpenKey(__reg("a6") APTR, __reg("a0") const char *name) = "\tjsr\t-6(a6)";
+void __DT_CloseKey(__reg("a6") APTR, __reg("a0") APTR key) = "\tjsr\t-12(a6)";
+APTR __DT_FindProperty(__reg("a6") APTR, __reg("a0") APTR key, __reg("a1") const char *name) = "\tjsr\t-24(a6)";
+ULONG __DT_GetPropLen(__reg("a6") APTR, __reg("a0") APTR prop) = "\tjsr\t-36(a6)";
+APTR __DT_GetPropValue(__reg("a6") APTR, __reg("a0") APTR prop) = "\tjsr\t-48(a6)";
+void __MB_RawCommand(__reg("a6") APTR, __reg("a0") ULONG *command) = "\tjsr\t-6(a6)";
+/* Supervisor mode only. MOVEC Rc,D0 is $4e7a,$0xxx; MOVEC D0,Rc is $4e7b,$0xxx. */
+void emu68_movec_all(__reg("a0") ULONG *r) =
+    "\tdc.w\t$4e7a,$00e0\n\tmove.l\td0,(a0)+\n"   /* CNTFRQ */
+    "\tdc.w\t$4e7a,$00e2\n\tmove.l\td0,(a0)+\n"   /* CNTVALHI */
+    "\tdc.w\t$4e7a,$00e1\n\tmove.l\td0,(a0)+\n"   /* CNTVALLO */
+    "\tdc.w\t$4e7a,$00e2\n\tmove.l\td0,(a0)+\n"   /* CNTVALHI again */
+    "\tdc.w\t$4e7a,$00e4\n\tmove.l\td0,(a0)+\n"   /* INSNCNTHI */
+    "\tdc.w\t$4e7a,$00e3\n\tmove.l\td0,(a0)+\n"   /* INSNCNTLO */
+    "\tdc.w\t$4e7a,$00e4\n\tmove.l\td0,(a0)+\n"
+    "\tdc.w\t$4e7a,$00e6\n\tmove.l\td0,(a0)+\n"   /* ARMCNTHI */
+    "\tdc.w\t$4e7a,$00e5\n\tmove.l\td0,(a0)+\n"   /* ARMCNTLO */
+    "\tdc.w\t$4e7a,$00e6\n\tmove.l\td0,(a0)+\n"
+    "\tdc.w\t$4e7a,$00e7\n\tmove.l\td0,(a0)+\n"   /* JITSIZE */
+    "\tdc.w\t$4e7a,$00e8\n\tmove.l\td0,(a0)+\n"   /* JITFREE */
+    "\tdc.w\t$4e7a,$00e9\n\tmove.l\td0,(a0)+\n"   /* JITCOUNT */
+    "\tdc.w\t$4e7a,$00ea\n\tmove.l\td0,(a0)+\n"   /* JITSCFTHRESH */
+    "\tdc.w\t$4e7a,$00eb\n\tmove.l\td0,(a0)+\n"   /* JITCTRL */
+    "\tdc.w\t$4e7a,$00ec\n\tmove.l\td0,(a0)+\n"   /* JITCMISS */
+    "\tdc.w\t$4e7a,$01e0\n\tmove.l\td0,(a0)+\n"   /* JITCTRL2 */
+    "\tdc.w\t$4e7a,$0002\n\tmove.l\td0,(a0)";     /* CACR */
+void emu68_movec_set(__reg("a0") ULONG *v) =
+    "\tmove.l\t(a0)+,d0\n\tdc.w\t$4e7b,$00ea\n"   /* JITSCFTHRESH */
+    "\tmove.l\t(a0)+,d0\n\tdc.w\t$4e7b,$00eb\n"   /* JITCTRL */
+    "\tmove.l\t(a0),d0\n\tdc.w\t$4e7b,$01e0";     /* JITCTRL2 */
+#else
+#define EMU68_BUILT 0
+#endif
+
+#define E68_REGS 18
+#define E68_SFTHRESH 13
+#define E68_JITCTRL 14
+#define E68_JITCTRL2 16
+/* The fields Emu68 documents as settable: JITCTRL soft flush, loop count,
+ * inline range, instruction depth; JITCTRL2 chip and DBF slowdown, CCR scan
+ * depth, chip slowdown ratio, blitter wait. Debug registers are not offered. */
+#define E68_CTRL_MASK 0xFFFFFFF1UL
+#define E68_CTRL2_MASK 0x00000FFBUL
+
+static APTR dt_base;
+
+static APTR dt_prop(const char *key, const char *name, ULONG *len)
+{
+#if EMU68_BUILT
+    APTR k, p, v = NULL;
+
+    if (!dt_base || !(k = __DT_OpenKey(dt_base, key)))
+        return NULL;
+    if ((p = __DT_FindProperty(dt_base, k, name))) {
+        v = __DT_GetPropValue(dt_base, p);
+        if (len)
+            *len = __DT_GetPropLen(dt_base, p);
+    }
+    __DT_CloseKey(dt_base, k);
+    return v;
+#else
+    return NULL;
+#endif
+}
+
+/* Emu68 for certain: its devicetree.resource has an /emu68 node with an idstring. */
+static BOOL emu68_present(void)
+{
+#if EMU68_BUILT
+    ULONG len = 0;
+
+    if (!dt_base)
+        dt_base = OpenResource("devicetree.resource");
+    return dt_base && dt_prop("/emu68", "idstring", &len) && len > 1;
+#else
+    return FALSE;
+#endif
+}
+
+/* All counters and settings; the 64 bit counters read again until their high half stands still. */
+static void emu68_read(ULONG *r)
+{
+#if EMU68_BUILT
+    LONG tries;
+    APTR ssp;
+
+    for (tries = 0; tries < 8; tries++) {
+        ssp = SuperState();
+        emu68_movec_all(r);
+        if (ssp)
+            UserState(ssp);
+        if (r[1] == r[3] && r[4] == r[6] && r[7] == r[9])
+            break;
+    }
+#endif
+}
+
+/* Set the documented fields; the other bits stay. ea, eb, 1e0 as reg, value, mask. */
+static void emu68_write(const ULONG *want, ULONG n)
+{
+#if EMU68_BUILT
+    ULONG r[E68_REGS], v[3], i;
+    APTR ssp;
+
+    Disable();  /* read, change, write in one go: no other tool in between */
+    ssp = SuperState();
+    emu68_movec_all(r);
+    v[0] = r[E68_SFTHRESH];
+    v[1] = r[E68_JITCTRL];
+    v[2] = r[E68_JITCTRL2];
+    for (i = 0; i < n; i++) {
+        ULONG reg = want[i * 3], val = want[i * 3 + 1], mask = want[i * 3 + 2];
+        LONG at = reg == 0xea ? 0 : reg == 0xeb ? 1 : reg == 0x1e0 ? 2 : -1;
+
+        if (at < 0)
+            continue;
+        mask &= at == 0 ? 0xFFFFFFFFUL : at == 1 ? E68_CTRL_MASK : E68_CTRL2_MASK;
+        v[at] = (v[at] & ~mask) | (val & mask);
+    }
+    emu68_movec_set(v);
+    if (ssp)
+        UserState(ssp);
+    Enable();
+    CacheClearU();  /* on Emu68 this flushes the JIT cache: the new settings apply from now */
+#endif
+}
+
+/* A Pi firmware property request with one tag: value words in v (two at most).
+ * Through mailbox.resource when there is one, else as EmuControl does it, at
+ * the mailbox found in the device tree, under Forbid and with a time limit. */
+static APTR mb_base;
+static volatile ULONG *mb_regs;
+static BOOL mb_looked;
+
+static void mb_find(void)
+{
+#if EMU68_BUILT
+    const char *alias;
+    const ULONG *reg, *ranges, *cells;
+    ULONG addr = 1, cpu = 1, len;
+
+    mb_looked = TRUE;
+    if ((mb_base = OpenResource("mailbox.resource")))
+        return;
+    if (!(alias = dt_prop("/aliases", "mailbox", NULL)))
+        return;
+    if ((cells = dt_prop("/soc", "#address-cells", NULL)))
+        addr = *cells;
+    if ((cells = dt_prop("/", "#address-cells", NULL)))
+        cpu = *cells;
+    if (addr < 1 || addr > 3 || cpu < 1 || cpu > 3)
+        return;
+    reg = dt_prop(alias, "reg", &len);
+    ranges = dt_prop("/soc", "ranges", NULL);
+    if (!reg || len < addr * 4 || !ranges)
+        return;
+    mb_regs = (volatile ULONG *)(reg[addr - 1] - ranges[addr - 1] + ranges[addr + cpu - 1]);
+#endif
+}
+
+static ULONG le32(ULONG x)
+{
+    return x >> 24 | (x >> 8 & 0xFF00) | (x << 8 & 0xFF0000) | x << 24;
+}
+
+static BOOL mb_tag(ULONG tag, ULONG words, ULONG *v)
+{
+#if EMU68_BUILT
+    /* In the Pi's own memory, never on a stack that might be Chip RAM across the bus */
+    ULONG *raw = AllocMem(64, MEMF_FAST | MEMF_PUBLIC | MEMF_CLEAR);
+    ULONG *m = (ULONG *)(((ULONG)raw + 15) & ~15UL), i, len = 32;
+    BOOL ok = FALSE;
+
+    if (!raw)
+        return FALSE;
+    if (!mb_looked)
+        mb_find();
+    m[0] = 32;
+    m[1] = 0;
+    m[2] = tag;
+    m[3] = 8;
+    m[4] = 0;
+    m[5] = v[0];
+    m[6] = words > 1 ? v[1] : 0;
+    m[7] = 0;
+    if (mb_base) {
+        __MB_RawCommand(mb_base, m);
+    } else if (mb_regs) {
+        volatile ULONG *rd = mb_regs, *st = mb_regs + 6, *wr = mb_regs + 8;
+        ULONG got = 0, spin;
+
+        for (i = 0; i < 8; i++)
+            m[i] = le32(m[i]);
+        Forbid();
+        CachePreDMA(m, &len, 0);
+        for (spin = 0; spin < 200000 && (le32(*st) & 0x80000000UL); spin++)
+            ;
+        if (spin < 200000) {
+            *wr = le32(((ULONG)m & ~15UL) | 8);
+            for (spin = 0; spin < 2000000; spin++) {
+                if (le32(*st) & 0x40000000UL)
+                    continue;
+                got = le32(*rd);
+                if ((got & 15) == 8)
+                    break;
+            }
+        }
+        CachePostDMA(m, &len, 0);
+        Permit();
+        for (i = 0; i < 8; i++)
+            m[i] = le32(m[i]);
+        if ((got & 15) != 8)
+            m[1] = 0;
+    } else
+        m[1] = 0;
+    ok = m[1] == 0x80000000UL && (m[4] & 0x80000000UL);
+    if (ok) {
+        v[0] = m[5];
+        if (words > 1)
+            v[1] = m[6];
+    }
+    FreeMem(raw, 64);
+    return ok;
+#else
+    return FALSE;
+#endif
+}
+
+/* A device tree string, as long as it is (bootargs pass the 256 of t_str). */
+static void t_prop(struct text *t, const char *out, const char *key, const char *name)
+{
+    ULONG len = 0, i;
+    const UBYTE *v = dt_prop(key, name, &len);
+
+    if (!v || !len)
+        return;
+    if (len > 4096)
+        len = 4096;
+    while (len && !v[len - 1])
+        len--;
+    if (len >= 6 && !strncmp((const char *)v, "$VER: ", 6)) {
+        v += 6;
+        len -= 6;
+    }
+    t_str(t, (const UBYTE *)out, FALSE);
+    t_chr(t, '=');
+    for (i = 0; i < len; i++)
+        t_chr(t, v[i] < ' ' ? ' ' : v[i]);
+    t_chr(t, '\n');
+}
+
+static void t_hexpair(struct text *t, const char *key, ULONG v)
+{
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_chr(t, '=');
+    t_hex(t, v);
+    t_chr(t, '\n');
+}
+
+static void t_mb(struct text *t, const char *key, ULONG tag, ULONG id)
+{
+    ULONG v[2];
+
+    v[0] = id;
+    v[1] = 0;
+    if (mb_tag(tag, 2, v))
+        t_pair(t, key, v[1]);
+}
+
+/* emu68=0 without Emu68 and nothing else. what: 0 all, 2 counters and settings only. */
+static void emu68_text(struct text *t, UBYTE what)
+{
+    ULONG r[E68_REGS], v[2];
+    const ULONG *ver;
+    ULONG len = 0;
+
+    if (!emu68_present()) {
+        t_pair(t, "emu68", 0);
+        if (!EMU68_BUILT)
+            t_str(t, (const UBYTE *)"why=not in this amigentd build\n", FALSE);
+        return;
+    }
+    t_pair(t, "emu68", 1);
+    emu68_read(r);
+    t_pair(t, "cntfrq", r[0]);
+    t_hexpair(t, "cnt_hi", r[1]);
+    t_hexpair(t, "cnt_lo", r[2]);
+    t_hexpair(t, "insn_hi", r[4]);
+    t_hexpair(t, "insn_lo", r[5]);
+    t_hexpair(t, "arm_hi", r[7]);
+    t_hexpair(t, "arm_lo", r[8]);
+    t_pair(t, "jit_size", r[10]);
+    t_pair(t, "jit_free", r[11]);
+    t_pair(t, "jit_count", r[12]);
+    t_pair(t, "jit_sfthresh", r[13]);
+    t_hexpair(t, "jitctrl", r[14]);
+    t_pair(t, "jit_cmiss", r[15]);
+    t_hexpair(t, "jitctrl2", r[16]);
+    t_hexpair(t, "cacr", r[17]);
+    if (what == 2)
+        return;
+    t_prop(t, "idstring", "/emu68", "idstring");
+    if ((ver = dt_prop("/emu68", "version", &len)) && len >= 12) {
+        t_str(t, (const UBYTE *)"version=", FALSE);
+        t_num(t, ver[0]);
+        t_chr(t, '.');
+        t_num(t, ver[1]);
+        t_chr(t, '.');
+        t_num(t, ver[2]);
+        t_chr(t, '\n');
+    }
+    t_prop(t, "git", "/emu68", "git-hash");
+    t_prop(t, "variant", "/emu68", "variant");
+    t_prop(t, "model", "/", "model");
+    t_prop(t, "compatible", "/", "compatible");
+    t_prop(t, "bootargs", "/chosen", "bootargs");
+    if ((ver = dt_prop("/emu68", "m68k-jit-size", &len)) && len >= 4)
+        t_pair(t, "jit_size_mb", ver[0]);
+    v[0] = 0;
+    if (mb_tag(0x00010002, 1, v))  /* board revision: model and memory size */
+        t_hexpair(t, "board_revision", v[0]);
+    v[0] = 0;
+    if (mb_tag(0x00000001, 1, v))
+        t_pair(t, "firmware", v[0]);
+    t_mb(t, "temp", 0x00030006, 0);  /* millidegrees Celsius */
+    t_mb(t, "temp_max", 0x0003000a, 0);
+    t_mb(t, "arm_clock", 0x00030002, 3);  /* Hz: set, measured, highest */
+    t_mb(t, "arm_clock_measured", 0x00030047, 3);
+    t_mb(t, "arm_clock_max", 0x00030004, 3);
+    t_mb(t, "core_volt", 0x00030003, 1);  /* microvolts */
+    v[0] = 0;
+    if (mb_tag(0x00030046, 1, v))  /* under-voltage and throttling, now and since power on */
+        t_hexpair(t, "throttled", v[0]);
+    t_str(t, (const UBYTE *)(mb_base ? "mailbox=resource\n" : mb_regs ? "mailbox=direct\n" : "mailbox=none\n"), FALSE);
+}
+
+/* EMU68: c[1] 0 what runs and how it is, 2 counters only; 1 sets the JIT fields
+ * sent as reg, value, mask (three longs each), then answers as 2. */
+static BOOL c_emu68(struct link *l, UBYTE op, UWORD len)
+{
+    struct text t = {0};
+
+    if (op == 1) {
+        BOOL alive;
+        ULONG *want = (ULONG *)c_name(l, len, &alive);
+
+        if (!want)
+            return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+        if (!emu68_present()) {
+            FreeVec(want);
+            return c_fail(l, 1, "not Emu68");
+        }
+        mon_say('C', "Emu68 JIT settings", NULL);
+        emu68_write(want, len / 12 > 8 ? 8 : len / 12);
+        FreeVec(want);
+        op = 2;
+    } else if (len && !l_skip(l, len, IO_SECONDS))
+        return FALSE;
+    else
+        mon_say('C', op == 2 ? "Emu68 counters" : "what runs under Emu68", NULL);
+    emu68_text(&t, op);
+    return c_text(l, &t);
+}
+
+static ULONG hexval(const char **p)
+{
+    ULONG v = 0;
+    char c;
+
+    while ((c = **p) && ((c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'f'))) {
+        v = v << 4 | (c <= '9' ? c - '0' : (c | 32) - 'a' + 10);
+        (*p)++;
+    }
+    return v;
+}
+
+/* amigentd EMU68JIT "eb:value:mask,1e0:value:mask" (hex): set the fields from a
+ * job's script, around a program; on anything but Emu68 it does nothing. */
+static int emu68_cli(const char *spec)
+{
+    ULONG want[24], n = 0;
+    const char *p = spec;
+
+    if (!emu68_present()) {
+        PutStr("amigentd: not Emu68, nothing changed\n");
+        return RETURN_WARN;
+    }
+    while (*p && n < 8) {
+        want[n * 3] = hexval(&p);
+        if (*p != ':')
+            break;
+        p++;
+        want[n * 3 + 1] = hexval(&p);
+        if (*p != ':')
+            break;
+        p++;
+        want[n * 3 + 2] = hexval(&p);
+        n++;
+        if (*p != ',')
+            break;
+        p++;
+    }
+    if (*p || !n) {
+        PutStr("amigentd: EMU68JIT wants reg:value:mask,... in hex\n");
+        return RETURN_ERROR;
+    }
+    emu68_write(want, n);
+    return RETURN_OK;
+}
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -7894,6 +8320,8 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_cpu(l, y, w);
     case CMD_DRAG:  /* window as hex in the name; arg pattern, y steps, w pixels */
         return c_drag(l, c[1], x, y, w);
+    case CMD_EMU68:  /* c[1]: 0 info, 2 counters, 1 set (reg, value, mask longs in x bytes) */
+        return c_emu68(l, c[1], x);
     case CMD_QUIET:  /* the monitor draws nothing for y seconds; 0 ends it */
         quiet_monitor(y);
         return c_ok(l);
@@ -9270,7 +9698,7 @@ static int follow(const char *from, const char *to)
 
 int main(int argc, char **argv)
 {
-    LONG args[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    LONG args[11] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -9282,13 +9710,18 @@ int main(int argc, char **argv)
         tool_types((struct WBStartup *)argv, &port);
     } else {
         rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K,"
-                       "ALLOWPOKE/S", args, NULL);
+                       "ALLOWPOKE/S,EMU68JIT/K", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
         }
         if (args[7] && args[8]) {  /* a job's helper, not the daemon */
             rc = follow((const char *)args[7], (const char *)args[8]);
+            FreeArgs(rda);
+            return rc;
+        }
+        if (args[10]) {  /* a job's helper: JIT settings around a program */
+            rc = emu68_cli((const char *)args[10]);
             FreeArgs(rda);
             return rc;
         }

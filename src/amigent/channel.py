@@ -30,6 +30,7 @@ TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
 LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
+EMU68 = 48  # protocol 6, "emu68" in SYSINFO (amigentd 1.5.0)
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -665,6 +666,25 @@ class AmigaChannel(VolumeFlush):
         self._need_probe("measuring window dragging")
         return self._one(Request(DRAG, f"{window & 0xFFFFFFFF:08x}", pattern, steps, step,
                                  read=_read_text, wait=steps / 10 + 30))
+
+    def _need_emu68(self, what: str) -> None:
+        self._need6(what)
+        if getattr(self, "_emu68", None) is None:
+            self._emu68 = "emu68" in self.sysinfo()
+        if not self._emu68:
+            raise AmigaError(f"{what} needs amigentd 1.5.0 or newer; run amigent-setup --update")
+
+    def emu68_info(self, counters: bool = False) -> list[str]:
+        """key=value lines: emu68=0 alone without Emu68; else device tree, Pi, counters."""
+        self._need_emu68("asking Emu68")
+        return self._one(Request(EMU68, "", 2 if counters else 0, read=_read_text))
+
+    def emu68_set(self, items: list[tuple[int, int, int]]) -> list[str]:
+        """Set JIT fields as (register, value, mask); the counters and settings after."""
+        self._need_emu68("changing Emu68's JIT settings")
+        raw = b"".join(r.to_bytes(4, "big") + (v & 0xFFFFFFFF).to_bytes(4, "big") + (m & 0xFFFFFFFF).to_bytes(4, "big")
+                       for r, v, m in items)
+        return self._one(Request(EMU68, raw.decode(ENCODING), 1, read=_read_text))
 
     def peek_many(self, spans: list[tuple[int, int]]) -> list:
         """Several PEEKs on one wire: bytes, or the AmigaError, for each (address, size)."""

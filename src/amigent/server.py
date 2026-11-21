@@ -331,7 +331,8 @@ UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "am
                "amiga_locks", "amiga_cpu", "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
                "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
                "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text",
-               "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log"}
+               "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log",
+               "amiga_emu68"}
 
 
 def _amiga_name() -> str:
@@ -375,6 +376,8 @@ def amiga_status() -> str:
     if uptime.restarted(said) or info.get("last_alert"):
         report["before_it_went_away"] = _postmortem(before, info, tasks)
     report["system"] = _system_facts()
+    if info.get("emu68") == "1":  # amigentd 1.5.0 found Emu68: the Pi's health in one line
+        _emu68_status(report)
     report.update({"sysinfo": info, "volumes": _with_ctl(_session().ctl.volumes)})
     outdated = pc_outdated(getattr(getattr(_session().ctl, "backend", None), "protocol", 0))
     if outdated:
@@ -390,6 +393,20 @@ def amiga_status() -> str:
                                "debug_output": info.get("debug") == "1"}
         report["packing"] = pack.policy_for(_session().host).describe()
     return json.dumps(report, indent=1)
+
+
+def _emu68_status(report: dict) -> None:
+    from . import emu68
+    try:
+        pi = _emu68_info()
+    except AmigaError:
+        return
+    if not emu68.present(pi):
+        return
+    report["emu68"] = (pi.get("idstring") or "Emu68") + (f" on {pi['model']}" if pi.get("model") else "")
+    warn = emu68.health_warning(pi)
+    if warn:
+        report["pi_warning"] = warn
 
 
 def _postmortem(before: dict, info: dict, tasks: str | None) -> dict:
@@ -1296,13 +1313,224 @@ def amiga_cpu(seconds: int = 5, every_ms: int = 10) -> str:
     amigentd samples every every_ms milliseconds at a priority above all
     others which task was running, with no network traffic meanwhile, and
     amigent-monitor stays still. Shows percent per task and idle. Needs amigentd 1.4.0.
+    Under Emu68 (amigentd 1.5.0) also the real MIPS and JIT cache misses meanwhile.
     """
+    from . import emu68
+    before = _emu68_counters()
     lines = _with_ctl(lambda: _session().ctl.cpu(max(1, min(seconds, 60)), max(2, min(every_ms, 1000))))
+    rate = emu68.mips(before, _emu68_counters()) if before else None
     try:
         names = {t.address: t.label for t in _tasks()}
     except AmigaError:
         names = {}
-    return probes.cpu(lines, names)
+    text = probes.cpu(lines, names)
+    return text + ("\n" + emu68.mips_line(rate) if rate else "")
+
+
+def _emu68_counters() -> dict | None:
+    """Emu68's counters when this Amiga runs on it and amigentd can tell; else None."""
+    from . import emu68
+    try:
+        if _with_ctl(_session().ctl.sysinfo).get("emu68") != "1":
+            return None
+        info = _emu68_info(counters=True)
+    except (AmigaError, AttributeError):
+        return None
+    return info if emu68.present(info) else None
+
+
+# ---- Emu68 on a Raspberry Pi (PiStorm and others)
+
+def _emu68_info(counters: bool = False) -> dict:
+    """EMU68's answer as a dict; {'emu68': '0'} without Emu68."""
+    from . import emu68
+    try:
+        return emu68.parse(_with_ctl(lambda: _session().ctl.emu68_info(counters)))
+    except AttributeError:  # amigactld
+        raise AmigaError("asking Emu68 needs amigentd 1.5.0 or newer; run amigent-setup --update") from None
+
+
+def _emu68_extras() -> list[str]:
+    """PiStormBoot and Emu68PWM, when they are there."""
+    out = []
+    try:
+        loaded = _loaded()
+    except AmigaError:
+        loaded = None
+    if loaded is not None:
+        for r in loaded.residents:
+            if "pistormboot" in r.name.lower():
+                out.append(f"PiStormBoot {r.version} is loaded: it applies its own JIT settings again at "
+                           "every start, so values seen after a restart come from it")
+                break
+        for lib in loaded.libraries:
+            if lib.name.lower() == "emu68pwm.audio":
+                out.append(f"Emu68PWM {lib.version}.{lib.revision} plays through the Pi's audio jack "
+                           "(a second sound path next to Paula or a sound card)")
+                break
+        else:
+            try:
+                _with_ctl(lambda: _session().ctl.stat("DEVS:AHI/emu68pwm.audio"))
+                out.append("Emu68PWM is installed (DEVS:AHI/emu68pwm.audio), an AHI driver for the Pi's audio jack")
+            except AmigaError:
+                pass
+    return out
+
+
+@mcp.tool()
+def amiga_emu68() -> str:
+    """What runs on the Raspberry Pi under Emu68 (PiStorm and other Pi boards), read only.
+
+    Emu68 version and variant, the Pi's model and memory, the boot options from
+    cmdline.txt, its health (temperature, ARM clock, core voltage, and whether
+    the Pi reported under-voltage or throttling since power on), the JIT
+    cache and counters, and the JIT settings now. Names PiStormBoot and
+    Emu68PWM when they are there. On an Amiga without Emu68 it says
+    "not Emu68" and touches nothing. Changes nothing. Needs amigentd 1.5.0.
+    """
+    from . import emu68
+    info = _emu68_info()
+    if not emu68.present(info):
+        return emu68.describe(info)
+    return emu68.describe(info, _emu68_extras())
+
+
+def _emu68_sysinfo() -> dict:
+    return _with_ctl(_session().ctl.sysinfo)
+
+
+@mcp.tool()
+def amiga_emu68_jit(settings: str = "", restore: bool = False, program: str = "",
+                    wait: float = 600, remember: bool = False) -> str:
+    """Show or change Emu68's JIT settings while the Amiga runs, with no restart.
+
+    Without arguments: the settings now, what each does, and what was saved
+    before a change. settings like "chip_slowdown=1 dbf_slowdown=1" changes
+    them at once (EmuControl's short names work too: sc, scs, dbf, bw, ccrd,
+    icnt, irng, lcnt, sf, sfl); the values from before the first change are
+    kept on this PC, and restore=True puts them back. Only the settings Emu68
+    documents as changeable; other bits stay. Nothing is written to the SD
+    card: a restart brings back what cmdline.txt (or PiStormBoot) sets.
+
+    program: start it as a job with these settings (or the ones noted for it
+    earlier) and put the old ones back on the Amiga when it ends; wait as in
+    amiga_job. remember=True keeps the settings as an amiga_note for the
+    program, so the next start uses them. Needs amigentd 1.5.0 on Emu68.
+    """
+    from . import emu68
+    info = _emu68_info(counters=True)
+    if not emu68.present(info):
+        return emu68.describe(info)
+    current = emu68.settings(info)
+    saved = emu68.saved_for(_amiga())
+    booted = emu68.booted_at(_emu68_sysinfo())
+    before = saved.load(booted)
+    try:
+        changes = emu68.requested(_settings_words(settings))
+        if changes:
+            emu68.check(current, changes)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    if restore:
+        if program or changes:
+            raise AmigaError("restore=True goes alone")
+        if before is None:
+            return "nothing to take back: no change was made since the Amiga started"
+        after = emu68.parse(_with_ctl(lambda: _session().ctl.emu68_set(emu68.restore_fields(before))))
+        saved.clear()
+        return "put back: " + _jit_line(emu68.settings(after))
+    if program:
+        return _emu68_program(program, changes, current, info, wait, remember)
+    if not changes:
+        lines = [f"{s.name}={current[s.name]}  ({s.text}; {s.low}-{s.high}, default {s.default})"
+                 for s in emu68.SETTINGS]
+        if before is not None:
+            lines.append("before the first change: " + _jit_line(_decoded(before)) +
+                         "; restore=True puts that back")
+        return "\n".join(lines)
+    if before is None:
+        saved.keep(emu68.registers(info), booted)
+    after = emu68.parse(_with_ctl(lambda: _session().ctl.emu68_set(emu68.fields(changes))))
+    now = emu68.settings(after)
+    wrong = {k: v for k, v in changes.items() if now.get(k) != v}
+    text = "set: " + " ".join(f"{k}={now[k]}" for k in changes)
+    if wrong:
+        text += "\nnot taken as asked: " + ", ".join(f"{k} is {now.get(k)}" for k in wrong)
+    if remember:
+        text += "\n" + (_emu68_remember(_session().last_started, changes) if _session().last_started
+                        else "remember=True needs a program: none was started in this session")
+    return text + "\nrestore=True takes it back; a restart does as well"
+
+
+def _settings_words(text: str) -> dict:
+    out = {}
+    for word in text.replace(",", " ").split():
+        if "=" not in word:
+            raise ValueError(f"{word!r}: settings go as name=value")
+        k, v = word.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _decoded(regs: dict[int, int]) -> dict[str, int]:
+    from . import emu68
+    return {s.name: s.decode(regs) for s in emu68.SETTINGS}
+
+
+def _jit_line(values: dict[str, int]) -> str:
+    return " ".join(f"{k}={v}" for k, v in values.items())
+
+
+def _emu68_remember(program: str, changes: dict[str, int]) -> str:
+    from . import emu68
+    topic = notes.topic_of(program)
+    if not topic:
+        return ""
+    book = notes.for_amiga(_amiga())
+    for old in book.get(topic):
+        if old.startswith("Emu68 JIT:"):
+            book.remove(topic, old)
+    book.add(topic, emu68.note_text(changes))
+    return f"noted for {topic!r}: {emu68.note_text(changes)}"
+
+
+def _emu68_program(program: str, changes: dict[str, int], current: dict[str, int], info: dict,
+                   wait: float, remember: bool) -> str:
+    """The program as a job between two 'amigentd EMU68JIT' lines: the Amiga puts the
+    settings back itself when it ends, also if this PC is gone meanwhile."""
+    from . import emu68
+    said = ""
+    if not changes:
+        changes = emu68.from_notes(notes.for_amiga(_amiga()).get(notes.topic_of(program)))
+        if not changes:
+            raise AmigaError(f"no settings given and none noted for {notes.topic_of(program)!r}")
+        said = "settings from the note: "
+    try:
+        emu68.check(current, changes)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    me = _emu68_sysinfo().get("self", "")
+    if not me:
+        raise AmigaError("amigentd does not say where it lives (self in SYSINFO), so the job "
+                         "cannot set and restore the JIT settings itself")
+    regs = emu68.registers(info)
+    saved = emu68.saved_for(_amiga())
+    booted = emu68.booted_at(_emu68_sysinfo())
+    if saved.load(booted) is None:  # restore=True still works should the script be broken off
+        saved.keep(regs, booted)
+    back = emu68.restore_fields(regs)
+    # FailAt: the line that puts the settings back runs whatever the program returns
+    command = "\n".join(["FailAt 2147483647", f'"{me}" EMU68JIT {emu68.cli_spec(emu68.fields(changes))}',
+                         program, f'"{me}" EMU68JIT {emu68.cli_spec(back)}'])
+    number = _start_job(command, title=f"{program} (Emu68 JIT: {_jit_line(changes)})")
+    _session().last_started = program
+    text = f"{said}{_jit_line(changes)} while {program} runs (job {number}); the old ones come back when it ends"
+    if remember:
+        text += "\n" + _emu68_remember(program, changes)
+    result = _wait_job(number, wait)
+    if result is None:
+        return text + f"\njob {number} still running; amiga_job_output({number}) shows what it printed"
+    return text + "\n" + (result or "(no output)")
 
 
 @mcp.tool()

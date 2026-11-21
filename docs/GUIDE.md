@@ -256,7 +256,8 @@ starts the old one again.
 | `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` (or `task=`, `hunk=`, `offset=`, kept inside the hunk) and the vectors below $400 (ExecBase at 4) work too |
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
-| `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_cpu` | CPU load per task, sampled on the Amiga itself; under Emu68 also the real MIPS |
+| `amiga_emu68`, `amiga_emu68_jit` | under Emu68 (PiStorm and other Pi boards): Emu68 version, the Pi, boot options, temperature, under-voltage and throttling, JIT counters; JIT settings while it runs, taken back with one call, per program, see [EMU68.md](EMU68.md) |
 | `amiga_graphics`, `amiga_screen_modes` | the graphics board: Picasso96 or CyberGraphX, card and chip driver with versions, the Zorro bus, Warp3D and MiniGL; the Picasso96 screen modes with the colour depths switched on, one switched on or off after a copy (`confirm=True`), undone in one call |
 | `amiga_emu68_card` | Emu68's boot partition on the PiStorm's SD card, read only: kernel and version, board variant, Kickstart, `cmdline.txt` options explained, free space, problems; `check=True` reads every file |
 | `amiga_emu68_option`, `amiga_emu68_kickstart`, `amiga_emu68_undo` | change one `cmdline.txt` option or the Kickstart file, and take it back; dry run until `confirm=True`, backup on the card and the PC first, see [Emu68's SD card](#emu68s-sd-card) |

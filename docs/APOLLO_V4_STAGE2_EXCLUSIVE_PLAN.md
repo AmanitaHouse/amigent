@@ -4,7 +4,7 @@
 **Based on Stage 1:** `docs/APOLLO_V4_STAGE1_INVENTORY_RESULTS.md` (session `20261121T005910Z`)  
 **Docs branch tip at preparation parent:** `6c87c22`  
 **Stage 2A results:** `docs/APOLLO_V4_STAGE2A_RESULTS.md` (session `20261121T010816Z`)  
-**Status:** Stage 2A executed under separate authorisation. **Stage 2B not authorised by this document.**
+**Status:** Stage 2A executed. Stage 2B **U-DAE** executed — `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`. F-DAE / Stage 3 still require separate authorisation.
 
 Stage 1 established: V4-SA, ApolloOS, SYSINFO CPU 68080, AFF_FPGA bit present, Kickstart 51.51, **production protocol 5 + TLS**, `AMIGENT` public, production remained responsive, **no `self=` path**.
 

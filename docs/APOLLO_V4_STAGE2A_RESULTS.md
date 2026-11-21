@@ -109,5 +109,5 @@ Production backup hash **differs** from U-DAE (`456fce26…`, 129844) and F-DAE 
 
 ## Next step
 
-Stage 2B runbook: **`docs/APOLLO_V4_STAGE2B_RUNBOOK.md`**.  
-Await Stage 2B authorisation (includes physical Shell confirmation). Stage candidate **before** production `QUIT`. First session is **U-DAE only**.
+Stage 2B U-DAE results: **`docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`**.  
+F-DAE and Stage 3 await separate authorisation.

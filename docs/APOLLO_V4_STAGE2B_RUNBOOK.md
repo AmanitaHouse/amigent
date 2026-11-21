@@ -1,8 +1,8 @@
 # Apollo V4 Stage 2B exclusive runbook — U-DAE first session
 
 **Prepared:** 2026-11-21  
-**Status:** Offline runbook only — **Stage 2B execution not authorised**  
-**Parent docs tip:** `d449e2d`  
+**Status:** First U-DAE exclusive session **executed** — see `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`  
+**Parent docs tip:** `cc2907e`  
 **Based on:** Stage 1 inventory, Stage 2A backup (`docs/APOLLO_V4_STAGE2A_RESULTS.md`), `docs/PROTOCOL.md`, `src/amigent/tls.py`, `src/amigent/amiga/amigent-update.rexx`, `src/native/amiga/daemon/amigentd.c`
 
 This runbook tests **only U-DAE** (protected upstream contribution). Do not substitute F-DAE. Do not overwrite `C:amigentd`.

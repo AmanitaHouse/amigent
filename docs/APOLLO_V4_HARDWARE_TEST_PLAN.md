@@ -180,7 +180,7 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 2A (done):** see `docs/APOLLO_V4_STAGE2A_RESULTS.md` — production `C:amigentd` backed up on PC; startup `RUN >NIL: C:amigentd TLSONLY`.
 
-**Stage 2B runbook:** **`docs/APOLLO_V4_STAGE2B_RUNBOOK.md`** (U-DAE first; stage+hash before QUIT; physical Shell required). Plan overview: `docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`. **Stage 2B not authorised until explicit approval** (console access + interruption + staging writes).
+**Stage 2B (U-DAE done):** `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md` — protocol 6 validated; production protocol 5 restored. Runbook: `docs/APOLLO_V4_STAGE2B_RUNBOOK.md`. F-DAE and Stage 3 still require separate authorisation.
 
 **Exclusive / separate authorisation:** Stage 2B interruption; Stage 3 AUDIO / monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 

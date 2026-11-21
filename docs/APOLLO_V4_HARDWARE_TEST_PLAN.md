@@ -1,10 +1,27 @@
 # Apollo V4 hardware validation plan
 
-**Plan date:** 2026-11-21  
+**Plan date:** 2026-11-21 (first-contact preflight revision)  
 **Audit commit (fork `main`):** `79880b8f018ae735715de4f1d0e943acf4462dcd`  
+**Docs branch tip (preflight):** see `validation/apollo-v4-evidence-prep`  
 **Status:** Preparation only — **no V4 contact authorised by this document**
 
-Source of truth for ports, tool types and second-instance behaviour: `docs/PROTOCOL.md`, `docs/GUIDE.md`, `src/amigent/setup.py`, `src/amigent/viewer.py`, `src/amigent/server.py`, `src/amigent/doctor.py`, `src/amigent/hrtmon.py`.
+Source of truth for ports, tool types and second-instance behaviour: `docs/PROTOCOL.md`, `docs/GUIDE.md`, `src/amigent/setup.py`, `src/amigent/viewer.py`, `src/amigent/server.py`, `src/amigent/doctor.py`, `src/amigent/hrtmon.py`, and `src/native/amiga/daemon/amigentd.c` (hooks / listen / twin).
+
+## Concurrent daemon safety (source review)
+
+| Topic | Finding |
+|-------|---------|
+| Port selection | Default **6801**; `PORT <n>` or tool type `PORT=`. TLS on **PORT+1**. |
+| Twin on default port | If `PORT` is 6801 and public ARexx port `AMIGENT` already exists, startup refuses (`twin`) and tells the operator to use Update or another PORT. |
+| Documented second copy | PROTOCOL: second copy on another PORT; ARexx becomes `AMIGENT.<port>`. |
+| Shared library hooks | Named semaphore **`amigent hooks 1`**. Only **one** instance obtains it (`AttemptSemaphore`). The other runs **without** text/debug `SetFunction` patches. Stubs are never freed and may remain in the LVO chain. |
+| Stopping a non-owner | `hooks_stop` → `unhook_all` returns immediately if `!hooks_owned`, so a candidate that never owned hooks should not strip production vectors. |
+| Monitor | Fixed public port name **`Amigent.monitor`** — one monitor consumer. |
+| AUDIO / ARNE | Mix is read from the loaded `arne.audio` driver state in RAM. Per-process `audio_owner` does **not** serialise two daemon processes. Concurrent AUDIO is **not** established as safe. |
+| Candidate without install change | Running a binary from another path with an unused `PORT` and an existing `KEY` does not rewrite `C:amigentd` or User-Startup by itself. |
+| Client ports | Production clients default to screen **6801**. Pointing `AMIGENT_SCREEN_PORT` / `AMIGENT_CTL_PORT` at a candidate must not leave production unattended mid-session without a plan. |
+
+**Verdict:** A second instance on an unused PORT is **technically supported for TCP listen / SYSINFO / basic screen**, with **degraded hooks** on the non-owner. It is **not** a general “safe sandbox” for AUDIO, monitor exclusivity, or hook-dependent text features. Those remain **exclusive / approval-gated (L3)** unless a later live check proves otherwise.
 
 ## Binary matrix (must record per result)
 
@@ -27,9 +44,10 @@ Documented facts (not assumptions):
 - `PORT <n>` selects another port; PROTOCOL states this is “handy for running a second copy next to the first.” ARexx becomes `AMIGENT.<port>` when the primary name is taken.
 - Client env defaults: `AMIGENT_CTL_PORT`/`AMIGENT_SCREEN_PORT` default **6800**/**6801** in `server.py` (control may be amigactld on older installs); viewer HTTP `AMIGENT_VIEWER_PORT` default **6810** on localhost.
 - `amigent-setup --update` **replaces** the running daemon with the packaged build — treat as **approval-gated** on a known-good V4.
-- This plan’s preferred mode: stage candidates under a **separate drawer** (e.g. `T:amigent-candidate/` or `SYS:amigent-test/`), launch with an **unused PORT**, point the PC client at that host:port via documented env vars — **only after** inventory confirms the port is free and the known-good instance remains untouched.
+- Preferred mode for Stage 2 TCP/SYSINFO only: stage candidates under a **non-startup** path, launch with an **unused PORT** (never 6801 while production holds `AMIGENT`), confirm production still answers on 6801, then point a **separate** PC client env at the candidate ports.
+- Prefer **exclusive session** for AUDIO, monitor, HRTmon, hook-dependent text, update/fallback, and any ALLOWPOKE experiment.
 
-If concurrent operation cannot be confirmed safe on the live machine (port conflict, RAM, TLS cert path), stop and request an **exclusive session** with tested rollback.
+If port conflict, RAM pressure, TLS/key ambiguity, or production stop answering occurs, stop and request an exclusive session with tested rollback.
 
 ### Offline procedure checklist (before any connection)
 
@@ -62,7 +80,7 @@ If concurrent operation cannot be confirmed safe on the live machine (port confl
 
 | ID | Purpose | Preconditions | Implementation / command | Binary | Expected | Evidence | Risk | Approval? | Pass/fail |
 |----|---------|---------------|--------------------------|--------|----------|----------|------|-----------|-----------|
-| A1 | Record board/OS | Inventory access | Manual + `amiga_sysinfo` / doctor once connected | CLI | Apollo model/OS strings logged | Screenshot/log | L1–L3 | If connect | Strings recorded |
+| A1 | Record board/OS | Inventory access | Read-only inventory (§ below). **Do not** use full `amigent-doctor` (it writes `RAM:amigent-speedtest`). | CLI | Apollo model/OS strings logged | Screenshot/log | L1 | **Yes — inventory contact** | Strings recorded |
 | A2 | AFF_FPGA / probe contract | Candidate probe staged | Run `amigent-apollo-probe` from Shell; note stdout + exit | F-PRB and U-PRB separately | F-PRB: `ApolloOS` then `68080`, exit 0 only if both; AmigaOS → non-zero; U-PRB behaviour per its contract | Shell transcript | L1 | No if already on path copy | Matches contract for **that** probe hash |
 | A3 | SYSINFO fields | Connected daemon | Client SYSINFO / About | F-DAE / U-DAE | `os`, `cpu`, `audio`, `pip` (fork may show `pip=0`; U-DAE must not advertise pip=1) | Redacted SYSINFO | L2 | Port staging | Fields match build |
 | A4 | First-install selection | Disposable or exclusive | `amigent-setup` against staged package | CLI+F-PRB+F-DAE or U-* | Selects Apollo daemon only with sufficient evidence | Setup log | L3 | **Yes** | Correct binary chosen |
@@ -95,9 +113,9 @@ If concurrent operation cannot be confirmed safe on the live machine (port confl
 | D1 | MMIO refuse (software) | Host tests | `tests/test_apollo_mmio.py` / harness | — | All eight windows refuse | CI/local log | L0 | No | Pass |
 | D2 | MMIO refuse (live read) | Candidate + ALLOWPOKE **off** | Protocol PEEK into a protected window | F/U-DAE | Refused; no register side effects claimed without proof | Log | L2 | Explicit | Refuse |
 | D3 | MMIO write attempt | ALLOWPOKE on **candidate only** | POKE into protected window | same | Refused even with ALLOWPOKE | Log | L4 | **Yes** | Refuse |
-| D4 | AUDIO opcode 48 | `audio=1` | Viewer Hear / `amiga_listen` | F/U-DAE separately | Stream starts/stops; WAV/PCM path | Audio note + log | L2 | Staging | Audible/logged |
-| D5 | PIP remains unsupported as claimed | SYSINFO | Check `pip` and opcode 49 | U-DAE: no PIP cmd; F-DAE: `pip=0` empty | No overlay claim | SYSINFO | L2 | | Matches build |
-| D6 | Apollo monitor | Packaged monitor present | Launch monitor path used by setup | MON | Runs or documented fallback | Log | L2–L3 | If replaces | OK / fallback |
+| D4 | AUDIO opcode 48 | `audio=1`; **exclusive** preferred | Viewer Hear / `amiga_listen` | F/U-DAE separately | Stream starts/stops; WAV/PCM path | Audio note + log | L3 | **Yes** | Audible/logged |
+| D5 | PIP remains unsupported as claimed | SYSINFO | Check `pip` and opcode 49 | U-DAE: no PIP cmd; F-DAE: `pip=0` empty | No overlay claim | SYSINFO | L2 | Staging | Matches build |
+| D6 | Apollo monitor | Packaged monitor present | Launch monitor — exclusive if production monitor uses `Amigent.monitor` | MON | Runs or documented fallback | Log | L3 | **Yes** | OK / fallback |
 | D7 | HRTmon program | ApolloOS, HRTmon on path | `amiga_hrtmon` / server tool | CLI | Starts **program** HRTmon only; never ROM | Log | L4 | **Yes** | Plan() rules |
 | D8 | Graphics reporting | Connected | SYSINFO / About graphics fields | same | Consistent with machine | Screenshot | L2 | | Consistent |
 
@@ -112,13 +130,57 @@ If concurrent operation cannot be confirmed safe on the live machine (port confl
 
 ---
 
+## Stage 1 — Read-only inventory procedure (awaiting contact approval)
+
+**Gate:** Do not open a network session to the V4 until the user explicitly approves this inventory.
+
+### Connection method (existing install)
+
+Uses the already-configured PC client entry (`AMIGENT_HOST` / `amigent-setup` machine name), defaulting to production ports **6801** (and TLS **6802** when applicable). No candidate daemon is started.
+
+### Safe on the PC once connected (no Amiga writes)
+
+Prefer a short Python session against the live production daemon, or the viewer About path — **not** full `amigent-doctor` (that writes and deletes `RAM:amigent-speedtest`).
+
+Collect and save **on the PC**:
+
+| Need | Supported approach |
+|------|-------------------|
+| OS / board / CPU / audio / pip / self | `Commands.sysinfo()` / viewer `read_amiga()` fields (`os`, `board`, `board_name`, `cpu`, `audio`, `pip`, `self`, protocol) |
+| Kickstart / Version text | `ctl.exec("Version")` output (Shell `Version`) |
+| CPU command text | `ctl.exec("CPU")` when available |
+| Volumes / free space | `ctl.volumes()` (read-only volume list) |
+| Installed daemon **file** identity | From SYSINFO `self` path: `Version "<path>"` and optional `read_file` of that path **to the PC** for SHA-256 — distinguish from “running image after in-place update” |
+| Running protocol | Handshake / `protocol` on the command channel |
+| HRTmon on path | `ctl.exec("Which HRTmon")` — presence only; **do not** `Run HRTmon` |
+| Monitor presence | `Which` / `List` of expected monitor path if known; do not start monitor |
+| Ports | Infer from successful connect + documented defaults; do not scan destructively |
+
+### Amiga Shell (if operator is already at the machine — still approval-gated for remote work)
+
+Read-only examples: `Version`, `Version FULL exec.library`, `Status`, `Which HRTmon`, `List C:amigentd`, `Type S:User-Startup` (operator reads; copy text to PC). Do not run Update, SETUP, or candidate binaries during inventory.
+
+### Explicitly out of scope for Stage 1
+
+- `amigent-setup` / `--update`  
+- Starting F-DAE / U-DAE / probes from a test path  
+- `amiga_hrtmon`, Hear / `amiga_listen`, monitor launch  
+- Full `amigent-doctor` speedtest  
+- Any write under `C:` or change to User-Startup  
+
+### Evidence capture
+
+Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied to the PC**. Do not create new inventory files on the V4 solely for this stage.
+
 ## What can run without disturbing production
 
-**Without V4:** A1 prep notes, D1, packaging/hash verification, client unit tests, report template dry-run.
+**Without V4:** D1, packaging/hash verification, offline binary checks, report template dry-run, this preflight.
 
-**With V4, production untouched (after staging approval):** A2 using a **copied** probe binary not on the startup path; A3/B1/B2/B4/C1/C3/C4/C5/D2/D4/D5/D8 on a **second** `PORT` instance if concurrency is verified; evidence capture only.
+**With V4 after inventory approval only:** Stage 1 read-only collection above.
 
-**Requires explicit authorisation / exclusive session:** A4, A5, B3, C2 with SETUP writing system paths, D3, D6 if it replaces monitor, D7, E1–E2, E4, any `amigent-setup --update`, any overwrite of `C:amigentd`, any ALLOWPOKE experiment, any live SAGA register write.
+**With V4 after Stage 2 approval (second PORT, production still up):** A3/B1/B2/B4/B5/C1/C3/C4/C5/D2/D5/D8 on candidate — **expect missing hooks** on the non-owner; re-check production after each stop.
+
+**Exclusive / separate authorisation:** A4, A5, B3, C2 SETUP writes, D3, **D4 AUDIO**, **D6 monitor**, D7 HRTmon, E1–E2, E4, `amigent-setup --update`, overwrite `C:amigentd`, ALLOWPOKE, live SAGA writes.
 
 ## Maintainer-facing explanation (draft — do not post yet)
 

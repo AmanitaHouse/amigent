@@ -14,12 +14,15 @@ Fill one report per test session. Mark every hardware row **NOT RUN** until exec
 |-------|-------|
 | Test date (UTC) | |
 | Operator | |
-| Authorisation reference | _(ticket / chat approval for L3–L4)_ |
+| Authorisation reference | _(inventory / stage2-port / L3–L4)_ |
+| Session stage | 1 inventory / 2 second-PORT / 3 exclusive |
+| Concurrent second PORT used? | yes / no — if yes, note hooks owner |
 | AmiGent client version (`amigent.__version__`) | |
 | Client git commit SHA | |
 | Client tree dirty? | yes / no |
 | Upstream PR(s) this evidence supports | |
 | Fork review PR(s) cross-ref | |
+| Full `amigent-doctor` used? | **must be no** for Stage 1 (writes RAM:) |
 
 ## Hardware and OS
 

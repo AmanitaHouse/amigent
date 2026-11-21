@@ -29,10 +29,10 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, roster, update
+from . import __version__, machines, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import PLAIN_CLOSED_TEXT, Commands, pc_outdated
+from .channel import Commands, pc_outdated
 from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
                      native_ppc, ppc_software)
 from .screenfeed import Feed, InputQueue
@@ -43,62 +43,68 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
 
-# Shown as themselves. Anything else that fails the link stays the generic
-# "not answering" line, so a greeting, a path or an address is not printed.
-KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
-KEY_REFUSED = ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
-               "must match S:amigent.key on the Amiga")
-CLOSED_BY_DAEMON = "connection closed by amigentd"
-STOPPED_ANSWERING = "amigentd stopped answering."
-UNEXPECTED_GREETING = "The Amiga sent an unexpected greeting."
-DID_NOT_ANSWER = "The Amiga did not answer in time."
-CONNECTION_REFUSED = "The Amiga refused the connection."
-CANNOT_BE_REACHED = "The Amiga cannot be reached on the network."
-CONNECTION_CLOSED = "The connection to the Amiga was closed."
-ADDRESS_UNRESOLVED = "The Amiga's address could not be resolved."
-KNOWN_CONNECTION_REASONS = (
-    KEY_WANTED, KEY_REFUSED, CLOSED_BY_DAEMON, STOPPED_ANSWERING, UNEXPECTED_GREETING,
-    DID_NOT_ANSWER, CONNECTION_REFUSED, CANNOT_BE_REACHED, CONNECTION_CLOSED, ADDRESS_UNRESOLVED,
-    PLAIN_CLOSED_TEXT,
-)
+# Why the Amiga does not answer, as a key the page translates (locales/*.json).
+# Anything not recognised becomes no reason on the page, so a greeting, a path or
+# an address never reaches it; the terminal that started the viewer gets the raw text.
+CONNECTION_REASONS = {
+    "reason_key_wanted": "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY.",
+    "reason_key_refused": ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+                           "must match S:amigent.key on the Amiga."),
+    "reason_closed_by_daemon": "amigentd closed the connection.",
+    "reason_stopped_answering": "amigentd stopped answering.",
+    "reason_unexpected_greeting": "The Amiga sent an unexpected greeting.",
+    "reason_timeout": "The Amiga did not answer in time.",
+    "reason_refused": "The Amiga refused the connection.",
+    "reason_unreachable": "The Amiga cannot be reached on the network.",
+    "reason_closed": "The connection to the Amiga was closed.",
+    "reason_unresolved": "The Amiga's address could not be resolved.",
+    "reason_plain_closed": tls.PLAIN_CLOSED_TEXT,
+    "reason_no_tls": tls.NO_TLS_TEXT,
+    "reason_tls_mismatch": "The Amiga's TLS certificate does not match the saved one; run amigent-setup again.",
+    "reason_pin_ambiguous": ("Two saved Amigas share this address and their TLS certificates differ; "
+                             "fix the address in Your Amigas or run amigent-setup again."),
+    "reason_machine_changed": "Machine changed; select it again in Your Amigas.",
+}
 
 
 def connection_reason(text: str) -> str:
-    """A connection or disconnection reason safe to show, or '' when it is not.
-
-    A known failure becomes one fixed sentence. An empty or unrecognised text,
-    including a greeting, a path or the Amiga's address, becomes no reason.
-    """
+    """The key of a known connection failure in text, or '' when there is none."""
     raw = text or ""
+    low = raw.lower()
     if "only encrypted connections" in raw:
-        return PLAIN_CLOSED_TEXT
+        return "reason_plain_closed"
+    if "amissl does not open" in low:
+        return "reason_no_tls"
+    if "certificate_verify_failed" in low or "certificate verify failed" in low:
+        return "reason_tls_mismatch"
+    if "ambiguous tls pin" in low:
+        return "reason_pin_ambiguous"
     if "wants a key" in raw:
-        return KEY_WANTED
+        return "reason_key_wanted"
     if "refused the key" in raw:
-        return KEY_REFUSED
-    if CLOSED_BY_DAEMON in raw:
-        return CLOSED_BY_DAEMON
+        return "reason_key_refused"
+    if "connection closed by amigentd" in raw:
+        return "reason_closed_by_daemon"
     if "stopped answering" in raw:
-        return STOPPED_ANSWERING
+        return "reason_stopped_answering"
     if "unexpected greeting" in raw:
-        return UNEXPECTED_GREETING
+        return "reason_unexpected_greeting"
     if "not answering" not in raw:
         return ""
-    low = raw.lower()
     if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
                                     "semaphore timeout")):
-        return DID_NOT_ANSWER
+        return "reason_timeout"
     if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
-        return CONNECTION_REFUSED
+        return "reason_refused"
     if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
                                     "winerror 10065", "winerror 10051")):
-        return CANNOT_BE_REACHED
+        return "reason_unreachable"
     if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
                                     "broken pipe", "winerror 10054", "winerror 10053")):
-        return CONNECTION_CLOSED
+        return "reason_closed"
     if any(part in low for part in ("name or service not known", "nodename nor servname",
                                     "getaddrinfo", "no such host", "winerror 11001")):
-        return ADDRESS_UNRESOLVED
+        return "reason_unresolved"
     return ""
 
 
@@ -230,7 +236,7 @@ class Viewer:
                          alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
-        self.reason = ""  # why the Amiga does not answer, for the page and the terminal
+        self.reason = ""  # why the Amiga does not answer: a CONNECTION_REASONS key or ""
         self.ever_joined = False
         self.amiga: dict = {}
         self.screen_list: list = []
@@ -387,7 +393,8 @@ class Viewer:
     def retire(self):
         """An address edit or removal invalidates this connection, not its jobs' target."""
         self.enabled = False
-        self.event("online", online=False, reason="Machine changed; select it again in Your Amigas.")
+        self.reason = "reason_machine_changed"
+        self.event("online", online=False, reason=self.reason)
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
@@ -404,7 +411,7 @@ class Viewer:
             if online:
                 print(f"{stamp} connected to {machines.name_of(self.host)}", file=sys.stderr, flush=True)
             else:
-                print(f"{stamp} the Amiga does not answer: {self.reason or 'no reason given'}",
+                print(f"{stamp} the Amiga does not answer: {reason or 'no reason given'}",
                       file=sys.stderr, flush=True)
 
     def _stats(self) -> None:

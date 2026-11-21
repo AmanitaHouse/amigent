@@ -121,26 +121,12 @@
   let amigaOnline = null;
   let host = "";
   let address = "";
-  let reason = "";  // why the Amiga does not answer, as the PC side says it
+  let reason = "";  // why the Amiga does not answer: a reason_* key from the PC side
 
-  // Fixed sentences from the viewer. Exact match only: the text is inserted
-  // with textContent, and anything else stays off the page.
-  const KNOWN_LINK_REASONS = [
-    "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY",
-    "amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ must match S:amigent.key on the Amiga",
-    "connection closed by amigentd",
-    "amigentd stopped answering.",
-    "The Amiga sent an unexpected greeting.",
-    "The Amiga did not answer in time.",
-    "The Amiga refused the connection.",
-    "The Amiga cannot be reached on the network.",
-    "The connection to the Amiga was closed.",
-    "The Amiga's address could not be resolved.",
-    "amigentd takes only encrypted connections from other computers. Copy its certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) to this one, or run amigent-setup again.",
-  ];
-
-  function shownLinkReason(text) {
-    return KNOWN_LINK_REASONS.includes(text) ? text : "";
+  // The PC side sends a key (reason_*) for why the Amiga does not answer; only
+  // keys the locales know are shown, anything else stays off the page.
+  function shownLinkReason(key) {
+    return /^reason_[a-z_]+$/.test(key) && Object.hasOwn(EN, key) ? t(key) : "";
   }
 
   function send(op) {

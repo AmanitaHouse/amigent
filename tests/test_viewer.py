@@ -343,28 +343,29 @@ def test_ppc_software_reads_only_version_strings():
 
 
 def test_connection_reason_names_a_known_failure_and_drops_the_detail():
-    from amigent.channel import PLAIN_CLOSED_TEXT
-    from amigent.viewer import KEY_REFUSED, connection_reason
+    from amigent import tls
+    from amigent.viewer import connection_reason
 
-    assert connection_reason("amigentd at 10.0.0.5:6801 not answering: timed out") == \
-        "The Amiga did not answer in time."
+    assert connection_reason("amigentd at 10.0.0.5:6801 not answering: timed out") == "reason_timeout"
     refused = ("amigentd at 10.0.0.5:6801 not answering: [WinError 10061] "
                "No connection could be made because the target machine actively refused it")
-    assert connection_reason(refused) == "The Amiga refused the connection."
-    assert "10.0.0.5" not in connection_reason(refused)
+    assert connection_reason(refused) == "reason_refused"
     windows_timeout = ("amigentd at amiga:6801 not answering: [WinError 10060] A connection "
                        "attempt failed because the connected party did not properly respond "
                        "after a period of time, or established connection failed because "
                        "connected host has failed to respond")
-    assert connection_reason(windows_timeout) == "The Amiga did not answer in time."
-    assert connection_reason("connection closed by amigentd") == "connection closed by amigentd"
-    assert connection_reason("amigentd stopped answering") == "amigentd stopped answering."
-    greeting = "unexpected greeting b'HTTP/1.1 secret-key'"
-    assert connection_reason(greeting) == "The Amiga sent an unexpected greeting."
-    assert "secret-key" not in connection_reason(greeting)
-    assert connection_reason("refused the key hunter2") == KEY_REFUSED
-    assert "hunter2" not in connection_reason("refused the key hunter2")
-    assert connection_reason(PLAIN_CLOSED_TEXT) == PLAIN_CLOSED_TEXT
+    assert connection_reason(windows_timeout) == "reason_timeout"
+    assert connection_reason("connection closed by amigentd") == "reason_closed_by_daemon"
+    assert connection_reason("amigentd stopped answering") == "reason_stopped_answering"
+    assert connection_reason("unexpected greeting b'HTTP/1.1 secret-key'") == "reason_unexpected_greeting"
+    assert connection_reason("refused the key hunter2") == "reason_key_refused"
+    assert connection_reason(tls.PLAIN_CLOSED_TEXT) == "reason_plain_closed"
+    assert connection_reason(tls.NO_TLS_TEXT) == "reason_no_tls"
+    mismatch = ("amigentd at 10.0.0.5:6801 not answering: [SSL: CERTIFICATE_VERIFY_FAILED] "
+                "certificate verify failed: self-signed certificate (_ssl.c:1006)")
+    assert connection_reason(mismatch) == "reason_tls_mismatch"
+    ambiguous = "Ambiguous TLS pin for 10.0.0.5. Save its verified certificate as tls-amiga-1.pem."
+    assert connection_reason(ambiguous) == "reason_pin_ambiguous"
     leaked = "amigentd at 10.1.2.3:6801 not answering: [Errno 13] Permission denied: '/home/x/secret'"
     assert connection_reason(leaked) == ""
     assert connection_reason("<img src=x onerror=alert(1)>") == ""
@@ -373,7 +374,7 @@ def test_connection_reason_names_a_known_failure_and_drops_the_detail():
     assert connection_reason("tile at 1,2: bad packed data") == ""
 
 
-def test_set_online_reports_a_known_reason_and_a_successful_connection(capsys, monkeypatch):
+def test_set_online_sends_a_key_to_the_page_and_the_raw_reason_to_the_terminal(capsys, monkeypatch):
     from amigent.viewer import Viewer
 
     monkeypatch.setattr("amigent.viewer.machines.name_of", lambda host: host)
@@ -384,19 +385,17 @@ def test_set_online_reports_a_known_reason_and_a_successful_connection(capsys, m
     events = []
     viewer.event = lambda kind, **fields: events.append((kind, fields))
     viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
-    assert events == [("online", {"online": False, "reason": "The Amiga did not answer in time."})]
-    err = capsys.readouterr().err
-    assert "the Amiga does not answer: The Amiga did not answer in time." in err
-    assert "10.0.0.8" not in err
+    assert events == [("online", {"online": False, "reason": "reason_timeout"})]
+    # the user's own terminal gets the whole text, address included
+    assert "the Amiga does not answer: amigentd at 10.0.0.8:6801 not answering: timed out" in \
+        capsys.readouterr().err
     viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
     assert len(events) == 1
     viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: connection refused")
-    assert events[-1][1] == {"online": False, "reason": "The Amiga refused the connection."}
-    assert "10.0.0.8" not in capsys.readouterr().err
+    assert events[-1][1] == {"online": False, "reason": "reason_refused"}
     viewer._set_online(False, "tile decoder blew up at /tmp/secret")
     assert events[-1][1]["reason"] == ""
-    assert "no reason given" in capsys.readouterr().err
-    assert "secret" not in capsys.readouterr().err
+    assert "tile decoder blew up" in capsys.readouterr().err
     viewer._set_online(True)
     assert events[-1] == ("online", {"online": True, "reason": ""})
     assert "connected to amiga.local" in capsys.readouterr().err
@@ -404,16 +403,25 @@ def test_set_online_reports_a_known_reason_and_a_successful_connection(capsys, m
     assert len(events) == 4
 
 
-def test_page_shows_only_known_link_reasons():
-    import re
+def test_every_reason_key_has_its_text_in_every_language():
     from pathlib import Path
 
-    from amigent.viewer import KNOWN_CONNECTION_REASONS
+    from amigent.viewer import CONNECTION_REASONS
+
+    locales = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web" / "locales"
+    english = json.loads((locales / "en.json").read_text(encoding="utf-8"))
+    assert {k: english[k] for k in CONNECTION_REASONS} == CONNECTION_REASONS
+    for path in locales.glob("*.json"):
+        texts = json.loads(path.read_text(encoding="utf-8"))
+        assert all(texts.get(k) for k in CONNECTION_REASONS), path.name
+
+
+def test_page_shows_only_known_link_reasons():
+    from pathlib import Path
 
     script = (Path(__file__).resolve().parents[1] / "src" / "amigent" / "web" / "viewer.js").read_text(encoding="utf-8")
-    body = script.split("const KNOWN_LINK_REASONS = [", 1)[1].split("];", 1)[0]
-    shown = tuple(re.findall(r'"([^"]*)"', body))
-    assert shown == KNOWN_CONNECTION_REASONS
+    shown = script.split("function shownLinkReason(key)", 1)[1].split("}", 1)[0]
+    assert "/^reason_[a-z_]+$/.test(key)" in shown and "Object.hasOwn(EN, key)" in shown
     show = script.split("function showState()", 1)[1].split("function showPaused(", 1)[0]
     assert "shownLinkReason(reason)" in show
     assert '$("overlay-text").textContent = message' in show

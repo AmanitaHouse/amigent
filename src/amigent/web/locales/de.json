@@ -167,5 +167,20 @@
  "machines_offline": "Offline",
  "machines_checking": "Checking…",
  "machines_empty": "No saved Amigas yet. Use amigent-setup to register one, or connect by address below.",
- "machines_unavailable": "Cannot reach the local machine manager. Reopen amigent-viewer."
+ "machines_unavailable": "Cannot reach the local machine manager. Reopen amigent-viewer.",
+ "reason_key_wanted": "amigentd verlangt einen Schlüssel: amigent-setup ausführen oder AMIGENT_KEY setzen.",
+ "reason_key_refused": "amigentd hat den Schlüssel abgelehnt; AMIGENT_KEY oder der Schlüssel in ~/.config/amigent/ muss zu S:amigent.key auf dem Amiga passen.",
+ "reason_closed_by_daemon": "amigentd hat die Verbindung geschlossen.",
+ "reason_stopped_answering": "amigentd antwortet nicht mehr.",
+ "reason_unexpected_greeting": "Der Amiga hat einen unerwarteten Gruß geschickt.",
+ "reason_timeout": "Der Amiga hat nicht rechtzeitig geantwortet.",
+ "reason_refused": "Der Amiga hat die Verbindung abgelehnt.",
+ "reason_unreachable": "Der Amiga ist im Netzwerk nicht erreichbar.",
+ "reason_closed": "Die Verbindung zum Amiga wurde geschlossen.",
+ "reason_unresolved": "Die Adresse des Amiga ließ sich nicht auflösen.",
+ "reason_plain_closed": "amigentd nimmt von anderen Computern nur verschlüsselte Verbindungen an. Kopiere sein Zertifikat (tls-<name>.pem in ~/.config/amigent/ auf dem PC, der ihn eingerichtet hat) auf diesen oder führe amigent-setup erneut aus.",
+ "reason_no_tls": "amigentd läuft mit TLSONLY, aber AmiSSL öffnet sich dort nicht, deshalb weist er jeden anderen Computer ab. Reparatur am Amiga: AmiSSL neu installieren und amigent-repair aus dem Amigent-Ordner starten, oder dort amigentd SETUP starten und amigent-setup erneut ausführen.",
+ "reason_tls_mismatch": "Das TLS-Zertifikat des Amiga passt nicht zum gespeicherten; führe amigent-setup erneut aus.",
+ "reason_pin_ambiguous": "Zwei gespeicherte Amigas teilen sich diese Adresse und haben verschiedene TLS-Zertifikate; korrigiere die Adresse in der Liste der Amigas oder führe amigent-setup erneut aus.",
+ "reason_machine_changed": "Der Amiga wurde geändert; wähle ihn in der Liste der Amigas erneut aus."
 }

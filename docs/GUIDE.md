@@ -260,6 +260,7 @@ starts the old one again.
 | `amiga_software_failure` | a Software Failure requester: its text, the guru in words, and Suspend (never Reboot) |
 | `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
 | `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
+| `amiga_hrtmon` | load HRTmon (Aminet dev/debug/HRTmon) for the user at the Amiga; entering it halts the system, so the agent never does |
 | `amiga_gurus` | guru codes in words, the last one and those MCP logged |
 | `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
 | `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |

@@ -1,25 +1,14 @@
-"""Whether to start the HRTmon program that runs under ApolloOS.
+"""What amiga_hrtmon says. HRTmon is the debugger from Aminet (dev/debug/HRTmon).
 
-The ROM HRTMon is a different thing. Its screen is not an Intuition screen, so
-the remote desktop cannot see it, and Amigent does not enter it.
+Running the HRTmon command only loads the monitor into memory. It is entered
+by its hotkey or by an NMI, and then it halts the operating system: no network,
+no amigentd, until someone at the Amiga's own keyboard leaves it. Amigent never
+enters it.
 """
 
-
-def plan(os_name: str, version_text: str, tasks: str, on_path: bool) -> tuple[str, bool]:
-    """The reply, and whether to run `Run >NIL: HRTmon`.
-
-    The second value is never a request to enter the ROM monitor.
-    """
-    apollo = os_name == "ApolloOS" or "ApolloOS" in (version_text or "")
-    if not apollo:
-        return ("This machine is not running ApolloOS. HRTmon is not started. "
-                "The ROM monitor stays unused.", False)
-    if "hrtmon" in (tasks or "").lower():
-        return ("HRTmon is already running. Use the screen and the keyboard. "
-                "The ROM monitor stays unused.", False)
-    if not on_path:
-        return ("HRTmon is not on the command path. Put the HRTmon program that runs "
-                "under the operating system where the Shell can find it, then ask again. "
-                "The ROM monitor stays unused.", False)
-    return ("HRTmon was started under ApolloOS. Use the screen and the keyboard. "
-            "The ROM monitor stays unused.", True)
+MISSING = ("HRTmon is not installed: Which HRTmon found nothing on the command path. It comes "
+           "from Aminet (dev/debug/HRTmon), not with the OS; copy the HRTmon program to C: "
+           "and ask again.")
+LOADED = ("HRTmon is loaded and waits in memory. Do not enter it from here: its hotkey or an "
+          "NMI halts the whole system, and Amigent loses this Amiga until someone at the "
+          "Amiga's own keyboard leaves the monitor.")

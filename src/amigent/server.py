@@ -2068,30 +2068,23 @@ def amiga_key(combo: str) -> str:
 
 @mcp.tool()
 def amiga_hrtmon() -> str:
-    """Start the HRTmon program under ApolloOS and use it through the screen and keyboard.
+    """Load the HRTmon debugger resident on the Amiga, for the user at its keyboard.
 
-    The ROM HRTMon is not used: its picture is not an Intuition screen, so the
-    remote desktop cannot see it.
+    This only loads it; never enter it. HRTmon is entered by its hotkey or an
+    NMI, and once entered it halts the whole system: the network and amigentd
+    stop, and Amigent loses this Amiga until someone at the Amiga's own keyboard
+    leaves the monitor. So never press its hotkey with amiga_key. HRTmon comes
+    from Aminet (dev/debug/HRTmon), not with the OS; if it is not installed the
+    reply says so.
     """
-    from .hrtmon import plan
-    info = _with_ctl(ctl.sysinfo)
-    os_name = info.get("os", "")
-    version = ""
-    if os_name != "ApolloOS":
-        reported = _with_ctl(lambda: ctl.exec("Version FULL exec.library"))
-        if reported.rc == 0:
-            version = reported.output
-    on_path = False
-    if os_name == "ApolloOS" or "ApolloOS" in version:
-        if "hrtmon" not in info.get("tasks", "").lower():
-            on_path = _with_ctl(lambda: ctl.exec("Which HRTmon")).rc == 0
-    text, start = plan(os_name, version, info.get("tasks", ""), on_path)
-    if not start:
-        return text
+    from .hrtmon import LOADED, MISSING
+    ctl = _session().ctl
+    if _with_ctl(lambda: ctl.exec("Which >NIL: HRTmon")).rc != 0:
+        return MISSING
     started = _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
     if started.rc != 0:
-        raise AmigaError("HRTmon did not start. The ROM monitor stays unused.")
-    return text
+        raise AmigaError(f"HRTmon did not load: Run answered {started.rc}.")
+    return LOADED
 
 
 @mcp.tool()

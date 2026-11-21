@@ -6877,6 +6877,11 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
+/* Length uses the same PEEK_MAX bound as PEEK. Order: address → size →
+ * ALLOWPOKE → MMIO/RAM gates → AllocVec/l_recv → CopyMem. Oversized n closes
+ * the channel (FALSE) instead of l_skip: a near-4 GiB drain would stall and
+ * still leave an ambiguous boundary. Bounded refuses skip at most PEEK_MAX.
+ * A rebuilt binary is a new validation identity; prior HW results do not transfer. */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
@@ -6885,27 +6890,28 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 
     if (!c_address(l, len, &at, &alive))
         return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
-    if (!(data = AllocVec(n ? n : 1, MEMF_ANY)))
+    if (!n)
+        return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (n > PEEK_MAX)
+        return FALSE;  /* close: do not drain an unbounded declared payload */
+    if (!allow_poke)
+        return l_skip(l, n, IO_SECONDS) &&
+               c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
+#ifdef AMIGENT_APOLLO
+    /* APoke is not this command. The same RAM gate applies, and a window
+     * whose read has a side effect is not a place to write either. */
+    if (apollo_mmio_hit(at, n))
+        return l_skip(l, n, IO_SECONDS) &&
+               c_fail(l, 1, "that range includes Apollo registers that a read can change");
+#endif
+    if (!peek_allowed(at, n) || at >= 0xF80000UL)
+        return l_skip(l, n, IO_SECONDS) &&
+               c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (!(data = AllocVec(n, MEMF_ANY)))
         return l_skip(l, n, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
     if (!l_recv(l, data, n, IO_SECONDS)) {
         FreeVec(data);
         return FALSE;
-    }
-    if (!allow_poke) {
-        FreeVec(data);
-        return c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
-    }
-#ifdef AMIGENT_APOLLO
-    /* APoke is not this command. The same RAM gate applies, and a window
-     * whose read has a side effect is not a place to write either. */
-    if (apollo_mmio_hit(at, n)) {
-        FreeVec(data);
-        return c_fail(l, 1, "that range includes Apollo registers that a read can change");
-    }
-#endif
-    if (!peek_allowed(at, n) || at >= 0xF80000UL) {
-        FreeVec(data);
-        return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
     }
     mon_say('C', "write memory", NULL);
     Disable();

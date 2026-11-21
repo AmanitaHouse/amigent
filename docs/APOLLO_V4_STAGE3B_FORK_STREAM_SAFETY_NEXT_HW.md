@@ -1,8 +1,8 @@
 # Next hardware milestone — fork stream-safe Apollo daemon
 
-**Status:** Prepared only — **not authorised**  
-**Purpose:** Smoke + one nonempty `audio(0)` on a **new** fork-built candidate after diagnostic-dump removal.  
-**Do not** treat as Hear UI validation unless separately named.
+**Status:** Oneshot HW **executed** — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md`.  
+**Remaining (optional, needs new auth):** fork streaming / stock Viewer Hear on `00443719…`.  
+**Do not** treat oneshot success as stream validation.
 
 ## Candidate (offline build — **not** hardware-validated)
 

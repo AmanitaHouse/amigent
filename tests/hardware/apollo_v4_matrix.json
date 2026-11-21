@@ -21,7 +21,13 @@
       "name": "amigentd.apollo-stream-safe",
       "size": 128496,
       "sha256": "983fd8531ed7e8631a77daac09b9f660cd59137a106dcc8f93a58e760921dd2a",
-      "lineage": "contrib/apollo-audio-stream-safety@1aa7265 (not packaged; HW NOT RUN)"
+      "lineage": "contrib/apollo-audio-stream-safety@1aa7265 (Hear HW PASSED supervised)"
+    },
+    "F-FORKSAFE": {
+      "name": "amigentd.apollo-fork-stream-safe",
+      "size": 129944,
+      "sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+      "lineage": "contrib/fork-audio-stream-safety@496f142 (oneshot HW PASSED; stream NOT TESTED)"
     },
     "F-PRB": {
       "name": "amigent-apollo-probe",
@@ -337,8 +343,17 @@
     "long_duration_stream": "NOT_TESTED",
     "FDAE_streaming": "NOT_TESTED",
     "stock_Viewer_Hear_UI": "NOT_TESTED",
+    "fork_stream_safe_oneshot": "PASSED_ON_HARDWARE 00443719\u2026 Phase 4 \u2014 docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md",
+    "fork_stream_safe_streaming": "NOT_TESTED",
     "stage3b": {
-      "status": "phase3_hear_executed_claims_reconciled",
+      "status": "phase4_fork_oneshot_executed",
+      "phase4_results": "docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md",
+      "phase4_evidence": "amigent-evidence/stage3b-fork-audio/20261121T033439Z",
+      "phase4_sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+      "phase4_rate": 47931,
+      "phase4_payload_bytes": 1920,
+      "phase4_production_restored": true,
+      "prior_status": "phase3_hear_executed_claims_reconciled",
       "session_evidence": "amigent-evidence/stage3b-hear-hw/20261121T031620Z",
       "evidence_assessment": "private/evidence-assessment.json",
       "results": "docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md",

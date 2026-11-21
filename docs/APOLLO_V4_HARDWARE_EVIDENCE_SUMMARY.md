@@ -31,8 +31,9 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 
 ## Explicitly **not** hardware-validated by this session
 
-- F-DAE AUDIO / long-duration Hear soak — still **NOT RUN ON HW**  
+- F-DAE AUDIO / long-duration Hear soak / fork streaming — still **NOT RUN ON HW**  
 - Viewer Hear (stream-safe U-HEAR `983fd853…`): **PASSED ON HW** (bounded supervised session) — `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md`  
+- Corrected fork oneshot (`00443719…`): **PASSED ON HW** — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md`  
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  

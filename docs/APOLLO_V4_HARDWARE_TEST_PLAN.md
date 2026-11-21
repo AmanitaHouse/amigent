@@ -192,7 +192,9 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 3B Phase 3 (executed):** supervised Hear HW — `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md` (U-HEAR `983fd853…`).
 
-**Exclusive / separate authorisation:** F-DAE AUDIO; long-duration Hear soak; monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
+**Stage 3B Phase 4 (executed):** corrected fork oneshot — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md` (`00443719…`); fork streaming still NOT RUN.
+
+**Exclusive / separate authorisation:** fork streaming / stock Viewer Hear on F-FORKSAFE; F-DAE AUDIO; long-duration soak; monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 
 ## Maintainer-facing explanation (draft — do not post yet)
 

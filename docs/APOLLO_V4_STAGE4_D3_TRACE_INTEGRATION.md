@@ -22,6 +22,8 @@ Standalone review branches remain: `review/stage4-d3-poke-resource` (`edb200b`),
 | SHA-256 | `6765f090c4e92898c479cac36bb0021872f6c046238a3d7a670b906ae82c9f85` |
 | Toolchain | ApolloCrossDev GCC-6.50-Stable, `-m68080 -DAMIGENT_APOLLO` |
 | Status | **NOT HARDWARE VALIDATED** |
+| Offline regression | **404 passed**, 5 skipped (`tests/` excluding `tests/native`) |
+| Tip commit | `2f393bc6fb429b4479719b94cddc24e8dc9e6974` |
 
 Includes both D3 POKE resource gates and Apollo TRACE set refusal strings.
 

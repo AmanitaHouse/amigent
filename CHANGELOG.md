@@ -174,6 +174,11 @@ Versions follow [semver](https://semver.org). The number lives in
   flicker. The monitor's window is marked; `amiga_wait_text`,
   `amiga_click_text` and a search with `find` leave it out unless it is named,
   since its log repeats the agent's own calls. (#41)
+- `amigent-monitor` runs on a 68000 again: 1.4.0 shipped a 68020 build, which
+  stopped an A500 with an illegal instruction. On chipset Amigas, closing the
+  monitor or resizing its window could also crash the Amiga a moment later,
+  because the monitor freed its drawing buffer while the blitter was still
+  clearing it. (#41)
 
 ### Tools and languages
 

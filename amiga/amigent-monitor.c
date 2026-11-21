@@ -18,6 +18,10 @@
  * fits itself to the screen and leaves out what has no room; it can be sized,
  * WIDTH and HEIGHT give the size it opens with. It draws only
  * what changed, five times a second at most. MIT licence, see LICENSE.
+ *
+ * One build serves every Amiga, so it is built for the 68000:
+ *   vc +aos68k -c99 -O2 -cpu=68000 -o amigent-monitor amigent-monitor.c -lamiga
+ * (a 68020 build stops a 68000 with an illegal instruction, guru 80000004).
  */
 
 #include <exec/types.h>
@@ -360,17 +364,22 @@ static LONG back_w, back_h;
 static BOOL dirty;
 static struct Rectangle damage;
 
-/* Finish any outstanding blit before releasing its source storage. */
+/* The blitter must be done with the bitmap before it goes: DeleteLayer itself
+ * clears the layer's area with the blitter and returns before it is through.
+ * Freed too early, the chip memory gets written after it went back to the
+ * system and its free list breaks: on a chipset Amiga another task then
+ * crashes with an address error a moment later (#41). RTG blits are done when
+ * they return, so only chipset machines showed it. */
 static void free_backing(void)
 {
     LONG i;
 
-    if (back_bitmap)
-        WaitBlit();
     if (back_layer)
         DeleteLayer(0, back_layer);
     if (back_info)
         DisposeLayerInfo(back_info);
+    if (back_bitmap)
+        WaitBlit();
     if (back_bitmap == &old_bitmap) {
         for (i = 0; i < old_bitmap.Depth; i++)
             if (old_bitmap.Planes[i])

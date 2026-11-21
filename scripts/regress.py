@@ -496,19 +496,25 @@ class Run:
                 if (f"{word}-mon" in text and chip) or time.monotonic() > deadline:
                     break
                 time.sleep(1)
-            assert f"{word}-mon" in text and chip, text[-600:]
-            unit = {"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30}[chip.group(2)]
-            shown = float(chip.group(1)) * unit
-            real = int(self.session.ctl.sysinfo()["chip_free"])
-            assert abs(shown - real) <= max(64 << 10, real // 20), (chip.group(0), real)
+            assert f"{word}-mon" in text, text[-600:]
+            if chip:
+                unit = {"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30}[chip.group(2)]
+                real = int(self.session.ctl.sysinfo()["chip_free"])
+                assert abs(float(chip.group(1)) * unit - real) <= max(64 << 10, real // 20), (
+                    chip.group(0), real)
+                figures = f"{chip.group(1)} {chip.group(2)} Chip free there, {real >> 10} KB by SYSINFO"
+            else:  # a 256 line screen leaves no room for the AMIGA part of the panel
+                assert "TRAFFIC" in text, text[-600:]
+                figures = "panel read; no room for its Chip free row on this screen"
             # the log repeats the agent's own calls: waiting for a text skips it
             waited = self.s.amiga_wait_text(f"{word}-mon", timeout=2)
             assert waited.startswith("timeout"), waited
         finally:
             if ours:
                 self.s.amiga_task("amigent-monitor", signal="C")
-        return (f"{len(text.splitlines())} lines from the monitor; {chip.group(0).split()[-2]} "
-                f"{chip.group(2)} Chip free there, {real >> 10} KB by SYSINFO")
+                gone = self.s.amiga_wait_window(title, timeout=10, gone=True)
+                assert gone.endswith("is gone"), gone
+        return f"{len(text.splitlines())} lines from the monitor; {figures}"
 
     def wait(self):
         if not self._new():

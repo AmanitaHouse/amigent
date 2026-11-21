@@ -275,6 +275,8 @@ starts the old one again.
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
 | `amiga_run`, `amiga_debug_log` | run a program under test, with its kprintf and Enforcer output; FPU code is not started on an Amiga without an FPU |
 | `amiga_follow` | copy a growing log or the debug output to the PC while it grows, so it survives a hang |
+| `amiga_pi_network` | on a PiStorm with Emu68: the Pi's Ethernet or Wi-Fi as a second network interface, switched on probation (see below) |
+| `amiga_serial_log` | record the Pi's serial debug output on the PC through a USB serial adapter (see below) |
 | `amiga_clipboard` | read or set the Amiga's clipboard |
 | `amiga_notes`, `amiga_note` | what the agent learned about programs on this Amiga, for next time |
 | `amiga_viewer` | open the remote desktop |
@@ -381,6 +383,91 @@ Before `amiga_run` starts a program on an Amiga without an FPU, or on a
 FPU instructions; on an Amiga without an FPU it does not start one that has
 them (`check_fpu=False` runs it anyway). This is a heuristic: a program may
 test for an FPU before using it.
+
+### The Pi's network on a PiStorm
+
+A PiStorm Amiga often reaches the network through a slow adapter at the
+parallel or serial port, while the Raspberry Pi behind it has Ethernet or
+Wi-Fi. `amiga_pi_network()` only reads and tells what is possible: whether
+Emu68 runs, which drivers are in `DEVS:Networks`, which TCP/IP stack is
+installed, the interfaces in `DEVS:NetInterfaces` and the speed today.
+
+| driver | for | comes from |
+|---|---|---|
+| `genet.device` | the Ethernet port of a Pi 4 or CM4 | the emu68-genet project; it needs a recent Emu68. The Pi 3's Ethernet sits on its USB hub and has no Amiga driver |
+| `wifipi.device` | the Wi-Fi of a Pi 3, Pi 4 or Zero 2 W | Emu68-tools; many PiStorm distributions have it already |
+
+Emu68 does not tell AmigaOS which Pi it runs on, so the report names what
+each driver needs instead.
+
+`amiga_pi_network("setup", "ethernet", confirm=True)` (or `"wifi"`) sets the
+Pi's network up as a second Roadshow interface, `pieth` or `piwifi`, with
+DHCP. The existing interface is not changed. The steps:
+
+1. The interface file goes to `net/` in the Amigent folder on the Amiga,
+   not yet to `DEVS:NetInterfaces`.
+2. A probation script starts with `Run`. After the probation time (90 s by
+   default, `probation=`) it takes the new interface down
+   (`ConfigureNetInterface pieth STATE=DOWN`) unless the PC has confirmed.
+   It needs no network, and since nothing in `DEVS:NetInterfaces` changed
+   yet, a restart forgets the interface as well.
+3. `AddNetInterface` brings the interface up. The PC waits for its address
+   and connects there with the Amiga's key or certificate. If that works it
+   confirms, measures the speed, copies the file to `DEVS:NetInterfaces`,
+   writes a repair module and moves Amigent's entry for the Amiga to the new
+   address.
+
+`amiga_pi_network("undo")` takes the interface down, removes only the file
+Amigent added, and moves the entry back. Amigent sets up only Roadshow; for
+AmiTCP or Miami the report says so. Wi-Fi names and passwords are entered by
+the user on the Amiga, where `wifipi.device` expects them; they never pass
+through Amigent. The Pi's boot partition (`config.txt`, `cmdline.txt`) is
+never read or written.
+
+### The Pi's serial debug output
+
+When an Amiga with Emu68 freezes hard, the Amiga cannot tell anything any
+more, but Emu68 still writes its messages to a serial line of the Pi. A USB
+serial adapter on the PC can record them:
+
+```
+pipx inject amigent pyserial        # or: pip install "amigent[serial]"
+amigent-serial --list               # the serial ports this PC has
+amigent-serial COM5                 # or /dev/ttyUSB0; Ctrl+C stops
+```
+
+`amiga_serial_log("start")` does the same inside the MCP server, and
+`"stop"`, `"status"` and `"show"` go with it. Each line gets the PC's time and
+goes to `serial/<id>.log` in the config folder. Nothing is ever sent on the
+line. `amiga_debug_log` adds what came since its last call, also while the
+Amiga does not answer. When the Amiga does not answer, `amiga_status` gives
+the last lines, and after a restart it gives the lines from before it.
+
+Wiring, from the PiStorm documentation:
+
+- Use a 3.3 V TTL adapter only. A 5 V adapter or a real RS-232 port (±12 V)
+  damages the Pi. Connect GND, and the Pi's data line to the adapter's RX.
+  The adapter's TX stays unconnected; Amigent only listens.
+- PiStorm32-lite: pin 0 of the debug connector (marked with a square) carries
+  the data; GND is on the same connector.
+- Classic PiStorm: the line is not on a connector; the data is on GPIO 26
+  (pin 37 of the Pi's 40-pin header). It is not GPIO 14/15, the Pi's usual
+  UART.
+- Speed 921600 baud (Emu68 says 921.6 kBit), 8N1. FTDI adapters are known to
+  work at this speed. Emu68's `fast_serial` mode is synchronous and needs an
+  FT232H with its own tool; Amigent does not read it.
+
+Emu68 writes JIT messages only with `debug` (and `disassemble`) in
+`cmdline.txt` on the Pi's boot partition. Amigent does not write that file;
+the user adds the words there. At boot this output can go past 200 MB, so
+Emu68 can limit it at run time to a range of 68k addresses through its
+control registers DBGCTRL, DBGADDRLO and DBGADDRHI.
+`amiga_serial_log("narrow", low="$00F80000", high="$00FFFFFF", verbose=1,
+confirm=True)` sets them with a small program written to `RAM:`, and
+`"wide"` sets verbosity 0 for every address again. Only code translated
+after that follows the new setting; the program clears the JIT cache for
+this. Amigent runs it only when Emu68's `devicetree.resource` is loaded,
+because on a real 68k CPU these instructions would crash.
 
 ## Remote desktop
 
@@ -539,7 +626,8 @@ Everything lives in `~/.config/amigent/` (or `$XDG_CONFIG_HOME/amigent/`).
 `amigas.json` holds the saved Amigas, each with an ID such as
 `amiga-0123456789abcdef0123456789abcdef`. Key and certificate are
 `key-<id>` and `tls-<id>.pem`; notes, installation records, the inventory, the
-journal and `amiga_follow`'s copies (`follow/<id>/`) are filed under the same
+journal, `amiga_follow`'s copies (`follow/<id>/`) and the serial log
+(`serial/<id>.log`) are filed under the same
 ID. The ID is made on each PC, so the same Amiga has a different ID on another
 PC.
 

@@ -207,6 +207,24 @@ Versions follow [semver](https://semver.org). The number lives in
   and codec. It reads amigus.library's records and reserves nothing. (#45)
 - `amiga_audio_levels` reads an AmiGUS card's left and right output level for
   a few seconds, with the small program `amigent-levels` on the Amiga. (#45)
+- `amiga_pi_network` tells, on a PiStorm with Emu68, which of the Pi's
+  network drivers are there (`genet.device` for the Ethernet of a Pi 4 or
+  CM4, `wifipi.device` for Wi-Fi; a missing one is named with where it comes
+  from), the TCP/IP stack, Roadshow's interfaces and the link speed. With
+  `confirm=True` it adds the Pi's Ethernet or Wi-Fi as a second Roadshow
+  interface next to the existing one, on probation: a script on the Amiga
+  takes it down again unless the PC reaches the Amiga through the new address
+  in time, and a restart forgets it. Once reached, it is kept, the speed
+  before and after is measured, and Amigent moves to the new address;
+  `undo` takes it back. The Pi's boot partition is never touched. (#20)
+- The Pi's serial debug output (Emu68) can be recorded on the PC through a
+  USB serial adapter, with time stamps: `amiga_serial_log('start')` or
+  `amigent-serial`, with the optional `amigent[serial]` (pyserial).
+  `amiga_debug_log` includes it, also while the Amiga is frozen, and
+  `amiga_status` gives the last lines when the Amiga does not answer.
+  `amiga_serial_log('narrow', low=..., high=...)` limits Emu68's JIT debug
+  output to an address range at run time. Without an adapter nothing
+  changes. (#21)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

@@ -436,3 +436,18 @@ def test_a_damaged_state_file_does_not_stop_the_migration(private_config, damage
     assert (private_config / "uptime.json").read_text() == damaged  # left for the user to look at
     (private_config / "amigas.pre-id.json").write_text(damaged)
     assert roster.load()[0]["id"] == entry["id"]
+
+
+def test_command_line_reports_a_damaged_registry_without_traceback(monkeypatch):
+    import sys as _sys
+
+    from amigent import fleet, roster
+
+    def broken(*args, **kwargs):
+        raise roster.RegistryError("amigas.json: not valid JSON")
+
+    monkeypatch.setattr(fleet, "_main", broken)
+    monkeypatch.setattr(_sys, "argv", ["amigent-fleet", "--list"])
+    with pytest.raises(SystemExit) as raised:
+        fleet.main()
+    assert str(raised.value) == "amigent-fleet: amigas.json: not valid JSON"

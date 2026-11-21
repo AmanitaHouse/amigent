@@ -273,7 +273,7 @@
  "reason_unreachable": "Amiga'ya ağ üzerinden ulaşılamıyor.",
  "reason_closed": "Amiga ile bağlantı kapandı.",
  "reason_unresolved": "Amiga'nın adresi çözümlenemedi.",
- "reason_plain_closed": "amigentd diğer bilgisayarlardan yalnızca şifreli bağlantı kabul eder. Sertifikasını (onu kuran bilgisayarda ~/.config/amigent/ içindeki tls-<name>.pem) bu bilgisayara kopyalayın veya amigent-setup komutunu yeniden çalıştırın.",
+ "reason_plain_closed": "amigentd diğer bilgisayarlardan yalnızca şifreli bağlantı kabul eder. Sertifikasını (onu kuran bilgisayarda ~/.config/amigent/ içindeki tls-<id>.pem → tls-<address>.pem) bu bilgisayara kopyalayın veya amigent-setup komutunu yeniden çalıştırın.",
  "reason_no_tls": "amigentd TLSONLY ile çalışıyor, ancak AmiSSL orada açılmıyor; bu yüzden diğer tüm bilgisayarları geri çeviriyor. Amiga'nın başında onarın: AmiSSL'i yeniden kurun ve Amigent klasöründen amigent-repair komutunu çalıştırın ya da orada amigentd SETUP komutunu başlatıp amigent-setup komutunu yeniden çalıştırın.",
  "reason_no_certificate": "amigentd TLSONLY ile çalışıyor ve AmiSSL de sorunsuz, ancak S:amigent-tls.pem yüklenmiyor; bu yüzden şifreli portu kapalı ve diğer tüm bilgisayarlar geri çevriliyor. Amiga'nın başında onarın: S:amigent-tls.pem dosyasını silin ve Amigent klasöründen amigent-repair komutunu çalıştırın ya da orada amigentd SETUP komutunu başlatıp amigent-setup komutunu yeniden çalıştırın.",
  "reason_tls_mismatch": "Amiga'nın TLS sertifikası kayıtlı olanla eşleşmiyor; amigent-setup komutunu yeniden çalıştırın.",

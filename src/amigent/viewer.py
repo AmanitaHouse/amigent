@@ -746,7 +746,7 @@ def running_viewer(host: str) -> str | None:
         return None
 
 
-def main() -> None:
+def _main() -> None:
     parser = argparse.ArgumentParser(prog="amigent-viewer", description="Watch and drive the Amiga.")
     parser.add_argument("host", nargs="?", default="",
                         help="the Amiga's name or address (default: AMIGENT_HOST, else the known Amiga)")
@@ -818,6 +818,16 @@ def main() -> None:
                     break  # the window is gone; a reload comes back within seconds
     except KeyboardInterrupt:
         pass
+
+
+
+
+def main() -> None:
+    from .roster import RegistryError
+    try:
+        _main()
+    except RegistryError as e:  # a damaged amigas.json: say what is wrong, not a traceback
+        raise SystemExit(f"amigent-viewer: {e}") from None
 
 
 if __name__ == "__main__":

@@ -273,7 +273,7 @@
  "reason_unreachable": "Το Amiga δεν είναι προσβάσιμο στο δίκτυο.",
  "reason_closed": "Η σύνδεση με το Amiga έκλεισε.",
  "reason_unresolved": "Δεν ήταν δυνατή η επίλυση της διεύθυνσης του Amiga.",
- "reason_plain_closed": "Το amigentd δέχεται από άλλους υπολογιστές μόνο κρυπτογραφημένες συνδέσεις. Αντιγράψτε το πιστοποιητικό του (tls-<name>.pem στο ~/.config/amigent/ του υπολογιστή που το ρύθμισε) σε αυτόν εδώ ή εκτελέστε ξανά το amigent-setup.",
+ "reason_plain_closed": "Το amigentd δέχεται από άλλους υπολογιστές μόνο κρυπτογραφημένες συνδέσεις. Αντιγράψτε το πιστοποιητικό του (tls-<id>.pem → tls-<address>.pem στο ~/.config/amigent/ του υπολογιστή που το ρύθμισε) σε αυτόν εδώ ή εκτελέστε ξανά το amigent-setup.",
  "reason_no_tls": "Το amigentd τρέχει με TLSONLY, αλλά το AmiSSL δεν ανοίγει εκεί, οπότε απορρίπτει κάθε άλλον υπολογιστή. Επισκευάστε το στο ίδιο το Amiga: εγκαταστήστε ξανά το AmiSSL και εκτελέστε το amigent-repair από τον φάκελο Amigent, ή ξεκινήστε εκεί το amigentd SETUP και εκτελέστε ξανά το amigent-setup.",
  "reason_no_certificate": "Το amigentd τρέχει με TLSONLY και το AmiSSL λειτουργεί, αλλά το S:amigent-tls.pem δεν φορτώνεται, οπότε η κρυπτογραφημένη θύρα του είναι κλειστή και κάθε άλλος υπολογιστής απορρίπτεται. Επισκευάστε το στο ίδιο το Amiga: διαγράψτε το S:amigent-tls.pem και εκτελέστε το amigent-repair από τον φάκελο Amigent, ή ξεκινήστε εκεί το amigentd SETUP και εκτελέστε ξανά το amigent-setup.",
  "reason_tls_mismatch": "Το πιστοποιητικό TLS του Amiga δεν ταιριάζει με το αποθηκευμένο· εκτελέστε ξανά το amigent-setup.",

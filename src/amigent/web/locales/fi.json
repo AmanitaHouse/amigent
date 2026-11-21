@@ -273,7 +273,7 @@
  "reason_unreachable": "Amigaan ei saada yhteyttä verkossa.",
  "reason_closed": "Yhteys Amigaan suljettiin.",
  "reason_unresolved": "Amigan osoitetta ei voitu selvittää.",
- "reason_plain_closed": "amigentd ottaa muilta tietokoneilta vastaan vain salattuja yhteyksiä. Kopioi sen varmenne (tls-<name>.pem kansiossa ~/.config/amigent/ sillä PC:llä, jolla se otettiin käyttöön) tälle koneelle tai suorita amigent-setup uudelleen.",
+ "reason_plain_closed": "amigentd ottaa muilta tietokoneilta vastaan vain salattuja yhteyksiä. Kopioi sen varmenne (tls-<id>.pem → tls-<address>.pem kansiossa ~/.config/amigent/ sillä PC:llä, jolla se otettiin käyttöön) tälle koneelle tai suorita amigent-setup uudelleen.",
  "reason_no_tls": "amigentd toimii TLSONLY-tilassa, mutta AmiSSL ei avaudu siellä, joten se torjuu kaikki muut tietokoneet. Korjaa Amigalla: asenna AmiSSL uudelleen ja suorita amigent-repair Amigent-kansiosta, tai käynnistä siellä amigentd SETUP ja suorita amigent-setup uudelleen.",
  "reason_no_certificate": "amigentd toimii TLSONLY-tilassa ja AmiSSL toimii, mutta S:amigent-tls.pem ei lataudu, joten sen salattu portti on suljettu ja kaikki muut tietokoneet torjutaan. Korjaa Amigalla: poista S:amigent-tls.pem ja suorita amigent-repair Amigent-kansiosta, tai käynnistä siellä amigentd SETUP ja suorita amigent-setup uudelleen.",
  "reason_tls_mismatch": "Amigan TLS-varmenne ei vastaa tallennettua; suorita amigent-setup uudelleen.",

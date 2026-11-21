@@ -45,7 +45,7 @@ def wanted(host: str) -> bool:
 
 AMISSL_OPEN, PLAIN_CLOSED = 2, 4  # hello flags: AmiSSL works; plain is for localhost only
 PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
-                     "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
+                     "certificate (tls-<id>.pem → tls-<address>.pem in ~/.config/amigent/ on the PC that set it up) "
                      "to this one, or run amigent-setup again.")
 NO_TLS_TEXT = ("amigentd runs TLSONLY, but AmiSSL does not open there, so it turns every other "
                "computer away. Repair it at the Amiga: install AmiSSL again and run amigent-repair "

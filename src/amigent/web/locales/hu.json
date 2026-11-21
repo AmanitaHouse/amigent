@@ -273,7 +273,7 @@
  "reason_unreachable": "Az Amiga nem érhető el a hálózaton.",
  "reason_closed": "Az Amigával való kapcsolat lezárult.",
  "reason_unresolved": "Az Amiga címét nem sikerült feloldani.",
- "reason_plain_closed": "Az amigentd más számítógépektől csak titkosított kapcsolatot fogad. Másold át a tanúsítványát (tls-<name>.pem a ~/.config/amigent/ mappában azon a PC-n, amelyik beállította) erre a gépre, vagy futtasd újra az amigent-setup parancsot.",
+ "reason_plain_closed": "Az amigentd más számítógépektől csak titkosított kapcsolatot fogad. Másold át a tanúsítványát (tls-<id>.pem → tls-<address>.pem a ~/.config/amigent/ mappában azon a PC-n, amelyik beállította) erre a gépre, vagy futtasd újra az amigent-setup parancsot.",
  "reason_no_tls": "Az amigentd TLSONLY módban fut, de az AmiSSL ott nem nyílik meg, ezért minden más számítógépet elutasít. Javítsd az Amigán: telepítsd újra az AmiSSL-t, és futtasd az amigent-repair parancsot az Amigent mappájából, vagy indítsd el ott az amigentd SETUP parancsot, és futtasd újra az amigent-setup parancsot.",
  "reason_no_certificate": "Az amigentd TLSONLY módban fut, és az AmiSSL működik, de az S:amigent-tls.pem nem töltődik be, ezért a titkosított portja zárva van, és minden más számítógépet elutasít. Javítsd az Amigán: töröld az S:amigent-tls.pem fájlt, és futtasd az amigent-repair parancsot az Amigent mappájából, vagy indítsd el ott az amigentd SETUP parancsot, és futtasd újra az amigent-setup parancsot.",
  "reason_tls_mismatch": "Az Amiga TLS-tanúsítványa nem egyezik a mentettel; futtasd újra az amigent-setup parancsot.",

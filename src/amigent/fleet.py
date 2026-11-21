@@ -343,7 +343,7 @@ class _FleetHandler(TokenHandler):
         self._reply(404, b"not found", "text/plain")
 
 
-def main() -> None:
+def _main() -> None:
     parser = argparse.ArgumentParser(prog="amigent-fleet", description="An overview of your Amigas.")
     parser.add_argument("--add", nargs=2, metavar=("NAME", "ADDRESS"))
     parser.add_argument("--remove", metavar="NAME")
@@ -446,6 +446,16 @@ def run_everywhere(command: str, amigas: list[dict] | None = None, timeout: floa
         return []
     with concurrent.futures.ThreadPoolExecutor(len(amigas)) as pool:
         return list(pool.map(one, amigas))
+
+
+
+
+def main() -> None:
+    from .roster import RegistryError
+    try:
+        _main()
+    except RegistryError as e:  # a damaged amigas.json: say what is wrong, not a traceback
+        raise SystemExit(f"amigent-fleet: {e}") from None
 
 
 if __name__ == "__main__":

@@ -273,7 +273,7 @@
  "reason_unreachable": "Amigan går inte att nå på nätverket.",
  "reason_closed": "Anslutningen till Amigan stängdes.",
  "reason_unresolved": "Amigans adress kunde inte slås upp.",
- "reason_plain_closed": "amigentd tar bara emot krypterade anslutningar från andra datorer. Kopiera dess certifikat (tls-<name>.pem i ~/.config/amigent/ på datorn som konfigurerade den) till den här datorn, eller kör amigent-setup igen.",
+ "reason_plain_closed": "amigentd tar bara emot krypterade anslutningar från andra datorer. Kopiera dess certifikat (tls-<id>.pem → tls-<address>.pem i ~/.config/amigent/ på datorn som konfigurerade den) till den här datorn, eller kör amigent-setup igen.",
  "reason_no_tls": "amigentd körs med TLSONLY, men AmiSSL går inte att öppna där, så den avvisar alla andra datorer. Reparera vid Amigan: installera AmiSSL igen och kör amigent-repair från Amigent-mappen, eller starta amigentd SETUP där och kör amigent-setup igen.",
  "reason_no_certificate": "amigentd körs med TLSONLY och AmiSSL fungerar, men S:amigent-tls.pem går inte att läsa in, så dess krypterade port är stängd och alla andra datorer avvisas. Reparera vid Amigan: radera S:amigent-tls.pem och kör amigent-repair från Amigent-mappen, eller starta amigentd SETUP där och kör amigent-setup igen.",
  "reason_tls_mismatch": "Amigans TLS-certifikat stämmer inte med det sparade; kör amigent-setup igen.",

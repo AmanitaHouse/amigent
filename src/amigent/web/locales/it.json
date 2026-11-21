@@ -273,7 +273,7 @@
  "reason_unreachable": "L'Amiga non è raggiungibile in rete.",
  "reason_closed": "La connessione all'Amiga è stata chiusa.",
  "reason_unresolved": "Impossibile risolvere l'indirizzo dell'Amiga.",
- "reason_plain_closed": "amigentd accetta da altri computer solo connessioni crittografate. Copia il suo certificato (tls-<name>.pem in ~/.config/amigent/ sul PC che l'ha configurato) su questo, oppure esegui di nuovo amigent-setup.",
+ "reason_plain_closed": "amigentd accetta da altri computer solo connessioni crittografate. Copia il suo certificato (tls-<id>.pem → tls-<address>.pem in ~/.config/amigent/ sul PC che l'ha configurato) su questo, oppure esegui di nuovo amigent-setup.",
  "reason_no_tls": "amigentd gira con TLSONLY, ma lì AmiSSL non si apre, quindi respinge tutti gli altri computer. Riparalo sull'Amiga stesso: reinstalla AmiSSL ed esegui amigent-repair dalla cartella di Amigent, oppure avvia lì amigentd SETUP ed esegui di nuovo amigent-setup.",
  "reason_no_certificate": "amigentd gira con TLSONLY e AmiSSL funziona, ma S:amigent-tls.pem non si carica, quindi la sua porta crittografata è chiusa e tutti gli altri computer vengono respinti. Riparalo sull'Amiga stesso: elimina S:amigent-tls.pem ed esegui amigent-repair dalla cartella di Amigent, oppure avvia lì amigentd SETUP ed esegui di nuovo amigent-setup.",
  "reason_tls_mismatch": "Il certificato TLS dell'Amiga non corrisponde a quello salvato; esegui di nuovo amigent-setup.",

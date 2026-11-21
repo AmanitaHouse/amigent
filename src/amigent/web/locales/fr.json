@@ -273,7 +273,7 @@
  "reason_unreachable": "L'Amiga est injoignable sur le réseau.",
  "reason_closed": "La connexion à l'Amiga a été fermée.",
  "reason_unresolved": "Impossible de résoudre l'adresse de l'Amiga.",
- "reason_plain_closed": "amigentd n'accepte que des connexions chiffrées depuis d'autres ordinateurs. Copiez son certificat (tls-<name>.pem dans ~/.config/amigent/ sur le PC qui l'a configuré) sur celui-ci, ou relancez amigent-setup.",
+ "reason_plain_closed": "amigentd n'accepte que des connexions chiffrées depuis d'autres ordinateurs. Copiez son certificat (tls-<id>.pem → tls-<address>.pem dans ~/.config/amigent/ sur le PC qui l'a configuré) sur celui-ci, ou relancez amigent-setup.",
  "reason_no_tls": "amigentd tourne en TLSONLY, mais AmiSSL ne s'y ouvre pas, il refuse donc tous les autres ordinateurs. Réparez-le sur l'Amiga même : réinstallez AmiSSL et lancez amigent-repair depuis le dossier Amigent, ou démarrez-y amigentd SETUP et relancez amigent-setup.",
  "reason_no_certificate": "amigentd tourne en TLSONLY et AmiSSL fonctionne, mais S:amigent-tls.pem ne se charge pas : son port chiffré est donc fermé et tous les autres ordinateurs sont refusés. Réparez-le sur l'Amiga même : supprimez S:amigent-tls.pem et lancez amigent-repair depuis le dossier Amigent, ou démarrez-y amigentd SETUP et relancez amigent-setup.",
  "reason_tls_mismatch": "Le certificat TLS de l'Amiga ne correspond pas à celui enregistré ; relancez amigent-setup.",

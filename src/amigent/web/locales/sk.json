@@ -273,7 +273,7 @@
  "reason_unreachable": "Amiga nie je v sieti dostupná.",
  "reason_closed": "Spojenie s Amigou bolo ukončené.",
  "reason_unresolved": "Adresu Amigy sa nepodarilo preložiť.",
- "reason_plain_closed": "amigentd prijíma od iných počítačov len šifrované spojenia. Skopírujte jeho certifikát (tls-<name>.pem v ~/.config/amigent/ na počítači, ktorý ho nastavil) na tento počítač alebo znova spustite amigent-setup.",
+ "reason_plain_closed": "amigentd prijíma od iných počítačov len šifrované spojenia. Skopírujte jeho certifikát (tls-<id>.pem → tls-<address>.pem v ~/.config/amigent/ na počítači, ktorý ho nastavil) na tento počítač alebo znova spustite amigent-setup.",
  "reason_no_tls": "amigentd beží s TLSONLY, ale AmiSSL sa tam neotvorí, a preto odmieta všetky ostatné počítače. Oprava priamo na Amige: znova nainštalujte AmiSSL a spustite amigent-repair z priečinka Amigent, alebo tam spustite amigentd SETUP a znova spustite amigent-setup.",
  "reason_no_certificate": "amigentd beží s TLSONLY a AmiSSL funguje, ale S:amigent-tls.pem sa nenačíta, a preto je jeho šifrovaný port zatvorený a odmieta všetky ostatné počítače. Oprava priamo na Amige: zmažte S:amigent-tls.pem a spustite amigent-repair z priečinka Amigent, alebo tam spustite amigentd SETUP a znova spustite amigent-setup.",
  "reason_tls_mismatch": "TLS certifikát Amigy nezodpovedá uloženému; znova spustite amigent-setup.",

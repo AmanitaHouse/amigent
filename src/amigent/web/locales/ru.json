@@ -273,7 +273,7 @@
  "reason_unreachable": "Amiga недоступна по сети.",
  "reason_closed": "Соединение с Amiga закрыто.",
  "reason_unresolved": "Не удалось определить адрес Amiga.",
- "reason_plain_closed": "amigentd принимает от других компьютеров только зашифрованные соединения. Скопируйте его сертификат (tls-<name>.pem в ~/.config/amigent/ на том ПК, где его настраивали) на этот компьютер или снова запустите amigent-setup.",
+ "reason_plain_closed": "amigentd принимает от других компьютеров только зашифрованные соединения. Скопируйте его сертификат (tls-<id>.pem → tls-<address>.pem в ~/.config/amigent/ на том ПК, где его настраивали) на этот компьютер или снова запустите amigent-setup.",
  "reason_no_tls": "amigentd работает с TLSONLY, но AmiSSL там не открывается, поэтому он отклоняет все другие компьютеры. Почините это на самой Amiga: переустановите AmiSSL и запустите amigent-repair из папки Amigent, либо запустите там amigentd SETUP и снова выполните amigent-setup.",
  "reason_no_certificate": "amigentd работает с TLSONLY и AmiSSL работает, но S:amigent-tls.pem не загружается, поэтому его зашифрованный порт закрыт и он отклоняет все другие компьютеры. Почините это на самой Amiga: удалите S:amigent-tls.pem и запустите amigent-repair из папки Amigent, либо запустите там amigentd SETUP и снова выполните amigent-setup.",
  "reason_tls_mismatch": "TLS-сертификат Amiga не совпадает с сохранённым; снова запустите amigent-setup.",

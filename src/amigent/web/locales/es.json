@@ -273,7 +273,7 @@
  "reason_unreachable": "No se puede llegar al Amiga por la red.",
  "reason_closed": "Se cerró la conexión con el Amiga.",
  "reason_unresolved": "No se pudo resolver la dirección del Amiga.",
- "reason_plain_closed": "amigentd solo acepta conexiones cifradas desde otros ordenadores. Copia su certificado (tls-<name>.pem en ~/.config/amigent/ del PC que lo configuró) a este, o vuelve a ejecutar amigent-setup.",
+ "reason_plain_closed": "amigentd solo acepta conexiones cifradas desde otros ordenadores. Copia su certificado (tls-<id>.pem → tls-<address>.pem en ~/.config/amigent/ del PC que lo configuró) a este, o vuelve a ejecutar amigent-setup.",
  "reason_no_tls": "amigentd funciona con TLSONLY, pero AmiSSL no se abre allí, así que rechaza a todos los demás ordenadores. Repáralo en el propio Amiga: vuelve a instalar AmiSSL y ejecuta amigent-repair desde la carpeta de Amigent, o inicia allí amigentd SETUP y vuelve a ejecutar amigent-setup.",
  "reason_no_certificate": "amigentd funciona con TLSONLY y AmiSSL funciona, pero S:amigent-tls.pem no se carga, así que su puerto cifrado está cerrado y rechaza a todos los demás ordenadores. Repáralo en el propio Amiga: borra S:amigent-tls.pem y ejecuta amigent-repair desde la carpeta de Amigent, o inicia allí amigentd SETUP y vuelve a ejecutar amigent-setup.",
  "reason_tls_mismatch": "El certificado TLS del Amiga no coincide con el guardado; vuelve a ejecutar amigent-setup.",

@@ -273,7 +273,7 @@
  "reason_unreachable": "Amigaen kan ikke nås på netværket.",
  "reason_closed": "Forbindelsen til Amigaen blev lukket.",
  "reason_unresolved": "Amigaens adresse kunne ikke slås op.",
- "reason_plain_closed": "amigentd tager kun imod krypterede forbindelser fra andre computere. Kopiér dens certifikat (tls-<name>.pem i ~/.config/amigent/ på den pc, der satte den op) til denne, eller kør amigent-setup igen.",
+ "reason_plain_closed": "amigentd tager kun imod krypterede forbindelser fra andre computere. Kopiér dens certifikat (tls-<id>.pem → tls-<address>.pem i ~/.config/amigent/ på den pc, der satte den op) til denne, eller kør amigent-setup igen.",
  "reason_no_tls": "amigentd kører med TLSONLY, men AmiSSL kan ikke åbnes der, så den afviser alle andre computere. Reparer det ved Amigaen: installer AmiSSL igen, og kør amigent-repair fra Amigent-mappen, eller start amigentd SETUP der, og kør amigent-setup igen.",
  "reason_no_certificate": "amigentd kører med TLSONLY, og AmiSSL virker, men S:amigent-tls.pem kan ikke indlæses, så dens krypterede port er lukket, og alle andre computere afvises. Reparer det ved Amigaen: slet S:amigent-tls.pem, og kør amigent-repair fra Amigent-mappen, eller start amigentd SETUP der, og kør amigent-setup igen.",
  "reason_tls_mismatch": "Amigaens TLS-certifikat passer ikke til det gemte; kør amigent-setup igen.",

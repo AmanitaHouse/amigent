@@ -26,7 +26,7 @@ HUNK = b"\x00\x00\x03\xf3"
 
 # GCC 6.50 Stable. The daemon links the MMIO guard with AUDIO. build/ is not packaged.
 APOLLO = {
-    "amigentd.apollo": (129844, "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6"),
+    "amigentd.apollo": (128744, "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1"),
     "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
 }
 CLASSIC = {

@@ -473,7 +473,9 @@ class Viewer:
                     apply_loaded(fpu, memory.parse(self._ctl(self.ctl.loaded)).libraries)
                 except (AmigaError, AttributeError):
                     pass
-            self._system.update(fpu=fpu.short(), processor=fpu.line())
+            self._system.update(fpu=fpu.short(), processor=fpu.line(), fpu_state=fpu.state(),
+                                fpu_cpu=fpu.cpu, fpu_chip=fpu.kind if fpu.state() == "chip" else "",
+                                fpu_library=fpu.library)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
         # chip_free stays None when SYSINFO omits it, so a page can tell a real

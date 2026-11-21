@@ -164,6 +164,21 @@ class Fpu:
             return f"FPU, {self.library} missing"
         return "FPU"
 
+    def state(self) -> str:
+        """For the remote desktop, which words it in the page's language: '' (unknown),
+        none, chip (68881/68882), emu68, missing (the library), loaded, or fpu."""
+        if self.present is None:
+            return ""
+        if not self.present:
+            return "none"
+        if self.kind in ("68881", "68882"):
+            return "chip"
+        if self.emulator:
+            return "emu68"
+        if self.support_missing:
+            return "missing"
+        return "loaded" if self.loaded else "fpu"
+
     def line(self) -> str:
         """'68040 with FPU (68040.library loaded)', '68LC040, no FPU' and the like."""
         cpu = self.cpu or "the CPU"

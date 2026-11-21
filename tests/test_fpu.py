@@ -289,3 +289,54 @@ def test_emu68_with_its_own_68040_library():
     fpu = system.apply_loaded(system.describe_fpu(A4000_040, "68040"), memory.parse(
         ["L\t68040.library\t2\t0\t1\t0a100000\t60\t60\t", "R\tdevicetree.resource\t1\t0\t0\t0a200000\t0\t0\t"]).libraries)
     assert fpu.line() == "68040 with FPU (Emu68)" and not fpu.support_missing
+
+
+def test_the_page_gets_a_state_to_word_in_its_language():
+    from amigent.system import describe_fpu
+    assert describe_fpu(LC040, "68LC040").state() == "none"
+    assert describe_fpu(A1200_030_882, "68030").state() == "chip"
+    assert describe_fpu(A4000_040_BARE, "68040").state() == "missing"
+    assert describe_fpu(A4000_040, "68040").state() == "fpu"
+    assert describe_fpu(None, "68020").state() == ""
+    emu = describe_fpu(A4000_040_BARE, "68040")
+    emu.emulator = "Emu68"
+    assert emu.state() == "emu68"
+    loaded = describe_fpu(A4000_040, "68040")
+    loaded.loaded = True
+    assert loaded.state() == "loaded"
+
+
+def _viewer(info, loaded):
+    from amigent.viewer import Viewer
+
+    viewer = Viewer.__new__(Viewer)
+    viewer._system = {"os": "AmigaOS 3.2", "cpu": "68040"}
+
+    class Ctl:
+        backend = type("B", (), {"protocol": 6})()
+
+        def sysinfo(self):
+            return info
+
+        def volumes(self):
+            return []
+
+        def loaded(self):
+            return loaded
+
+    viewer.ctl = Ctl()
+    viewer._ctl = lambda fn: fn()
+    viewer.link = lambda: {}
+    return viewer.read_amiga()
+
+
+def test_the_remote_desktop_tells_emu68_and_nofpu():
+    emu68 = ["R\tdevicetree.resource\t1\t0\t0\t0a200000\t0\t0\t"]
+    facts = _viewer({"attn_flags": hex(A4000_040_BARE)}, emu68)
+    assert facts["fpu_state"] == "emu68" and facts["processor"] == "68040 with FPU (Emu68)"
+    facts = _viewer({"attn_flags": hex(LC040)}, emu68)
+    assert facts["fpu_state"] == "none" and facts["fpu_cpu"] == "68040"
+    facts = _viewer({"attn_flags": hex(A4000_040_BARE)}, [])
+    assert facts["fpu_state"] == "missing" and facts["fpu_library"] == "68040.library"
+    facts = _viewer({"attn_flags": hex(A1200_030_882)}, [])
+    assert facts["fpu_state"] == "chip" and facts["fpu_chip"] == "68882"

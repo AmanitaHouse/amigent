@@ -25,7 +25,7 @@
     const rows = [
       [t("about_system"), [i.os, i.kickstart && t("kickstart_n", { version: i.kickstart }),
         i.workbench && t("workbench_n", { version: i.workbench })].filter(Boolean).join(", ")],
-      [t("about_cpu"), [i.cpu, i.fpu, i.ppc].filter(Boolean).join(" + ")],
+      [t("about_cpu"), UI.cpuLine(i)],
       [t("about_memory"), i.chip_total ? t("mem_detail", {
         chip: i.chip_free == null ? "–" : bytes(i.chip_free), chip_total: bytes(i.chip_total),
         fast: bytes(i.fast_free), fast_total: bytes(i.fast_total) }) : ""],

@@ -187,7 +187,7 @@
     $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
     $("machine-name").textContent = host || "Amiga";
     const state = up ? t("machines_online") : waiting ? t("machines_checking") : t("state_offline");
-    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu].filter(Boolean).join(" · ") || state : state;
+    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu && amiga.cpu + (amiga.fpu_state && !["none", ""].includes(amiga.fpu_state) ? " + FPU" : "")].filter(Boolean).join(" · ") || state : state;
     $("machine").setAttribute("aria-label", t("machine_switch", { name: host || "Amiga", state }));
     $("machine").title = up ? [where(), systemLine(amiga), cpuLine(amiga)].filter(Boolean).join("\n") : "";
     // the machine menu shows this window's own view of its Amiga, which is fresher than the list's
@@ -221,9 +221,7 @@
       info.workbench && t("workbench_n", { version: info.workbench })].filter(Boolean).join(", ");
   }
 
-  function cpuLine(info) {
-    return [info.cpu, info.fpu, info.ppc].filter(Boolean).join(" + ");
-  }
+  const cpuLine = UI.cpuLine;
 
   let toldOutdated = false;
 

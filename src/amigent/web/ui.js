@@ -294,8 +294,20 @@
     return { select: (id) => select(all.find((tab) => tab.id === id) || all[0]) };
   }
 
+  // The CPU with its FPU in the page's language ("68040 mit FPU (Emu68)"), from the
+  // fpu_state the PC sends; an older PC sends only cpu and fpu, which are joined.
+  const FPU_TEXTS = { none: "fpu_none", chip: "fpu_chip", fpu: "fpu_fpu", loaded: "fpu_loaded",
+    missing: "fpu_missing", emu68: "fpu_emu68" };
+
+  function cpuLine(info) {
+    const key = FPU_TEXTS[info.fpu_state];
+    const cpu = key ? t(key, { cpu: info.fpu_cpu || info.cpu || "68k", chip: info.fpu_chip || "",
+      library: info.fpu_library || "" }) : [info.cpu, info.fpu].filter(Boolean).join(" + ");
+    return [cpu, info.ppc].filter(Boolean).join(" + ");
+  }
+
   window.amigentUI = {
-    store, MAC, LANGUAGES, language, pickLanguage, ready, t, knows, mac, translate,
+    store, MAC, LANGUAGES, language, pickLanguage, ready, t, knows, mac, translate, cpuLine,
     THEMES, setTheme, theme: () => store.get("theme", "auto"),
     toast, ask, menu, tabs,
   };

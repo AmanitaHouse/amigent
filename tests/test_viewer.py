@@ -146,6 +146,7 @@ def test_every_language_has_every_text():
     used |= {"restarting", "restart_failed", "not_supported", "pause_failed"}  # sent by the server
     used |= {f"theme_{name}" for name in ("auto", "light", "dark")}
     used |= {f"machines_{action}" for action in ("connect", "rename", "default", "address", "remove")}
+    used |= {f"fpu_{state}" for state in ("none", "chip", "fpu", "loaded", "missing", "emu68")}  # Fpu.state()
     assert used <= english.keys(), used - english.keys()
     script = (web / "ui.js").read_text(encoding="utf-8")
     codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))

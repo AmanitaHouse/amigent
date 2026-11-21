@@ -125,8 +125,11 @@ class SimAmiga:
             if not words:
                 continue
             cmd, args = words[0], [w.strip('"') for w in words[1:]]
-            if cmd == "Quit":
-                return int(args[0]), "\n".join(out)
+            if cmd == "Quit":  # ends every script up to the CLI, like AmigaDOS
+                raise AssertionError("Quit in a job script ends the job's own script too")
+            if cmd == "Skip":
+                i = lines.index(f"Lab {args[0]}", i) + 1
+                continue
             if cmd == "If" and args == ["WARN"]:
                 if rc >= 5:
                     i = lines.index("Lab failed", i) + 1

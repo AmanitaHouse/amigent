@@ -426,9 +426,11 @@ def begin_script(record: Record) -> str:
         lines += [f'Copy "{full}" "{record.dest_of(full)}" {flags}', "If WARN", "  Skip failed", "EndIf"]
     lines += [f'Echo >"{join(record.store, "begun")}" "{record.started}"',
               f'Echo >"{record.marker}" "{record.started}"',
-              'Echo "Amigent backup complete"', "Quit 0",
+              'Echo "Amigent backup complete"', "Skip done",
               "Lab failed", 'Echo "Amigent backup stopped or failed: not complete, it will not be used"',
-              "Quit 20"]
+              "Lab done"]
+    # No Quit: the job runs this script from a script of its own, and Quit would end that one
+    # too, before it notes the return code; the job would then look as if it never ended.
     return "\n".join(lines) + "\n"
 
 

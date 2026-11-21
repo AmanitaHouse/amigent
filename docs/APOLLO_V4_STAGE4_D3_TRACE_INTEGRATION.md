@@ -1,8 +1,10 @@
 # Stage 4 — D3 POKE + Apollo TRACE combined integration
 
-**Branch:** `review/stage4-d3-trace-integration`  
-**Base:** fork `main` `d90d282…`  
-**Mode:** Offline fork-local review — **NOT HARDWARE VALIDATED**
+**Merged:** fork PR [#14](https://github.com/AmanitaHouse/amigent/pull/14) → `main`  
+**Merge commit:** `bb6bb8ef4bd6e2b725b8c211c10921a473a96718`  
+**Reviewed tip:** `f927b86a5f8b0fbb05395d92e379704f9d0d39f1` (`review/stage4-d3-trace-integration`)  
+**Prior base:** fork `main` `d90d282b5276f746da96504f0e70950764caa6d6`  
+**Mode:** Offline fork-local — **NOT HARDWARE VALIDATED** (no V4 contact for this identity)
 
 ## Reviewable commits
 
@@ -50,10 +52,11 @@ expiry or incomplete recv closes the channel (`FALSE`) so bytes are not read as 
 
 Maximum enforceable POKE payload duration: **30 seconds** wall-clock.
 
-## Recommended PR order (draft only — not published)
+## Merge status
 
-**Option A (preferred):** one security-hardening PR with separately reviewable commits
-(D3 → TRACE → package → deadline).  
-**Option B:** PR1 D3 source → PR2 TRACE → PR3 package/deadline (depends on 1+2).
+Merged into fork `AmanitaHouse/amigent` `main` as PR #14 (merge commit `bb6bb8e…`).
+Upstream `akustikrausch/amigent` was not touched. Protected historical hardware evidence for
+`00443719…` / 129944 B remains unchanged.
 
-Do not merge without explicit authorisation. Hardware validation of `63db83ff…` requires a separate GO.
+Hardware validation of packaged identity `63db83ff…` / 128744 B still requires a separate GO.
+D3 POKE, D6 monitor, D7 HRTmon and TRACE hardware execution remain unauthorised.

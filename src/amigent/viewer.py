@@ -29,12 +29,12 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, roster, tls, update
+from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
-from .system import (OS_NAMES, attn_flags, describe_fpu, describe_system,  # noqa: F401
-                     exec_before_os3, exec_coldreboot, native_ppc, ppc_software)
+from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
+                     exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -465,6 +465,11 @@ class Viewer:
         if not native_ppc(self._system) and "processor" not in self._system:
             # exec's AttnFlags tell the FPU better than C:CPU's text; amiga_status adds the library check
             fpu = describe_fpu(attn_flags(info), self._system.get("cpu", ""), self._system.get("fpu", ""))
+            if fpu.support_missing or (fpu.present is False and wants_loaded(fpu)):
+                try:  # Emu68 runs the FPU itself; only its resource in LOADED tells
+                    apply_loaded(fpu, memory.parse(self._ctl(self.ctl.loaded)).libraries)
+                except (AmigaError, AttributeError):
+                    pass
             self._system.update(fpu=fpu.short(), processor=fpu.line())
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]

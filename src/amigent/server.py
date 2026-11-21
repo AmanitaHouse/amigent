@@ -427,10 +427,9 @@ def _read_fpu(facts: dict) -> "system.Fpu":
     except (AmigaError, AttributeError):
         flags = None
     fpu = system.describe_fpu(flags, facts.get("cpu", ""), facts.get("fpu", ""))
-    if fpu.present and fpu.library:
+    if system.wants_loaded(fpu):
         try:
-            names = {lib.name.lower() for lib in _loaded().libraries if lib.kind == "L"}
-            fpu.loaded = fpu.library in names
+            system.apply_loaded(fpu, _loaded().libraries)
         except (AmigaError, AttributeError):
             pass  # amigentd before 1.4.0, or amigactld: the flags alone tell
     return fpu

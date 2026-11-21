@@ -335,7 +335,9 @@ compares the screen with a saved picture, for tests of how a program looks.
 The FPU: Amigent reads it from exec's AttnFlags, which amigentd reports, and
 on a 68040 or 68060 also whether `68040.library` or `68060.library` is loaded;
 the chip's FPU lacks some instructions (FSIN, FETOX and others) that the
-library emulates. Without AttnFlags (an older amigentd) it falls back to what
+library emulates. Emu68 on a PiStorm (told by its `devicetree.resource`) runs
+all of them itself, so there it says "68040 with FPU (Emu68)", and with Emu68's
+`nofpu` option no FPU. Without AttnFlags (an older amigentd) it falls back to what
 `C:CPU` prints. A line-F guru is then explained: no FPU means the program needs
 one; an FPU without its library means the library is missing. `amiga_build`
 builds without FPU code by default, so the program runs on every Amiga;

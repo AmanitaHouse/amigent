@@ -104,6 +104,8 @@ def ppc_software(run) -> str:
 AFF_68010, AFF_68020, AFF_68030, AFF_68040 = 1 << 0, 1 << 1, 1 << 2, 1 << 3
 AFF_68881, AFF_68882, AFF_FPU40, AFF_68060 = 1 << 4, 1 << 5, 1 << 6, 1 << 7
 AFF_68080 = 1 << 10
+# Emu68 (PiStorm) puts this resource in from its own ROM board; nothing else has it.
+EMU68_RESOURCE = "devicetree.resource"
 
 
 def attn_flags(info: dict) -> int | None:
@@ -128,6 +130,9 @@ class Fpu:
     support code for the FPU instructions the chip lacks is in (the library
     then sets the 68881/68882 bits too, see execbase.h); None when unknown.
     loaded: whether the library is in exec's library list (amiga_loaded), None when not asked.
+    emulator: 'Emu68' on a PiStorm: its JIT runs every FPU instruction itself
+    (FSIN, FETOX included), so no support library is missing there; with
+    Emu68's nofpu the FPU bits stay clear and it is no FPU as anywhere else.
     """
     cpu: str = ""
     present: bool | None = None
@@ -136,11 +141,12 @@ class Fpu:
     emulation: bool | None = None
     loaded: bool | None = None
     from_flags: bool = False
+    emulator: str = ""
 
     @property
     def support_missing(self) -> bool:
         """A 68040/060 FPU without the library that emulates what the chip does not do."""
-        if not (self.present and self.library):
+        if not (self.present and self.library) or self.emulator:
             return False
         if self.loaded is not None:
             return not self.loaded and not self.emulation
@@ -164,9 +170,11 @@ class Fpu:
         if self.present is None:
             return f"{cpu}, FPU unknown (this amigentd does not report exec's AttnFlags)"
         if not self.present:
-            return f"{cpu}, no FPU"
+            return f"{cpu}, no FPU" + (f" ({self.emulator}, started with nofpu?)" if self.emulator else "")
         if self.kind in ("68881", "68882"):
             return f"{cpu} with {self.kind} FPU"
+        if self.emulator:
+            return f"{cpu} with FPU ({self.emulator})"
         if not self.library:
             return f"{cpu} with FPU"
         if self.support_missing:
@@ -225,3 +233,18 @@ def describe_fpu(flags: int | None, cpu: str = "", fpu_text: str = "") -> Fpu:
     if flags & AFF_68881:
         return Fpu(shown, True, "68881", from_flags=True)
     return Fpu(shown, False, from_flags=True)
+
+
+def wants_loaded(fpu: Fpu) -> bool:
+    """Only a 68040/060 needs the library list: for its support library, and to tell Emu68."""
+    return bool(fpu.library) or fpu.cpu.endswith(("040", "060"))
+
+
+def apply_loaded(fpu: Fpu, libraries) -> Fpu:
+    """Fill in from LOADED (memory.Library entries): the support library, and Emu68 by its resource."""
+    names = {lib.name.lower() for lib in libraries if lib.kind == "L"}
+    if fpu.library:
+        fpu.loaded = fpu.library in names
+    if any(lib.kind == "R" and lib.name.lower() == EMU68_RESOURCE for lib in libraries):
+        fpu.emulator = "Emu68"
+    return fpu

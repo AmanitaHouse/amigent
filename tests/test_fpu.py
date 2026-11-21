@@ -5,7 +5,7 @@ import struct
 import pytest
 
 import amigent.server as server
-from amigent import alerts, hunks, project, system
+from amigent import alerts, hunks, memory, project, system
 from amigent.channel import Commands
 from amigent.errors import AmigaError
 from fakeamiga import FakeAmiga
@@ -80,7 +80,7 @@ def test_line_f_with_a_working_fpu_points_elsewhere():
 
 # ---- the fake Amiga, end to end
 
-def amiga(flags, cpu_text, libraries=()):
+def amiga(flags, cpu_text, libraries=(), resources=()):
     fake = FakeAmiga()
     fake.protocol = 6
     if flags is not None:
@@ -92,7 +92,8 @@ def amiga(flags, cpu_text, libraries=()):
         "Version FILE LIBS:ppc.library": (20, ""),
     })
     fake.loaded = ["L\texec.library\t47\t115\t40\t00000ac0\t1032\t632\texec 47.115"] + [
-        f"L\t{name}\t47\t1\t1\t0a100000\t60\t60\t{name} 47.1" for name in libraries]
+        f"L\t{name}\t47\t1\t1\t0a100000\t60\t60\t{name} 47.1" for name in libraries] + [
+        f"R\t{name}\t1\t0\t0\t0a200000\t60\t60\t" for name in resources]
     return fake
 
 
@@ -256,3 +257,35 @@ def test_run_reads_an_amiga_program_only_where_it_matters(on, monkeypatch):
     fake2.add("Work:calc", program(FLOAT))
     assert server.amiga_run("Work:calc").startswith("rc=0")
     assert fake2.counts.get(22, 0) == 0 and reads == 1  # a working FPU: the file is not read
+
+
+# ---- Emu68 runs the FPU instructions itself
+
+EMU68 = ["devicetree.resource"]
+
+
+def test_emu68_is_not_told_a_library_is_missing(on, monkeypatch):
+    monkeypatch.setattr(server, "_window_titles", lambda: [])
+    fake = on(amiga(A4000_040_BARE, "68040", resources=EMU68))
+    facts = server._system_facts()
+    assert facts["processor"] == "68040 with FPU (Emu68)" and facts["fpu"] == "FPU"
+    fake.add("Work:calc", program(FLOAT))
+    assert server.amiga_run("Work:calc").startswith("rc=0")
+    assert fake.counts.get(22, 0) == 0  # nothing to check: Emu68 runs FSIN itself
+    assert "MMU" in server.amiga_gurus("0000000B")
+
+
+def test_emu68_with_nofpu_is_no_fpu(on, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_window_titles", lambda: [])
+    on(amiga(LC040, "68040", resources=EMU68))
+    assert server._system_facts()["processor"] == "68040, no FPU (Emu68, started with nofpu?)"
+    local = tmp_path / "calc"
+    local.write_bytes(program(FLOAT))
+    assert server.amiga_run(str(local)).startswith("not run:")
+    assert "needs an FPU this Amiga lacks" in server.amiga_gurus("0000000B")
+
+
+def test_emu68_with_its_own_68040_library():
+    fpu = system.apply_loaded(system.describe_fpu(A4000_040, "68040"), memory.parse(
+        ["L\t68040.library\t2\t0\t1\t0a100000\t60\t60\t", "R\tdevicetree.resource\t1\t0\t0\t0a200000\t0\t0\t"]).libraries)
+    assert fpu.line() == "68040 with FPU (Emu68)" and not fpu.support_missing

@@ -211,7 +211,8 @@ Fork review PRs **#4–#10** remain open and unchanged.
 |---|---|
 | URL | https://github.com/akustikrausch/amigent/pull/47 |
 | State | **Draft OPEN** against `akustikrausch/amigent:main` |
-| Head | `AmanitaHouse:contrib/apollo-audio-hear` @ `213d641…` (plus follow-up CI fix commits) |
+| Head | `AmanitaHouse:contrib/apollo-audio-hear` @ `6457d83…` |
+| GitHub CI | All required checks green (ubuntu/windows/macos × 3.10/3.13 + package) |
 | Upstream base | `f6aab1d…` |
 | Packaged Apollo daemon | `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` (128744 B) |
 | Layout | Flat `amiga/` (not #46) |

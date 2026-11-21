@@ -20,7 +20,7 @@ import argparse
 import sys
 import time
 
-from . import __version__, machines, tls
+from . import __version__, machines, roster, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from .daemons import (CPU_68000, CPU_68020, CPU_68080, Machine, available_names, choose,
@@ -343,6 +343,7 @@ def update_windows(channel, home: str | None) -> None:
 def update(host: str, home: str | None, spare: str | None = None, force: bool = False) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
+    shown = roster.name_of(host)  # host may be the saved ID; people know the name
     try:
         channel.connect()
         try:
@@ -369,12 +370,12 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             # the scripts are renewed all the same; the folders get the amigentd that runs
             update_folders(channel, home, spare, installed or new)
             if installed == new:
-                print(f"amigentd on {host} is already the one from Amigent {__version__}.")
+                print(f"amigentd on {shown} is already the one from Amigent {__version__}.")
             else:
                 print(reason)
             channel.close()
             return 0
-        print(f"uploading {build} to {host}")
+        print(f"uploading {build} to {shown}")
         channel.write_file("C:amigentd.new", new)
         channel.exec("Delete >NIL: T:amigent-update.done QUIET")
         # the same script that Amigent-Update runs on the Amiga; detached, so it outlives amigentd
@@ -410,7 +411,7 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             channel.close()
             print(".", end="", flush=True)
             time.sleep(3)
-    print(f"\namigentd on {host} has not answered for {UPDATE_WAIT:.0f} s. Restart the Amiga; "
+    print(f"\namigentd on {shown} has not answered for {UPDATE_WAIT:.0f} s. Restart the Amiga; "
           "C:amigentd.old is the previous version.")
     return 1
 

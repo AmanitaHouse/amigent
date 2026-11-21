@@ -453,10 +453,10 @@
     "stage3b_final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
     "stage3b_status": "CLOSED",
     "stage4_safety_assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
-    "stage4_status": "d5_audio_request_valid_empty_capture_unconfirmed",
+    "stage4_status": "d5_audio_nonempty_pass",
     "upstream_1_5_0_public": "NOT_PUBLISHED \u2014 no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
     "stage4": {
-      "status": "d5_audio_request_valid_empty_capture_unconfirmed",
+      "status": "d5_audio_nonempty_pass",
       "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
       "d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
       "d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
@@ -503,14 +503,19 @@
       "d4_production_restored": true,
       "d4_claims": "start_proto6_tls_sysinfo_poke0_trace0_quit_restore_only;no_poke_trace_audio_mmio_hw_execution",
       "d5_results": "docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
-      "d5_evidence": "amigent-evidence/stage4-d5-audio-regression/20261121T080724Z",
+      "d5_evidence": "amigent-evidence/stage4-d5-audio-remake/20261121T081528Z",
       "d5_sha256": "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
       "d5_audio_request_count": 1,
-      "d5_audio_response": "VALID_EMPTY",
-      "d5_audio_payload_bytes": 0,
-      "d5_audio_capture": "UNCONFIRMED_EMPTY",
+      "d5_audio_response": "VALID_NONEMPTY_SIGNAL",
+      "d5_audio_payload_bytes": 1920,
+      "d5_audio_capture": "PASS",
       "d5_production_restored": true,
-      "d5_note": "Single audio(0) valid empty; operator not asked to start AmigaAMP after candidate launch; no retry. Nonempty capture NOT demonstrated on 63db83ff."
+      "d5_note": "Remake: operator-confirmed AmigaAMP playback then one audio(0); nonempty PCM with signal. Prior same-day valid-empty retained as procedural miss.",
+      "d5_prior_valid_empty_evidence": "amigent-evidence/stage4-d5-audio-regression/20261121T080724Z",
+      "d5_audio_rate": 47931,
+      "d5_audio_frames": 480,
+      "d5_audio_peak": 23,
+      "d5_audio_rms": 9.12
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
@@ -530,6 +535,6 @@
     "stage4_d4_sha256": "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
     "NEW_DAEMON_63db83ff_SMOKE": "PASSED_ON_HARDWARE \u2014 proto6 TLS SYSINFO poke=0 trace=0 only; NOT AUDIO/PEEK/POKE/TRACE execution \u2014 docs/APOLLO_V4_STAGE4_D4_NEW_DAEMON_SMOKE_RESULTS.md",
     "stage4_d5_results": "docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
-    "NEW_DAEMON_63db83ff_AUDIO_ONESHOT": "REQUEST_HANDLED_VALID_EMPTY \u2014 nonempty capture NOT demonstrated \u2014 docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md"
+    "NEW_DAEMON_63db83ff_AUDIO_ONESHOT": "PASSED_ON_HARDWARE \u2014 nonempty one-shot PCM with signal on remake; stream/Hear NOT TESTED \u2014 docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md"
   }
 }

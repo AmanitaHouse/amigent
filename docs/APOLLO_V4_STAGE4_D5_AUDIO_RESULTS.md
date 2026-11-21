@@ -1,9 +1,10 @@
 # Apollo V4 — Stage 4 D5 AUDIO regression results
 
 **Session:** Stage 4 D5 — one-shot AUDIO on security-hardened Apollo daemon  
-**Evidence (private):** `~/amigent-evidence/stage4-d5-audio-regression/20261121T080724Z`  
+**Remake evidence (private):** `~/amigent-evidence/stage4-d5-audio-remake/20261121T081528Z`  
+**Prior valid-empty attempt:** `~/amigent-evidence/stage4-d5-audio-regression/20261121T080724Z`  
 **Mode:** Exclusive candidate launch; production restored  
-**Conclusion:** **AUDIO request handled — capture unconfirmed (valid empty); production restored**
+**Conclusion:** **APOLLO V4 STAGE 4 D5 AUDIO REGRESSION VALIDATED — PRODUCTION RESTORED**
 
 ## Candidate identity
 
@@ -15,58 +16,63 @@
 | Launch | `… amigentd.d4 TLSONLY` (no ALLOWPOKE) |
 | Prior D4 | start / proto-6 TLS / SYSINFO / `poke=0` `trace=0` PASS |
 
-Read-back before QUIT matched the frozen SHA-256. No rebuild / restage.
+No rebuild / restage. Staged identity unchanged from D4.
 
-## What was authorised and done
+## Authorised work
 
-Exactly one `AmigaChannel.audio(0)` (opcode 48, arg 0). No stream, Hear, PEEK/POKE/TRACE, install, or retry.
+Exactly one `AmigaChannel.audio(0)` after **operator-confirmed** AmigaAMP loop playback.  
+No stream, Hear, PEEK/POKE/TRACE, install, or AUDIO retry.
 
-## Session sequence
+## Remake sequence (successful)
 
-1. Offline GO (reuse D4 identity; opcode-48 oneshot retained).  
-2. Production preflight: proto 5 TLS, ApolloOS/68080, SYSINFO ×2; staged hash PASS; `arne.audio 4.22`.  
-3. Physical-console handover → production QUIT → operator launched `.d4`.  
-4. Proto-6 TLS smoke PASS (`audio=1`, `poke=0`, `trace=0`, `pip=0`).  
-5. **Single** `audio(0)` — see below.  
-6. Candidate QUIT → operator restored `C:amigentd TLSONLY`.  
-7. Proto 5 TLS + SYSINFO ×2 PASS. No reboot.
+1. Operator ready → production QUIT → TLS released.  
+2. Operator launched `.d4`.  
+3. Proto-6 TLS smoke PASS.  
+4. Operator confirmed **audio playing**.  
+5. Single `audio(0)` — nonempty PCM with measurable signal.  
+6. Candidate QUIT → TLS released.  
+7. Operator restored classic; audio stopped.  
+8. Proto 5 TLS + SYSINFO ×2 PASS. No reboot.
 
-## AUDIO result (exactly one request)
+## AUDIO result (remake — exactly one request)
 
 | Field | Value |
 |---|---|
 | Client | `AmigaChannel.audio(0)` |
 | Request count | **1** |
-| Elapsed | 0.013 s |
-| Rate | 0 |
-| Payload bytes | **0** |
-| Framing | Valid empty (within 48000 bound) |
-| Peak / RMS / nonzero | n/a (empty) |
+| Elapsed | 0.018 s |
+| Rate | **47931** |
+| Payload bytes | **1920** |
+| Frames (stereo) | **480** |
+| Alignment | Multiple of 4; within 48000 |
+| Peak abs (s16) | **23** |
+| RMS | **9.12** |
+| Nonzero frames | **466 / 480** |
+| PCM SHA-256 (metadata only) | `858065561a49b7b7d3a14257f9de88acfd1cd22c0e6b3ef26b42b62b749ea2fa` |
+| Raw PCM persisted | **No** |
 | Stream / Hear | **Not used** |
-| Retry | **None** |
 
-**Interpretation:** Request handling on the hardened daemon succeeded. Capture of nonempty PCM was **not** demonstrated.
+**Interpretation:** Nonempty one-shot AHI capture with measurable signal on `63db83ff…` while AmigaAMP held the mix.
 
-### Procedural defect
+## Prior valid-empty attempt (same day)
 
-After candidate launch, the operator was **not** explicitly asked to start active AmigaAMP loop playback before `audio(0)`. SYSINFO `AmigaAMP PlayTask` presence was incorrectly treated as proof of an active mix. That does not establish audible playback. Under D5 rules there is **no** second AUDIO attempt.
+First D5 attempt returned valid empty because `audio(0)` was issued without an explicit post-launch AmigaAMP play confirmation. That attempt remains recorded; it does **not** demonstrate nonempty capture. No retry was performed in that session.
 
 ## Production
 
 Restored and verified: protocol **5**, certificate-verified TLS, ApolloOS / 68080, SYSINFO ×2. Production binary untouched.
 
-## Coverage after D5
+## Coverage after D5 remake
 
 | Claim | Status |
 |---|---|
 | `63db83ff…` start / SYSINFO (D4) | PASSED ON HARDWARE |
-| `63db83ff…` one-shot AUDIO request handling | PASSED (valid empty) |
-| `63db83ff…` nonempty one-shot AUDIO capture | **NOT DEMONSTRATED** |
+| `63db83ff…` nonempty one-shot AUDIO (D5 remake) | **PASSED ON HARDWARE** |
 | Continuous AUDIO / Viewer Hear on this identity | NOT TESTED |
 | POKE / TRACE refuse on this identity | NOT EXECUTED ON HARDWARE |
 
-Historical nonempty capture on other executables (e.g. U-DAE / `00443719…` stream-safe) is **not** transferred to `63db83ff…`.
+Historical stream-safe (`00443719…`) claims are **not** transferred beyond what D4/D5 explicitly show for `63db83ff…`.
 
 ## Recommended next validation step (not authorised here)
 
-One exclusive D5-remediation session: same `63db83ff…` candidate, **operator-confirmed active AmigaAMP loop after launch**, then exactly one `audio(0)` — still no stream/Hear/POKE/TRACE.
+One exclusive continuous-AUDIO / stock Viewer Hear session on the same `63db83ff…` identity — still no POKE/TRACE/MMIO.

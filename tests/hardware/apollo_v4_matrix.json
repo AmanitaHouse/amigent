@@ -453,10 +453,10 @@
     "stage3b_final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
     "stage3b_status": "CLOSED",
     "stage4_safety_assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
-    "stage4_status": "d5_audio_nonempty_pass",
+    "stage4_status": "d5b_hardened_viewer_hear_pass",
     "upstream_1_5_0_public": "NOT_PUBLISHED \u2014 no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
     "stage4": {
-      "status": "d5_audio_nonempty_pass",
+      "status": "d5b_hardened_viewer_hear_pass",
       "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
       "d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
       "d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
@@ -515,7 +515,19 @@
       "d5_audio_rate": 47931,
       "d5_audio_frames": 480,
       "d5_audio_peak": 23,
-      "d5_audio_rms": 9.12
+      "d5_audio_rms": 9.12,
+      "d5b_results": "docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md",
+      "d5b_evidence": "amigent-evidence/stage4-d5b-hardened-viewer-hear/20261121T082420Z",
+      "d5b_sha256": "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
+      "d5b_viewer_commit": "fad6693a1678c5ae65c60d29a9a6a6b74feb42f3",
+      "d5b_audio_starts": 1,
+      "d5b_wall_s": 8.371,
+      "d5b_pcm_bytes": 531536,
+      "d5b_chunks": 139,
+      "d5b_rate": 47931,
+      "d5b_human_audible": "YES_CHOPPY",
+      "d5b_production_restored": true,
+      "d5b_note": "Stock Viewer Hear once under 7s/10s/2MiB; choppy but audible; Viewer connection-loss reported after Hear; D5 empty+remake preserved separately."
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
@@ -535,6 +547,8 @@
     "stage4_d4_sha256": "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
     "NEW_DAEMON_63db83ff_SMOKE": "PASSED_ON_HARDWARE \u2014 proto6 TLS SYSINFO poke=0 trace=0 only; NOT AUDIO/PEEK/POKE/TRACE execution \u2014 docs/APOLLO_V4_STAGE4_D4_NEW_DAEMON_SMOKE_RESULTS.md",
     "stage4_d5_results": "docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
-    "NEW_DAEMON_63db83ff_AUDIO_ONESHOT": "PASSED_ON_HARDWARE \u2014 nonempty one-shot PCM with signal on remake; stream/Hear NOT TESTED \u2014 docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md"
+    "NEW_DAEMON_63db83ff_AUDIO_ONESHOT": "PASSED_ON_HARDWARE \u2014 nonempty one-shot PCM with signal on remake; stream/Hear NOT TESTED \u2014 docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
+    "stage4_d5b_results": "docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md",
+    "NEW_DAEMON_63db83ff_VIEWER_HEAR": "PASSED_ON_HARDWARE \u2014 bounded stock Viewer stream; human-audible YES (choppy); docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md"
   }
 }

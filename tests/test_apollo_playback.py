@@ -139,17 +139,20 @@ def test_playback_starts_only_when_asked_and_stops_cleanly():
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
-    assert link.tls is True and link.started == 1 and link.stopped == 0
+    assert link.tls is True and link.started == 1 and link.stopped == 1 and link.closed == 1
+    assert viewer.hear is False
     assert viewer.sent[0] == ("audio", {"on": True})
-    frame = viewer.sent[1]
+    frame = next(m for m in viewer.sent if isinstance(m, (bytes, bytearray)))
     assert frame == pcm_message(48000, b"\x01\x00\x02\x00")
     assert frame[0] == 5 and struct.unpack(">I", frame[1:5]) == (48000,)
-
-    viewer.submit({"t": "audio", "on": False})
-    link.reads = [(48000, b"\x00\x00\x00\x00")]
-    viewer._play_audio(link)
-    assert link.stopped == 1 and link.closed == 1
     assert ("audio", {"on": False}) in viewer.sent
+
+    # User-initiated second Hear after cleanup
+    viewer.submit({"t": "audio", "on": True})
+    link2 = Link()
+    link2.reads = [(48000, b"\x00\x00\x00\x00"), None]
+    viewer._play_audio(link2)
+    assert link2.started == 1 and link2.stopped == 1 and viewer.hear is False
 
 
 def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
@@ -167,7 +170,6 @@ def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
     link.reads = [AmigaError("the Amiga does not answer")]
     with pytest.raises(AmigaError):
         viewer._play_audio(link)
-    viewer._drop_audio(link)
     assert not viewer.hear and link.closed == 1
 
     odd = Link()

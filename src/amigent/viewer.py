@@ -46,6 +46,10 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
 
+# Hear streaming safeguards (product defaults — not the 10 s HW test cap).
+AUDIO_DRAIN_MAX = 64  # bounded end-marker / stop drain reads
+AUDIO_PCM_BUDGET = 8 * 1024 * 1024  # aggregate PCM broadcast per Hear session
+
 # Shown as themselves. Anything else that fails the link stays the generic
 # "not answering" line, so a greeting, a path or an OS detail is not printed.
 KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
@@ -418,39 +422,71 @@ class Viewer:
             if link.connected:
                 try:
                     link.audio_stop()
-                    while link.audio_read() is not None:
-                        pass
+                    for _ in range(AUDIO_DRAIN_MAX):
+                        if link.audio_read() is None:
+                            break
                 except (AmigaError, OSError, AttributeError):
                     pass
         finally:
-            link.close()
+            try:
+                link.close()
+            except (AmigaError, OSError, AttributeError):
+                pass
             self.event("audio", on=False)
 
     def _play_audio(self, link: Commands, between=None) -> None:
-        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block."""
+        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block.
+
+        A daemon end-marker, PCM budget, or Hear OFF always releases the stream and
+        clears ``hear`` so ``_media`` cannot silently call ``audio_start`` again.
+        The user must click Hear to resume.
+        """
         if not link.connected:
             link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
         link.audio_start()
         self.event("audio", on=True)
-        while self._hearing():
-            got = link.audio_read()
-            if got is None:
-                break
-            rate, pcm = got
-            if pcm and len(pcm) % 4:
-                raise AmigaError("audio samples are not stereo frames")
-            if pcm:
-                self.broadcast(pcm_message(rate or 48000, pcm))
-            if between:
-                between()
-        if self._hearing():
-            return
-        self._release_audio(link)
+        pcm_sent = 0
+        try:
+            while self._hearing():
+                got = link.audio_read()
+                if got is None:
+                    break
+                rate, pcm = got
+                if pcm and len(pcm) % 4:
+                    raise AmigaError("audio samples are not stereo frames")
+                if pcm:
+                    room = AUDIO_PCM_BUDGET - pcm_sent
+                    if room < 4:
+                        break
+                    if len(pcm) > room:
+                        pcm = pcm[: room - (room % 4)]
+                    if pcm:
+                        self.broadcast(pcm_message(rate or 48000, pcm))
+                        pcm_sent += len(pcm)
+                if between:
+                    between()
+        finally:
+            # Never return to _media with hear still True after a stream attempt.
+            self.hear = False
+            self._release_audio(link)
 
     def _drop_audio(self, link: Commands) -> None:
-        link.close()
         self.hear = False
-        self.event("audio", on=False)
+        try:
+            if link.connected:
+                try:
+                    link.audio_stop()
+                    for _ in range(AUDIO_DRAIN_MAX):
+                        if link.audio_read() is None:
+                            break
+                except (AmigaError, OSError, AttributeError):
+                    pass
+        finally:
+            try:
+                link.close()
+            except (AmigaError, OSError, AttributeError):
+                pass
+            self.event("audio", on=False)
 
     def _media(self) -> None:
         """ARNE audio, only after the page asks, and the SAGA PIP, while a page is open.
@@ -468,6 +504,7 @@ class Viewer:
 
         while True:
             if not self._watching():
+                self.hear = False
                 if link.connected:
                     self._release_audio(link)
                 time.sleep(0.05)

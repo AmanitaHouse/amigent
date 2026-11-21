@@ -235,9 +235,14 @@ def test_wheel_and_sdist_carry_the_apollo_executables(tmp_path):
     )
     completed = subprocess.run(
         [sys.executable, str(script)],
-        cwd=ROOT, check=True, capture_output=True, text=True,
+        cwd=ROOT, check=False, capture_output=True, text=True,
         env={**os.environ, "AMIGENT_DIST_DIR": str(out), "AMIGENT_BUILD_BASE": str(work)},
     )
+    if completed.returncode:
+        raise AssertionError(
+            f"in-process wheel/sdist build failed ({completed.returncode})\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
     produced = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if line.startswith(("WHEEL ", "SDIST ")))
     wheel = out / produced["WHEEL"]
     sdist = out / produced["SDIST"]

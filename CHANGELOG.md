@@ -40,6 +40,30 @@ Versions follow [semver](https://semver.org). The number lives in
   Migration keeps the original files. After a downgrade, older versions see
   the pre-migration history. Later writes remain under the machine ID.
 
+### Security
+
+- With `TLSONLY`, amigentd now turns away plain connections from other
+  computers even when its TLS port did not open, instead of falling back to
+  plain. A broken AmiSSL or certificate therefore locks remote PCs out until it
+  is mended at the Amiga; Amigent says which of the two it is and how to
+  recover. (#27)
+
+### Building
+
+- A GitHub workflow builds amigentd, amigent-status and amigent-monitor with
+  GCC 16 whenever `amiga/` changes. (#26)
+
+### Fixes
+
+- A viewer that takes over from another one keeps the screen picture instead
+  of starting from black. (#29)
+- A screen pause of 120 s is reported as 120 s, not 121. (#32)
+- `amigent-doctor --help` exits with 0. (#34)
+
+### Thanks
+
+To midwan and AmanitaHouse for the pull requests in this release.
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

@@ -38,10 +38,11 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 - Native Apollo probe **execution**  
 - First-install automatic daemon selection  
 - Upgrade / fallback / Amigent-Update  
-- Fork daemon (**F-DAE**, 131292 / `1e0e3f65…`)  
-- Fork-specific AMMX / PIP picture paths  
+- Fork-specific AMMX / live PIP picture paths  
 
-Software unit tests and host harnesses are **not** substitutes for the rows above.
+**F-DAE** protocol-6 smoke is now separately documented in `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md` (same narrow scope as U-DAE; AUDIO/MMIO/probe still NOT RUN).
+
+Software unit tests and host harnesses are **not** substitutes for the untested rows above.
 
 ## Mapping to contributions (do not over-claim)
 
@@ -53,6 +54,6 @@ Software unit tests and host harnesses are **not** substitutes for the rows abov
 | Fork **#6** / **#8** AUDIO | Capability `audio=1` only | No opcode 48 / Hear |
 | Fork **#7** packaging | Exact U-DAE hash exercised | Installer/update paths not run |
 | Fork **#10** probe AFF_FPGA | FPGA bit in daemon `attn_flags` | Probe executable not launched |
-| Fork **F-DAE** | — | **NOT RUN** |
+| Fork **F-DAE** | Proto-6 exclusive smoke PASSED ON HW | AUDIO/MMIO/probe/PIP still NOT RUN |
 
 Draft PR comment text: `docs/APOLLO_V4_DRAFT_UPSTREAM_HW_COMMENT.md` (**not posted**).

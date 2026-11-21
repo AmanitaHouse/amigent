@@ -1,8 +1,8 @@
 # Apollo V4 Stage 2B — F-DAE exclusive runbook
 
-**Status:** Prepared offline — **not authorised for execution**  
+**Status:** First F-DAE exclusive session **executed** — see `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md`  
 **Basis:** Proven U-DAE exclusive session (`docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`)  
-**Do not** treat U-DAE success as F-DAE validation.
+U-DAE success was **not** treated as F-DAE validation; F-DAE was tested separately.
 
 ## Candidate
 

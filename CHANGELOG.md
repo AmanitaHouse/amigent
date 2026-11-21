@@ -150,6 +150,15 @@ Versions follow [semver](https://semver.org). The number lives in
 - When the remote desktop cannot reach the Amiga it gives one of a few fixed
   reasons in the page's language, including a TLS certificate that does not
   match; the full text goes to the terminal only. (#36)
+- Auto packing never has a 68000 or 68010 deflate its screens or replies, not
+  even as a try now and then: there it cost more time than it saved bytes. A
+  packing level chosen by hand still applies. (#43)
+- amigentd turns screens into tiles faster: RGB888 to RGB332 through lookup
+  tables, a tighter PackBits and colour index pass, and no try of a method
+  that cannot beat the best one so far. The tiles on the wire stay the same.
+  (#43)
+- amigentd's tile buffers were 14 bytes short for PackBits of noise in a full
+  64×64 chunky or 8-plane tile; the last bytes ran past them. (#43)
 
 ### Tools and languages
 

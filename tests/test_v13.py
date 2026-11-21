@@ -213,6 +213,23 @@ def test_an_explicit_mode_is_not_held_for_a_sample(tmp_path):
     assert _fast(tmp_path, mode="off").upload() is False
 
 
+def test_a_68000_never_deflates_in_auto_mode(tmp_path):
+    """Deflate costs a 68000 more time than it saves bytes (#43): auto mode leaves
+    it off, also for the screens' tries now and then; a choice by hand still packs."""
+    for cpu in ("68000", "68010"):
+        p = pack.Policy("slow", "10.0.0.9", path=tmp_path / f"link-{cpu}.json")
+        p.learn({"deflate_fast": "40", "deflate_best": "15", "inflate": "300", "cpu": cpu})
+        p.line_kbs = 5.0  # a line slow enough that the rates alone would pack
+        assert p.slow_cpu and p.level() == 0
+        assert [p.frame_level() for _ in range(100)] == [0] * 100
+        p.set_mode("fast")
+        assert p.level() == 1 and p.frame_level() == 1
+    quick = pack.Policy("quick", "10.0.0.9", path=tmp_path / "link.json")
+    quick.learn({"deflate_fast": "40", "deflate_best": "15", "inflate": "300", "cpu": "68020"})
+    quick.line_kbs = 5.0
+    assert not quick.slow_cpu and quick.level() == 2
+
+
 def test_a_failed_save_removes_the_part_file(tmp_path, monkeypatch):
     path = tmp_path / "link.json"
     policy = pack.Policy("fast", "10.0.0.9", path=path)

@@ -3448,6 +3448,66 @@ static BOOL l_skip(struct link *l, ULONG len, LONG secs)
     return TRUE;
 }
 
+/* POKE payload phase: one wall-clock deadline from now_ms(), not reset by
+ * receiving another fragment. IO_SECONDS in l_wait alone restarts each select. */
+#define POKE_DEADLINE_MS (IO_SECONDS * 1000UL)
+
+static BOOL l_wait_until(struct link *l, BOOL writing, ULONG deadline_ms)
+{
+    struct Library *SocketBase = l->base;
+    struct timeval tv;
+    ULONG sigs = SIGBREAKF_CTRL_C;
+    fd_set s;
+    LONG left;
+
+    left = (LONG)(deadline_ms - now_ms());
+    if (left <= 0)
+        return FALSE;
+    tv.tv_sec = left / 1000;
+    tv.tv_usec = (left % 1000) * 1000;
+    FD_ZERO(&s);
+    FD_SET(l->fd, &s);
+    if (WaitSelect(l->fd + 1, writing ? NULL : &s, writing ? &s : NULL, NULL, &tv, &sigs) > 0)
+        return TRUE;
+    if (sigs & SIGBREAKF_CTRL_C)
+        SetSignal(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+    return FALSE;
+}
+
+static BOOL l_recv_until(struct link *l, void *data, ULONG len, ULONG deadline_ms)
+{
+    struct Library *SocketBase = l->base;
+    UBYTE *p = data;
+    LONG n;
+
+    while (len > 0) {
+        if (!l_wait_until(l, FALSE, deadline_ms))
+            return FALSE;
+        n = recv(l->fd, p, len, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
+        if (n <= 0)
+            return FALSE;
+        p += n;
+        len -= n;
+        net_in += n;
+    }
+    return TRUE;
+}
+
+static BOOL l_skip_until(struct link *l, ULONG len, ULONG deadline_ms)
+{
+    UBYTE scratch[512];
+
+    while (len > 0) {
+        ULONG n = len > sizeof(scratch) ? sizeof(scratch) : len;
+        if (!l_recv_until(l, scratch, n, deadline_ms))
+            return FALSE;
+        len -= n;
+    }
+    return TRUE;
+}
+
 /* ---- newcomers --------------------------------------------------------- */
 
 /* A connection only becomes the screen client with its first screen command, so
@@ -4371,6 +4431,11 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
+#ifdef AMIGENT_APOLLO
+    t_pair(&t, "trace", 0);  /* TRACE set refused on Apollo/68080 until validated */
+#else
+    t_pair(&t, "trace", 1);
+#endif
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
     t_str(&t, (const UBYTE *)"execbase=", FALSE);
@@ -6877,35 +6942,42 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
+/* Length uses the same PEEK_MAX bound as PEEK. Order: address → size →
+ * ALLOWPOKE → MMIO/RAM gates → AllocVec/l_recv → CopyMem. Oversized n closes
+ * the channel (FALSE) instead of draining. Bounded payload skip/recv use one
+ * POKE_DEADLINE_MS wall-clock from now_ms(); fragments do not extend it.
+ * A rebuilt binary is a new validation identity; prior HW results do not transfer. */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
-    ULONG at;
+    ULONG at, deadline;
     UBYTE *data;
 
     if (!c_address(l, len, &at, &alive))
         return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
-    if (!(data = AllocVec(n ? n : 1, MEMF_ANY)))
-        return l_skip(l, n, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
-    if (!l_recv(l, data, n, IO_SECONDS)) {
-        FreeVec(data);
-        return FALSE;
-    }
-    if (!allow_poke) {
-        FreeVec(data);
-        return c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
-    }
+    if (!n)
+        return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (n > PEEK_MAX)
+        return FALSE;  /* close: do not drain an unbounded declared payload */
+    deadline = now_ms() + POKE_DEADLINE_MS;  /* payload phase only; not reset by drip */
+    if (!allow_poke)
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
 #ifdef AMIGENT_APOLLO
     /* APoke is not this command. The same RAM gate applies, and a window
      * whose read has a side effect is not a place to write either. */
-    if (apollo_mmio_hit(at, n)) {
-        FreeVec(data);
-        return c_fail(l, 1, "that range includes Apollo registers that a read can change");
-    }
+    if (apollo_mmio_hit(at, n))
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "that range includes Apollo registers that a read can change");
 #endif
-    if (!peek_allowed(at, n) || at >= 0xF80000UL) {
+    if (!peek_allowed(at, n) || at >= 0xF80000UL)
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (!(data = AllocVec(n, MEMF_ANY)))
+        return l_skip_until(l, n, deadline) && c_fault(l, ERROR_NO_FREE_STORE);
+    if (!l_recv_until(l, data, n, deadline)) {
         FreeVec(data);
-        return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+        return FALSE;  /* incomplete / deadline: close — do not treat as next command */
     }
     mon_say('C', "write memory", NULL);
     Disable();
@@ -6924,8 +6996,8 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
  * happened: it fires once, and the program never stops.
  *
  * The trap stub is the upstream 1.4.0 handler. Its behaviour on a 68080 has
- * not been validated on hardware. The command is implemented; that is not a
- * claim that a tracepoint has been shown to fire on ApolloOS. */
+ * not been validated on hardware. Apollo builds (AMIGENT_APOLLO) refuse TRACE
+ * set before any code or trap-handler change; list and clear still work. */
 
 static const UBYTE trap_code[68] = {
     0x0c, 0x97, 0x00, 0x00, 0x00, 0x2f, 0x66, 0x2a, 0x48, 0xe7, 0xff, 0xfe,
@@ -7123,6 +7195,11 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
     }
     if (op != 1)
         return c_fail(l, 1, "unknown trace operation");
+#ifdef AMIGENT_APOLLO
+    /* 68080 trap stub not hardware-validated: refuse before patching code or tc_TrapCode. */
+    (void)at;
+    return c_fail(l, 1, "tracepoints are not supported on this Apollo build yet");
+#endif
     if (at & 1)
         return c_fail(l, 1, "code starts at an even address");
     for (i = 0; i < TRACES; i++)  /* a second one would take our TRAP for the instruction */

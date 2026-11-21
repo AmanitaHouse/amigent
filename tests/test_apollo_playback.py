@@ -19,7 +19,7 @@ from amigent.paths import AMIGA
 from amigent.viewer import Viewer, pcm_message
 from amigent.webserver import WEB
 
-DAEMON = (129944, "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c")  # stream-safe HW-validated packaging
+DAEMON = (128744, "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1")  # D3+TRACE+POKE deadline; NOT HARDWARE VALIDATED
 
 
 def test_audio_capability_follows_the_advertisement_and_the_protocol():

@@ -247,5 +247,6 @@ def test_russian_catalog_is_json():
 
 def test_trace_is_present_and_not_claimed_for_the_68080():
     assert "trapstub" in DAEMON
-    assert "68080" in DAEMON and "not been validated" in DAEMON
+    assert "68080" in DAEMON
+    assert "not supported on this Apollo build yet" in DAEMON or "not been validated" in DAEMON
     assert (ROOT / "src" / "native" / "amiga" / "daemon" / "trapstub.s").is_file()

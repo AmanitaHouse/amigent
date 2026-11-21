@@ -33,6 +33,8 @@ APOLLO_MARK = b"arne.audio"  # present in the Apollo daemon, absent from the cla
 # so without this list an --update would leave the old dump-bearing daemon in place.
 SUPERSEDED_APOLLO_SHA256 = frozenset({
     "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
+    # F-FORKSAFE / Stage 3B-D2 hardware-tested dump; superseded by D3 POKE resource harden.
+    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
 })
 
 SUPPORTED, EXPERIMENTAL = "supported", "experimental"

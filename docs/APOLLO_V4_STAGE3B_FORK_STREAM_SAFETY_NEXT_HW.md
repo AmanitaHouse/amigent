@@ -1,8 +1,8 @@
 # Next hardware milestone — fork stream-safe Apollo daemon
 
-**Status:** Oneshot HW **executed** — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md`.  
-**Remaining (optional, needs new auth):** fork streaming / stock Viewer Hear on `00443719…`.  
-**Do not** treat oneshot success as stream validation.
+**Status:** Oneshot + supervised streaming HW **executed** — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md`, `docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md`.  
+**Remaining (optional, needs new auth):** stock Viewer Hear UI on `00443719…`; long soak; human-audible confirmation.  
+**Do not** treat supervised harness success as stock Viewer UI validation.
 
 ## Candidate (offline build — **not** hardware-validated)
 

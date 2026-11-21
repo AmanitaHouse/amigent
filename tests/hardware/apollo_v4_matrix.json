@@ -27,7 +27,7 @@
       "name": "amigentd.apollo-fork-stream-safe",
       "size": 129944,
       "sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
-      "lineage": "contrib/fork-audio-stream-safety@496f142 (oneshot HW PASSED; stream NOT TESTED)"
+      "lineage": "contrib/fork-audio-stream-safety@496f142 (oneshot + supervised stream HW PASSED)"
     },
     "F-PRB": {
       "name": "amigent-apollo-probe",
@@ -344,9 +344,21 @@
     "FDAE_streaming": "NOT_TESTED",
     "stock_Viewer_Hear_UI": "NOT_TESTED",
     "fork_stream_safe_oneshot": "PASSED_ON_HARDWARE 00443719\u2026 Phase 4 \u2014 docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md",
-    "fork_stream_safe_streaming": "NOT_TESTED",
+    "fork_stream_safe_streaming": "PASSED_ON_HARDWARE 00443719\u2026 Phase 5 supervised harness \u2014 docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md",
+    "fork_stream_session_audio_starts": 1,
+    "fork_stream_wall_s": 7.114,
+    "fork_stream_aggregate_pcm_bytes": 948352,
     "stage3b": {
-      "status": "phase4_fork_oneshot_executed",
+      "status": "phase5_fork_stream_executed",
+      "phase5_results": "docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md",
+      "phase5_evidence": "amigent-evidence/stage3b-fork-stream/20261121T034526Z",
+      "phase5_sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+      "phase5_stream_starts": 1,
+      "phase5_wall_s": 7.114,
+      "phase5_aggregate_pcm_bytes": 948352,
+      "phase5_chunks": 248,
+      "phase5_rate": 47931,
+      "phase5_production_restored": true,
       "phase4_results": "docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md",
       "phase4_evidence": "amigent-evidence/stage3b-fork-audio/20261121T033439Z",
       "phase4_sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",

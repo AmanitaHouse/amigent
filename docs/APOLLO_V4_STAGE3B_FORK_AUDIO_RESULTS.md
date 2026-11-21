@@ -19,7 +19,7 @@
 
 Do **not** conflate with U-DAE `456fce26…`, F-DAE `1e0e3f65…`, or U-HEAR `983fd853…`.
 
-**Streaming / Viewer Hear on this fork binary:** **NOT TESTED** in this session (oneshot only).
+**Streaming on this fork binary:** later Phase 5 — `docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md`. This Phase 4 session was oneshot only.
 
 ## Safety gates (before QUIT)
 
@@ -70,11 +70,11 @@ Comparison note (not a requirement): matches prior U-DAE Phase 2A shape (47931 H
 |-------|--------|
 | Corrected fork proto-6 smoke (`00443719…`) | **PASSED ON HARDWARE** |
 | Corrected fork oneshot nonempty+signal | **PASSED ON HARDWARE** |
-| Corrected fork streaming / Hear | **NOT TESTED** |
+| Corrected fork streaming / Hear | See Phase 5 (`FORK_STREAM_RESULTS.md`); stock Viewer UI still NOT TESTED |
 | Production restore | **PASSED ON HARDWARE** |
 
 ## Conclusion
 
 **APOLLO V4 CORRECTED FORK AUDIO HARDWARE VALIDATED — PRODUCTION RESTORED**
 
-Ready for a **separately authorised** streaming/Hear test of this fork binary if desired; do not infer stream validation from this oneshot.
+Supervised streaming was later validated in Phase 5; do not infer stock Viewer UI from either session.

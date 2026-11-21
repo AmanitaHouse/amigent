@@ -113,7 +113,7 @@ If port conflict, RAM pressure, TLS/key ambiguity, or production stop answering 
 | D1 | MMIO refuse (software) | Host tests | `tests/test_apollo_mmio.py` / harness | — | All eight windows refuse | CI/local log | L0 | No | Pass |
 | D2 | MMIO refuse (live read) | Candidate + ALLOWPOKE **off** | Protocol PEEK into a protected window | F/U-DAE | Refused; no register side effects claimed without proof | Log | L2 | Explicit | Refuse |
 | D3 | MMIO write attempt | ALLOWPOKE on **candidate only** | POKE into protected window | same | Refused even with ALLOWPOKE | Log | L4 | **Yes** | Refuse |
-| D4 | AUDIO opcode 48 | `audio=1`; **exclusive** preferred | Viewer Hear / `amiga_listen` | F/U-DAE separately | Stream starts/stops; WAV/PCM path | Audio note + log | L3 | **Yes** | **Oneshot + supervised Hear PASSED ON HW** (U-HEAR `983fd853…`); F-DAE AUDIO still NOT RUN |
+| D4 | AUDIO opcode 48 | `audio=1`; **exclusive** preferred | Viewer Hear / `amiga_listen` | F/U-DAE separately | Stream starts/stops; WAV/PCM path | Audio note + log | L3 | **Yes** | **Oneshot + supervised stream PASSED ON HW** (U-HEAR `983fd853…`, F-FORKSAFE `00443719…`); F-DAE AUDIO still NOT RUN; stock Viewer UI NOT TESTED |
 | D5 | PIP remains unsupported as claimed | SYSINFO | Check `pip` and opcode 49 | U-DAE: no PIP cmd; F-DAE: `pip=0` empty | No overlay claim | SYSINFO | L2 | Staging | Matches build |
 | D6 | Apollo monitor | Packaged monitor present | Launch monitor — exclusive if production monitor uses `Amigent.monitor` | MON | Runs or documented fallback | Log | L3 | **Yes** | OK / fallback |
 | D7 | HRTmon program | ApolloOS, HRTmon on path | `amiga_hrtmon` / server tool | CLI | Starts **program** HRTmon only; never ROM | Log | L4 | **Yes** | Plan() rules |
@@ -192,9 +192,11 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 3B Phase 3 (executed):** supervised Hear HW — `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md` (U-HEAR `983fd853…`).
 
-**Stage 3B Phase 4 (executed):** corrected fork oneshot — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md` (`00443719…`); fork streaming still NOT RUN.
+**Stage 3B Phase 4 (executed):** corrected fork oneshot — `docs/APOLLO_V4_STAGE3B_FORK_AUDIO_RESULTS.md` (`00443719…`).
 
-**Exclusive / separate authorisation:** fork streaming / stock Viewer Hear on F-FORKSAFE; F-DAE AUDIO; long-duration soak; monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
+**Stage 3B Phase 5 (executed):** corrected fork supervised streaming — `docs/APOLLO_V4_STAGE3B_FORK_STREAM_RESULTS.md` (`00443719…`); stock Viewer UI still NOT RUN.
+
+**Exclusive / separate authorisation:** stock Viewer Hear on F-FORKSAFE; F-DAE AUDIO; long-duration soak; monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 
 ## Maintainer-facing explanation (draft — do not post yet)
 

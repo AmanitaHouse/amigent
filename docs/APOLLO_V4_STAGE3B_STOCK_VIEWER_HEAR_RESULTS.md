@@ -77,7 +77,7 @@ Instrumentation observed and forced OFF only through `submit(audio,on=false)` �
 | Format | s16le stereo |
 | Nonzero PCM | **Yes** — 160 nonempty chunks, 0 empty keepalives (peak/RMS not computed; PCM not retained) |
 | PC playback path | Stock Viewer Web Audio (`AudioContext`) path active during Hear |
-| Human-confirmed audible | **INCONCLUSIVE** — operator did not report YES/NO |
+| Human-confirmed audible | **YES** — operator reported brief audible PC playback |
 | Hear OFF | Watchdog via normal UI path (`audio on=false`); `hear_final=false` |
 | `audio_stop` + end-marker | **Yes** |
 | Automatic restart | **None** (starts remain 1) |
@@ -94,7 +94,7 @@ Instrumentation observed and forced OFF only through `submit(audio,on=false)` �
 | Explicit Hear OFF + stream cleanup | **PASSED ON HARDWARE** |
 | No unintended restart this session | **PASSED ON HARDWARE** |
 | PC audio playback path operated | **PASSED** (Web Audio path) |
-| Human-audible confirmation | **INCONCLUSIVE** |
+| Human-audible confirmation | **YES** (brief) |
 | Reference fidelity / long soak / device matrix | **NOT TESTED** |
 | Upstream unpublished 1.5.0 | **NOT CLAIMED** |
 | Production restore | **PASSED ON HARDWARE** |
@@ -103,4 +103,4 @@ Instrumentation observed and forced OFF only through `submit(audio,on=false)` �
 
 **APOLLO V4 STOCK VIEWER HEAR HARDWARE VALIDATED — PRODUCTION RESTORED**
 
-*(qualified: human-audible INCONCLUSIVE — operator did not report YES/NO)*
+*(human-audible YES — brief PC-side playback confirmed by operator)*

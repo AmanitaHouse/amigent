@@ -202,3 +202,22 @@ Fork review PRs **#4–#10** remain open and unchanged.
 - One authorised GitHub comment was published on upstream #31 (URL above).  
 - Existing evidence and protected contribution tips are preserved.  
 - Seven open fork PRs (#4–#10) are preserved.
+
+---
+
+## 9. Upstream draft PR #47 — Apollo AUDIO + Viewer Hear (**PUBLISHED**)
+
+| Field | Value |
+|---|---|
+| URL | https://github.com/akustikrausch/amigent/pull/47 |
+| State | **Draft OPEN** against `akustikrausch/amigent:main` |
+| Head | `AmanitaHouse:contrib/apollo-audio-hear` @ `213d641…` (plus follow-up CI fix commits) |
+| Upstream base | `f6aab1d…` |
+| Packaged Apollo daemon | `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` (128744 B) |
+| Layout | Flat `amiga/` (not #46) |
+| Lineage | Fork PRs #4–#8 + #11–#14 behaviour; About/#9, PIP, AMMX, monitor, HRTmon omitted |
+| Dependencies noted | #31, #38, #46 (documented; not rewritten) |
+| Offline suite (contrib branch) | Focused 67 passed / 4 skipped; full applicable ~338 passed / 20 skipped |
+| Fork `main` / protected tips / V4 production | **Unchanged** by this publication |
+
+Authorisation: draft upstream PR creation was in scope for the AUDIO+Hear contribution mission. Merge remains unauthorised.

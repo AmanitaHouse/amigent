@@ -73,7 +73,7 @@ Copy rows from the plan as needed.
 | C1 launch/quit | HW | | | | | | NOT RUN |
 | C5 identity About | HW | | | | | | NOT RUN |
 | D2 MMIO peek refuse | HW | | | | | | NOT RUN |
-| D4 AUDIO Hear | HW | | | | | | NOT RUN |
+| D4 AUDIO Hear | HW | | | | Stage 3B | | NOT RUN ON HW |
 | D5 PIP advertising | HW | | | | | | NOT RUN |
 | D7 HRTmon | HW | | | | | | NOT RUN — approval |
 | E4 rollback | HW | | | | | | NOT RUN — approval |

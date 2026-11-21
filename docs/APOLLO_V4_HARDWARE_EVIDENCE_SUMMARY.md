@@ -31,7 +31,7 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 
 ## Explicitly **not** hardware-validated by this session
 
-- AUDIO opcode 48 / viewer Hear playback  
+- AUDIO opcode 48 / viewer Hear playback (Stage 3B prepared — `docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md`; NOT RUN ON HW)  
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  

@@ -60,6 +60,7 @@ CONNECTION_REASONS = {
     "reason_unresolved": "The Amiga's address could not be resolved.",
     "reason_plain_closed": tls.PLAIN_CLOSED_TEXT,
     "reason_no_tls": tls.NO_TLS_TEXT,
+    "reason_no_certificate": tls.NO_CERT_TEXT,
     "reason_tls_mismatch": "The Amiga's TLS certificate does not match the saved one; run amigent-setup again.",
     "reason_pin_ambiguous": ("Two saved Amigas share this address and their TLS certificates differ; "
                              "fix the address in Your Amigas or run amigent-setup again."),
@@ -75,6 +76,8 @@ def connection_reason(text: str) -> str:
         return "reason_plain_closed"
     if "amissl does not open" in low:
         return "reason_no_tls"
+    if "amigent-tls.pem does not load" in low:
+        return "reason_no_certificate"
     if "certificate_verify_failed" in low or "certificate verify failed" in low:
         return "reason_tls_mismatch"
     if "ambiguous tls pin" in low:

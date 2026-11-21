@@ -59,6 +59,8 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
+        self.hello_flags = 0  # 4 (TLSONLY): the hello, then the line is closed, as amigentd does
+        self.received: list[bytes] = []  # every byte a client sent, per connection
         self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
         self.pause_for = 0  # seconds asked for, not mixed into the clock
         self.pause_started = 0.0
@@ -110,7 +112,15 @@ class FakeAmiga:
         self.listener.close()
 
     def _serve(self, conn):
-        conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, 0))
+        conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, self.hello_flags))
+        if self.hello_flags & 4:
+            conn.settimeout(0.5)
+            try:
+                self.received.append(conn.recv(4096))
+            except OSError:
+                self.received.append(b"")
+            conn.close()
+            return
         rd = conn.makefile("rb")
         channel, me = False, {"client": None}
         try:

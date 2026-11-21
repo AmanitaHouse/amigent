@@ -1,6 +1,6 @@
 # Apollo V4 Stage 3B — Viewer Hear hardware runbook
 
-**Status:** Prepared — **not authorised** until the operator explicitly starts this session  
+**Status:** **Executed** — see `docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md`  
 **Candidate:** stream-safe U-DAE lineage build  
 **SHA-256:** `983fd8531ed7e8631a77daac09b9f660cd59137a106dcc8f93a58e760921dd2a` (128496 B)  
 **Source:** `contrib/apollo-audio-stream-safety` @ `1aa7265`  

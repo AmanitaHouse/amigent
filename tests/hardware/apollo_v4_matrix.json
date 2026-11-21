@@ -305,7 +305,7 @@
     "F-DAE_protocol6": "PASSED_ON_HARDWARE",
     "U-DAE_AUDIO": "PASSED_ON_HARDWARE (Phase 1 empty + Phase 2A nonempty+signal) \u2014 docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
     "F-DAE_AUDIO": "NOT_RUN_ON_HARDWARE \u2014 Stage 3B prepared; see docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
-    "AUDIO_opcode_48": "PASSED_ON_HARDWARE (oneshot nonempty+signal; Hear/stream NOT RUN)",
+    "AUDIO_opcode_48": "PASSED_ON_HARDWARE (oneshot + supervised Hear stream)",
     "native_apollo_probe_execution": "PASSED_ON_HARDWARE \u2014 see docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md",
     "U-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS / rc 0)",
     "F-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS+68080 / rc 0; OS\u2227AFF_FPGA path)",
@@ -325,20 +325,23 @@
       "evidence": "amigent-evidence/stage3a-probe/20261121T021031Z",
       "production_after": "protocol 5 TLS responsive"
     },
-    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 stream-safe candidate ready; docs/APOLLO_V4_STAGE3B_HEAR_RUNBOOK.md",
+    "viewer_Hear_playback": "PASSED_ON_HARDWARE (supervised; U-HEAR 983fd853\u2026) \u2014 docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md",
     "stage3b": {
-      "status": "phase2a_executed_nonempty_signal",
-      "session_evidence": "amigent-evidence/stage3b-audio-phase2a/20261121T024102Z",
-      "results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
+      "status": "phase3_hear_executed",
+      "session_evidence": "amigent-evidence/stage3b-hear-hw/20261121T031620Z",
+      "results": "docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md",
+      "phase2a_results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
       "phase1_results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
       "audit": "docs/APOLLO_V4_STAGE3B_AUDIO_SAFETY_AUDIT.md",
-      "runbook": "docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
-      "first_candidate": "U-DAE",
-      "phase2a_rate": 47931,
-      "phase2a_payload_bytes": 1920,
+      "runbook": "docs/APOLLO_V4_STAGE3B_HEAR_RUNBOOK.md",
+      "first_candidate": "U-HEAR",
+      "hear_rate": 47931,
+      "hear_aggregate_pcm_bytes": 940704,
+      "hear_chunks": 246,
+      "hear_duration_s": 7.078,
       "production_restored": true,
       "phase2b_hear_offline": "docs/APOLLO_V4_STAGE3B_HEAR_STREAM_SAFETY.md",
-      "phase2_hear_hw": "NOT_AUTHORISED",
+      "phase2_hear_hw": "EXECUTED",
       "phase3_fdae_audio": "NOT_AUTHORISED"
     },
     "apollo_monitor": "NOT_RUN",
@@ -359,7 +362,8 @@
       "hear_candidate_bytes": 128496,
       "hear_source_commit": "1aa726578f3c762ec41a06299f82b21873e2113a",
       "t_audio_mem_removed": true,
-      "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE"
+      "viewer_Hear_playback": "PASSED_ON_HARDWARE",
+      "hear_results": "docs/APOLLO_V4_STAGE3B_HEAR_RESULTS.md"
     }
   }
 }

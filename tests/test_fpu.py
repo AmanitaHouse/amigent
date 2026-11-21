@@ -121,6 +121,18 @@ def test_status_says_the_fpu_and_its_library(on):
     assert server._system_facts() == facts  # asked once per session
 
 
+def test_v4_status_keeps_fpu_when_version_looks_like_os4(on):
+    """Hardware Session A: Version/empty CPU → AmigaOS 4 without reconcile; SYSINFO saves it."""
+    fake = on(amiga(0xA47F, "68080"))  # attn_flags=42111
+    fake.info.update(os="ApolloOS", cpu="68080", kickstart="51.51")
+    fake.answers["Version"] = (0, "Kickstart 51.51, Workbench 40.0\n")
+    fake.answers["CPU"] = (0, "")  # no parseable chip token — the live failure mode
+    facts = server._system_facts()
+    assert facts["os"] == "ApolloOS"
+    assert facts["processor"] == "68080 with FPU" and facts["fpu"] == "FPU"
+    assert "emulation" not in facts.get("note", "")
+
+
 def test_status_on_a_bare_68040_says_what_is_missing(on):
     on(amiga(A4000_040_BARE, "68040"))
     facts = server._system_facts()

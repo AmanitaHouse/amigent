@@ -251,7 +251,7 @@ def test_the_c_detection_reads_only_exec_and_never_the_board_register():
 
 
 def test_apolloos_and_aros_are_not_taken_for_amigaos_4():
-    from amigent.system import describe_system, native_ppc
+    from amigent.system import describe_system, native_ppc, reconcile_system
 
     apollo = describe_system("Kickstart 51.16, Workbench 51.1\n", "System: 68080 68882\n")
     assert apollo["os"] == "ApolloOS" and not native_ppc(apollo)
@@ -265,3 +265,22 @@ def test_apolloos_and_aros_are_not_taken_for_amigaos_4():
     assert os4["os"] == "AmigaOS 4" and native_ppc(os4)
     unknown = describe_system("Kickstart 53.30\n", "")
     assert unknown["os"] == "AmigaOS 4"
+
+
+def test_v4_sysinfo_corrects_amigaos4_when_cpu_text_is_empty():
+    """Session A capture: Version gave Kickstart 51.51 / WB 40.0, CPU text did not
+    yield a 68k chip token, so describe_system chose AmigaOS 4 and skipped FPU.
+    Daemon SYSINFO already had ApolloOS / 68080 / attn_flags=42111."""
+    from amigent.system import describe_system, describe_fpu, native_ppc, reconcile_system
+
+    version = "Kickstart 51.51, Workbench 40.0\n"
+    mislabelled = describe_system(version, "")
+    assert mislabelled["os"] == "AmigaOS 4" and native_ppc(mislabelled)
+    info = {"os": "ApolloOS", "cpu": "68080", "attn_flags": "42111", "kickstart": "51.51"}
+    fixed = reconcile_system(mislabelled, info)
+    assert fixed["os"] == "ApolloOS" and fixed["cpu"] == "68080"
+    assert not native_ppc(fixed)
+    assert describe_fpu(42111, fixed["cpu"]).line() == "68080 with FPU"
+    # Real AmigaOS 4 SYSINFO must not be rewritten
+    os4 = describe_system("Kickstart 54.30\n", "System: PowerPC 7447\n")
+    assert reconcile_system(os4, {"os": "AmigaOS 4", "cpu": "PowerPC"})["os"].startswith("AmigaOS 4")

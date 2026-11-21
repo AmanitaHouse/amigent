@@ -280,3 +280,12 @@ def test_the_levels_tool_says_when_the_helper_is_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "AMIGA", tmp_path)
     with pytest.raises(AmigaError, match="amigent-levels.c"):
         server.amiga_audio_levels()
+
+
+def test_a_steady_level_is_called_a_held_value():
+    """An AmiGUS mini kept left at 3973 in silence after playback; that is no sound."""
+    held = "CARD\tAmiGUS mini\t00A00100\n" + "S\t3973\t1\n" * 20 + "TICKS\t100\n"
+    text = amigus.levels(held, 2, 10, True)
+    assert text.splitlines()[1].endswith("steady, probably a held value and not sound")
+    assert text.splitlines()[2].endswith("silent")
+    assert "measure once in silence" in text

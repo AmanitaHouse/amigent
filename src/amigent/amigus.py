@@ -285,13 +285,24 @@ def levels(text: str, seconds: float, hz: int, peak: bool) -> str:
     name = card[0] + (f" (PCM part at ${card[1].upper()})" if len(card) > 1 else "")
     out = [f"{name}: {len(samples)} samples at {hz} Hz{took}, "
            f"{'peak' if peak else 'average'} of each interval, of full scale 32767"]
+    held = False
     for name, vals in (("left", left), ("right", right)):
+        state = "silent"
+        if max(vals) > QUIET:
+            # Sound moves. A level that stays put over many samples is a value the card holds
+            # (seen on an AmiGUS mini after playback ended), not something playing.
+            steady = len(vals) >= 5 and max(vals) - min(vals) <= max(8, max(vals) // 200)
+            state = "steady, probably a held value and not sound" if steady else "sound"
+            held = held or steady
         out.append(f"{name:5} max {max(vals):5} {_db(max(vals))}, mean {sum(vals) // len(vals):5} "
-                   f"{_db(sum(vals) // len(vals))}, {'sound' if max(vals) > QUIET else 'silent'}")
+                   f"{_db(sum(vals) // len(vals))}, {state}")
     out.append("series in % of full scale (left/right):")
     row = [f"{a * 100 // 32767}/{b * 100 // 32767}" for a, b in zip(left, right)]
     for i in range(0, len(row), 20):
         out.append(f"  {i / hz:5.1f} s  " + " ".join(row[i:i + 20]))
     if "MODE" in info:
         out.append(info["MODE"])
+    if held:
+        out.append("A steady level can stay after playback has ended; measure once in silence and "
+                   "compare, or look for a level that moves.")
     return "\n".join(out)

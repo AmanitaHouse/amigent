@@ -73,10 +73,12 @@ On Windows, Amigent finds the `openssl` that comes with Git for Windows. `AMIGEN
 switches encryption off for a test.
 
 **A second computer says amigentd takes only encrypted connections.**
-That Amiga was set up for TLS only. Copy the files for it from
-`~/.config/amigent/` on the computer that set it up (the key and
-`tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
-there again with `amigentd SETUP` running.
+That Amiga was set up for TLS only. Copy its key and certificate from
+`~/.config/amigent/` on the computer that set it up (`key-<id>` and
+`tls-<id>.pem`, the ID is in `amigas.json` there) to the same folder on the
+other one, named `key-<address>` and `tls-<address>.pem`, then run
+`amigent-fleet --add NAME ADDRESS` there. Or run `amigent-setup` there again
+with `amigentd SETUP` running.
 
 **Amigent says AmiSSL does not open on the Amiga.**
 amigentd runs `TLSONLY`, and without AmiSSL it has no encrypted port, so it
@@ -112,6 +114,9 @@ choose the default, edit its address or remove it. A single MCP server can
 operate both: ask the agent to list your Amigas,
 then name the machine or machines in your request. Tools take an explicit
 `machine` argument, so connections and installation records stay separate.
+Without one they use the default. With two or more Amigas saved,
+`amigent-viewer` without a name opens **Your Amigas**; see
+[Several Amigas](GUIDE.md#several-amigas).
 
 **The Amiga got a new address.**
 Nothing to do: Amigent searches the home network and takes the Amiga with your
@@ -242,7 +247,7 @@ WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.
 
 **"amigentd refused the key" or "amigentd wants a key".**
-The key on the PC (in `~/.config/amigent/`, or `AMIGENT_KEY`) must
+The key on the PC (`key-<id>` in `~/.config/amigent/`, or `AMIGENT_KEY`) must
 match `S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
 again with `amigentd SETUP` running. Deleting `S:amigent.key` switches the key
 off.

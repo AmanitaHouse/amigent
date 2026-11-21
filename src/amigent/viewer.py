@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines, roster, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import Commands, pc_outdated
+from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
 from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -353,6 +353,9 @@ class Viewer:
                 ppc = ppc_software(lambda c: self._ctl(lambda: _rc_out(self.ctl.exec(c))))
                 if ppc:
                     self._system["ppc"] = ppc
+            daemon = re.search(r"amigentd (\d[\w.]*)", self._ctl(lambda: self.ctl.exec("Version C:amigentd").output) or "")
+            if daemon:
+                self._system["amigentd"] = daemon.group(1)
         info = self._ctl(self.ctl.sysinfo)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
@@ -361,7 +364,15 @@ class Viewer:
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
-                "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
+                "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0))),
+                "link": self.link()}
+
+    def link(self) -> dict:
+        """How the picture travels, for the page's Connection tab: no round trip needed."""
+        protocol = int(getattr(self.screen, "protocol", 0) or 0)
+        return {"port": getattr(self.screen, "port", 0), "protocol": protocol,
+                "tls": hasattr(getattr(self.screen, "_sock", None), "version"),
+                "amiga_outdated": 0 < protocol < NEWEST_PROTOCOL}
 
     def _answers(self) -> bool:
         """Is the Amiga there? Asked on the command line, which leaves the screen alone."""

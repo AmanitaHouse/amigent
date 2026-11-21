@@ -174,13 +174,13 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 ## What can run without disturbing production
 
-**Without V4:** D1, packaging/hash verification, offline binary checks, report template dry-run, this preflight.
+**Without V4:** D1, packaging/hash verification, offline binary checks, report template dry-run, this preflight, Stage 2 plan docs.
 
-**With V4 after inventory approval only:** Stage 1 read-only collection above.
+**Stage 1 (done):** see `docs/APOLLO_V4_STAGE1_INVENTORY_RESULTS.md`.
 
-**With V4 after Stage 2 approval (second PORT, production still up):** A3/B1/B2/B4/B5/C1/C3/C4/C5/D2/D5/D8 on candidate — **expect missing hooks** on the non-owner; re-check production after each stop.
+**Stage 2A / 2B / 3:** see **`docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`**. Default for protocol-6 candidates is an **exclusive** QUIT → non-`C:` candidate → restore `C:amigentd` session. Second-PORT twins remain caveated (hooks / AUDIO / monitor) and are not the Stage 2B baseline.
 
-**Exclusive / separate authorisation:** A4, A5, B3, C2 SETUP writes, D3, **D4 AUDIO**, **D6 monitor**, D7 HRTmon, E1–E2, E4, `amigent-setup --update`, overwrite `C:amigentd`, ALLOWPOKE, live SAGA writes.
+**Exclusive / separate authorisation:** Stage 2B interruption; Stage 3 AUDIO / monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 
 ## Maintainer-facing explanation (draft — do not post yet)
 

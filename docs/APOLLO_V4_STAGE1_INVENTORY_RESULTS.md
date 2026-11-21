@@ -76,10 +76,7 @@ Public ports list includes `AMIGENT`. Task list includes `amigentd`, `amigentd r
 - PC client connection closed after inventory; no remote shutdown.
 - Production daemon answered a second read-only `sysinfo()` before disconnect.
 
-## Recommended Stage 2 arrangement (not authorised yet)
+## Next step
 
-1. Treat production as a **known-good protocol-5** ApolloOS install with `audio=1` / `pip=0`.
-2. Prefer an **exclusive session** for any candidate protocol-6 daemon (F-DAE / U-DAE), or a second `PORT` only for TCP/SYSINFO with hook caveats — do not run concurrent AUDIO.
-3. Before exclusive replacement: obtain a PC-side copy/hash of `C:amigentd` (or the path used at boot) via an **approved** read of a known path, since `self=` is unavailable on this build.
-4. Keep F-DAE and U-DAE results in separate report rows.
-5. Re-approve before any Stage 2 contact.
+Stage 2 preparation: **`docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md`**.  
+Await **Stage 2A** authorisation before another V4 connection.

@@ -65,12 +65,28 @@
     {"id": "E3", "area": "recovery", "risk": "L2", "approval": "stage2-port", "v4": true},
     {"id": "E4", "area": "recovery", "risk": "L3", "approval": true, "v4": true}
   ],
+  "stage1_observed": {
+    "machine": "V4SA",
+    "protocol": 5,
+    "tls": true,
+    "os": "ApolloOS",
+    "board_name": "V4-SA",
+    "self_path": null,
+    "evidence": "amigent-evidence/stage1-inventory/20261121T005910Z"
+  },
+  "stage2": {
+    "plan_doc": "docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md",
+    "2A": "read-only C:amigentd + User-Startup identification; V4-to-PC backup",
+    "2B": "exclusive QUIT; candidate from non-C path; restore C:amigentd",
+    "stop_arexx": "ADDRESS AMIGENT QUIT",
+    "avoid": "amigent-setup --update / Amigent-Update for candidate loads"
+  },
   "concurrent_daemon": {
     "tcp_second_port": "supported with caveats",
     "shared_hooks_semaphore": "amigent hooks 1 — single owner",
     "audio_concurrent": "not established safe",
     "monitor_port": "Amigent.monitor — single consumer",
-    "verdict": "Stage2 TCP/SYSINFO only on unused PORT; AUDIO/monitor/hooks features exclusive"
+    "verdict": "Stage 2B exclusive by default; Stage 3 for AUDIO/monitor"
   },
   "ports_from_docs": {
     "default_daemon_port": 6801,

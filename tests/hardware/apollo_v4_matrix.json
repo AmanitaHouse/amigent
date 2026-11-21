@@ -419,7 +419,7 @@
     },
     "apollo_monitor": "NOT_RUN",
     "HRTmon": "NOT_RUN",
-    "live_MMIO": "PASSED_ON_HARDWARE Stage 4 D2 — 3 protected PEEK refuses + 2 safe controls on F-FORKSAFE 00443719… — docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
+    "live_MMIO": "BOUNDED_D2_ONLY — three protected-window PEEK refuses on HW ($DFF3FC/2, $DFF1F4/2, $DFF400/2); NOT full MMIO/POKE/monitor — docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
     "installer_update_fallback": "NOT_RUN",
     "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
     "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
@@ -450,7 +450,7 @@
     "stage4_status": "d2_executed_pass",
     "upstream_1_5_0_public": "NOT_PUBLISHED — no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
     "stage4": {
-      "status": "d2_mmio_peek_refuse_passed",
+      "status": "d2_reconciled_protected_refuse_validated",
       "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
       "d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
       "d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
@@ -461,16 +461,27 @@
       "d2_production_restored": true,
       "authorised_next": false,
       "remaining": [
+        "other MMIO windows",
         "POKE/ALLOWPOKE D3",
         "monitor D6",
         "HRTmon D7",
         "TRACE on 68080"
-      ]
+      ],
+      "d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
+      "d2_control_class": "out_of_authorised_scope_rom_and_vector",
+      "d2_protected_claim": "three_addresses_only",
+      "go_gate": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md#formal-go--no-go-gate-mandatory-for-any-stage-4-hardware-session"
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
     "stage4_d2_evidence": "amigent-evidence/stage4-d2-mmio/20261121T060119Z",
     "stage4_d2_protected_peeks": 3,
-    "stage4_d2_control_peeks": 2
+    "stage4_d2_control_peeks": 2,
+    "d2_protected_window_peek_refuse": "PASSED_ON_HARDWARE — D2-P1..P3 only ($DFF3FC, $DFF1F4, $DFF400 width 2) — docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
+    "d2_other_mmio_windows": "NOT_TESTED_ON_HARDWARE",
+    "d2_system_rom_control_reads": "EXECUTED — D2-C1 $F80000/4 ROM and D2-C2 $00000004/4 vector/ExecBase slot; successful reads but OUTSIDE original authorised control class (test-owned allocated RAM) — docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
+    "POKE_ALLOWPOKE": "NOT_TESTED",
+    "TRACE_68080": "NOT_TESTED",
+    "stage4_d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md"
   }
 }

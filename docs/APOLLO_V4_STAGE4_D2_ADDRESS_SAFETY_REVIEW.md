@@ -1,6 +1,6 @@
 # Apollo V4 Stage 4 D2 — MMIO PEEK address safety review
 
-**Decision: GO**  
+**Decision: GO** *(historical — issued 2026-11-21; see erratum)*  
 **Date:** 2026-11-21  
 **Fork `main` reference:** `d90d282b5276f746da96504f0e70950764caa6d6`  
 **Docs branch:** `validation/apollo-v4-evidence-prep`  
@@ -8,6 +8,10 @@
 **Candidate size / SHA-256:** **129944** / `004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c`
 
 Offline only until this document’s frozen operation list is executed under Phase B. No POKE, TRACE, monitor, HRTmon, or AUDIO in D2.
+
+### Erratum (post-test reconciliation)
+
+The original user authorisation limited optional controls to **test-owned allocated RAM** (or an equivalent explicitly authorised benign class). This GO incorrectly treated Kickstart ROM `$F80000` and vector/ExecBase slot `$00000004` as approved controls because `peek_allowed` permits them. That was a **governance error**. Hardware later executed those controls; they must not be retroactively labelled compliant. See `docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md`. Protected-window refuse cases (D2-P1…P3) are unaffected.
 
 ## Source → binary provenance
 

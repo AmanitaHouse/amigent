@@ -73,32 +73,38 @@ Client `feature_opcode` may expose POKE on proto 6 without checking `poke=1`; th
 
 ## Highest-priority remaining risks
 
-1. **Live MMIO refuse unproven** — software windows ≠ V4 hardware proof.  
+1. **Remaining MMIO windows unproven on HW** — only three D2 addresses refused live; other windows still software-only.  
 2. **ALLOWPOKE / POKE** — can crash or corrupt if misused; L4.  
 3. **TRACE on 68080** — implemented, not hardware-claimed.  
 4. **Monitor exclusivity / Intuition load** — shared `Amigent.monitor` port; drawing stalls.  
 5. **HRTmon** — interactive takeover; ROM path correctly blocked in software only.  
-6. **Upstream 1.5.0 still private** — no public branch/tag to re-diff against.
+6. **Upstream 1.5.0 still private** — no public branch/tag to re-diff against.  
+7. **GO-gate discipline** — D2 offline GO wrongly treated ROM/vector as test-owned RAM controls (reconciled).
 
-## Proposed next bounded hardware milestone (not authorised)
+## Formal GO / NO-GO gate (mandatory for any Stage 4 hardware session)
 
-**Stage 4 Phase 1 — Live PEEK refuse into one protected SAGA window (plan D2).**
+A GO may **not** be issued merely because an address “looks readable” or is permitted by `peek_allowed`.
 
-| Field | Proposal |
-|-------|----------|
-| Goal | Prove daemon refuses a PEEK that overlaps an Apollo MMIO window on real V4 |
-| Candidate | Staged **F-FORKSAFE** `00443719…` (already HW-proven for AUDIO; contains `apollo_mmio`) — or U-DAE `456fce26…` if contribution-lineage preferred; **one** binary only |
-| Provenance | Exact SHA-256 read-back before QUIT; size 129944 for F-FORKSAFE |
-| Mode | Exclusive: QUIT production → launch `… TLSONLY` → test → QUIT → restore `C:amigentd TLSONLY` |
-| ALLOWPOKE | **Off** |
-| Max operations | ≤ **3** PEEK attempts into a single documented window (e.g. `$DFF3FC` length 2) + ≤ **2** control PEEKs of safe Kickstart/ROM or known RAM for contrast |
-| Expected | Protected-window PEEK returns status fail / refuse text; **no** claimed register side effects; control PEEK may succeed |
-| Stop conditions | Unexpected success reading a window; daemon hang; TLS loss; any POKE/TRACE/HRTmon/monitor launch; second daemon; ambiguity of restore |
-| Console | Shell ready with restore command before QUIT |
-| Evidence | SHA-256s, refuse texts, SYSINFO `poke=0`, pre/post production proto 5 SYSINFO ×2 |
-| Out of scope | POKE, TRACE, monitor binary, HRTmon Run, AUDIO, PIP, install/update |
+Before GO, record written confirmation that:
 
-**Deferred (higher risk):** D3 POKE-with-ALLOWPOKE refuse; D6 monitor launch; D7 HRTmon program start — each needs separate approval.
+1. Every proposed operation is compared to the **user-authorised address class** for that session.  
+2. Each exact address and access width is independently reviewed against source.  
+3. Every proposed operation fits the approved scope (no silent widening).  
+4. **ROM, vectors, ExecBase-at-4, or other system memory must not substitute** for “test-owned allocated RAM” without **new** explicit user authorisation.  
+5. The frozen operation list matches that approved scope exactly.  
+6. Any unresolved eligibility difference → **mandatory NO-GO**.
+
+D2 post-test finding: offline GO incorrectly approved `$F80000` and `$00000004` as controls; reconciled in `docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md`.
+
+## Stage 4 D2 status (after HW + reconciliation)
+
+| Item | Status |
+|------|--------|
+| Protected-window PEEK refuse (3 named addresses) | **PASSED ON HARDWARE** |
+| Control peeks (ROM / vector) | **EXECUTED** — out-of-class vs original auth |
+| Remaining windows / POKE / TRACE / monitor / HRTmon | **NOT TESTED** |
+
+**Deferred (higher risk; separate approval):** D3 POKE-with-ALLOWPOKE refuse; D6 monitor launch; D7 HRTmon program start; TRACE on 68080.
 
 ## Upstream 1.5.0 public status (audit date 2026-11-21)
 

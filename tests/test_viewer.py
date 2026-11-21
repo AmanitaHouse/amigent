@@ -126,6 +126,31 @@ def test_no_running_viewer_without_state(monkeypatch, tmp_path):
     assert viewer.running_viewer("192.168.1.50") is None
 
 
+# Texts of the 1.5.0 redesign that wait for their translation: English fills in until then.
+# Every other text must be in every language; German is always complete.
+AWAITING_TRANSLATION = {
+    "about_tab_amiga", "about_tab_link", "about_version", "advanced", "amiga_outdated",
+    "appearance", "combo_tip", "cursor", "esc_leaves", "exists_title", "fleet_hint", "fleet_manage",
+    "fleet_rc", "fleet_restart_title", "game_mode", "game_mode_tip", "game_pill", "games", "get_go",
+    "get_pick", "hold_right_hint", "kb_direct", "kb_direct_tip", "key_alt", "key_ctrl", "key_del",
+    "key_down", "key_esc", "key_help", "key_lamiga_short", "key_left", "key_ramiga_short",
+    "key_return", "key_right", "key_shift", "key_tab", "key_up", "kickstart_n", "link_address",
+    "link_picture", "link_port", "link_protocol", "link_speed", "link_tls", "link_tls_off",
+    "link_tls_on", "machine_switch", "machines_connect_address", "machines_edit_title",
+    "machines_manage", "machines_none", "machines_overview", "machines_placeholder",
+    "machines_seen", "mem_detail", "menu_shortcuts", "menu_update", "more", "more_update",
+    "mouse_buttons", "mouse_pill", "next_key", "offline_try", "panel_hint", "panel_hint_mac",
+    "picture_live", "picture_paused", "rel_mouse", "replace", "sc_altgr", "sc_amiga",
+    "sc_amiga_mac", "sc_drop", "sc_esc", "sc_full", "sc_insert", "sc_lock", "sc_paste",
+    "sc_paste_mac", "sc_pgup", "sc_type", "sc_wheel", "sck_altgr", "sck_altgr_mac", "sck_amiga",
+    "sck_amiga_mac", "sck_drop", "sck_insert", "sck_lock", "sck_paste", "sck_paste_mac", "sck_pgup",
+    "sck_type", "sck_type_mac", "sck_wheel", "shell_break", "shell_eof", "shell_hint", "shortcuts",
+    "st_free", "st_link", "st_ping", "st_screen", "status_open", "tab_mouse", "tab_shell",
+    "theme_auto", "theme_dark", "theme_light", "type_keys", "type_keys_mac", "update_ready",
+    "upload_done", "upload_failed", "version_line", "version_pc", "workbench_n",
+}
+
+
 def test_every_language_has_every_text():
     import re
     from pathlib import Path
@@ -144,15 +169,39 @@ def test_every_language_has_every_text():
     assert used <= english.keys(), used - english.keys()
     script = (web / "ui.js").read_text(encoding="utf-8")
     codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))
-    assert {"en", "de"} <= codes
+    assert {"en", "de", "ru"} <= codes
+    assert AWAITING_TRANSLATION <= english.keys(), AWAITING_TRANSLATION - english.keys()
     for code in codes:
         texts = json.loads((web / "locales" / f"{code}.json").read_text(encoding="utf-8"))
-        # English fills gaps while new texts wait for their translation; German is always complete
         assert texts.keys() <= english.keys(), (code, texts.keys() - english.keys())
+        missing = english.keys() - texts.keys()
         if code == "de":
-            assert texts.keys() == english.keys(), english.keys() - texts.keys()
+            assert not missing, missing
+        assert missing <= AWAITING_TRANSLATION, (code, missing - AWAITING_TRANSLATION)
         for key, text in texts.items():
             assert set(re.findall(r"{\w+}", text)) == set(re.findall(r"{\w+}", english[key])), (code, key)
+
+
+def test_locale_catalogs_have_no_duplicate_keys():
+    import re
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
+    folder = web / "locales"
+    for path in sorted(folder.glob("*.json")):
+        seen = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped.startswith('"'):
+                continue
+            seen.append(json.loads(stripped.split('":', 1)[0] + '"'))
+        assert len(seen) == len(set(seen)), path.name
+        json.loads(path.read_text(encoding="utf-8"))
+    shared = (web / "ui.js").read_text(encoding="utf-8")  # the language list every page uses
+    codes = re.findall(r"\b([a-z]{2}): \"", shared.split("const LANGUAGES", 1)[1].split("};", 1)[0])
+    assert "ru" in codes
+    for code in codes:
+        assert (folder / f"{code}.json").is_file(), code
 
 
 def test_describe_system():
@@ -243,6 +292,45 @@ def test_reset_chord_waits_until_the_amiga_is_connected():
     assert seen["toasts"][-1] == ("toast", {"key": "restart_failed", "text": "the Amiga is not connected"})
 
 
+def test_exec_below_36_is_not_sent_the_reset_chord():
+    from amigent.errors import AmigaError
+
+    for version in ("34.5", "35.0"):
+        viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": version})
+        assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+        assert viewer.inputs.take() == []
+        text = seen["toasts"][-1][1]["text"]
+        assert seen["toasts"][-1][1]["key"] == "restart_failed"
+        assert "cannot ColdReboot()" in text and version in text
+
+
+def test_exec_36_without_reboot_still_submits_the_reset_chord():
+    from amigent.amigentd import reset_chord
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "36.16"})
+    assert seen["restart"] == 0
+    assert seen["flush"] == ["SYS:"] and seen["ring"] == 1
+    assert viewer.inputs.take() == reset_chord()
+
+
+def test_kickstart_below_36_is_not_sent_the_reset_chord():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {}, kickstart="34.1")
+    assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+    assert viewer.inputs.take() == []
+    assert "34.1" in seen["toasts"][-1][1]["text"]
+
+
+def test_an_ordinary_key_is_not_the_reset_chord():
+    viewer = Viewer("127.0.0.1", screen_port=1)
+    viewer.feed.ring = lambda: None
+    key = {"t": "key", "code": 0x45, "down": True, "q": 0}
+    viewer.submit(key)
+    assert viewer.inputs.take() == [key]
+
+
 def test_a_lost_connection_is_not_a_missing_reboot():
     from amigent.errors import AmigaError
 
@@ -311,3 +399,93 @@ def test_ppc_software_reads_only_version_strings():
     assert ppc_software(run) == "WarpOS powerpc.library 17.10"
     assert all(c.startswith("Version FILE ") for c in asked)
     assert ppc_software(lambda c: (20, "")) == ""
+
+
+def test_connection_reason_names_a_known_failure_and_drops_the_detail():
+    from amigent import tls
+    from amigent.viewer import connection_reason
+
+    assert connection_reason("amigentd at 10.0.0.5:6801 not answering: timed out") == "reason_timeout"
+    refused = ("amigentd at 10.0.0.5:6801 not answering: [WinError 10061] "
+               "No connection could be made because the target machine actively refused it")
+    assert connection_reason(refused) == "reason_refused"
+    windows_timeout = ("amigentd at amiga:6801 not answering: [WinError 10060] A connection "
+                       "attempt failed because the connected party did not properly respond "
+                       "after a period of time, or established connection failed because "
+                       "connected host has failed to respond")
+    assert connection_reason(windows_timeout) == "reason_timeout"
+    assert connection_reason("connection closed by amigentd") == "reason_closed_by_daemon"
+    assert connection_reason("amigentd stopped answering") == "reason_stopped_answering"
+    assert connection_reason("unexpected greeting b'HTTP/1.1 secret-key'") == "reason_unexpected_greeting"
+    assert connection_reason("refused the key hunter2") == "reason_key_refused"
+    assert connection_reason(tls.PLAIN_CLOSED_TEXT) == "reason_plain_closed"
+    assert connection_reason(tls.NO_TLS_TEXT) == "reason_no_tls"
+    mismatch = ("amigentd at 10.0.0.5:6801 not answering: [SSL: CERTIFICATE_VERIFY_FAILED] "
+                "certificate verify failed: self-signed certificate (_ssl.c:1006)")
+    assert connection_reason(mismatch) == "reason_tls_mismatch"
+    ambiguous = "Ambiguous TLS pin for 10.0.0.5. Save its verified certificate as tls-amiga-1.pem."
+    assert connection_reason(ambiguous) == "reason_pin_ambiguous"
+    leaked = "amigentd at 10.1.2.3:6801 not answering: [Errno 13] Permission denied: '/home/x/secret'"
+    assert connection_reason(leaked) == ""
+    assert connection_reason("<img src=x onerror=alert(1)>") == ""
+    assert connection_reason("AMIGENT_KEY=supersecret") == ""
+    assert connection_reason("") == ""
+    assert connection_reason("tile at 1,2: bad packed data") == ""
+
+
+def test_set_online_sends_a_key_to_the_page_and_the_raw_reason_to_the_terminal(capsys, monkeypatch):
+    from amigent.viewer import Viewer
+
+    monkeypatch.setattr("amigent.viewer.machines.name_of", lambda host: host)
+    viewer = Viewer.__new__(Viewer)
+    viewer.online = None
+    viewer.reason = ""
+    viewer.host = "amiga.local"
+    events = []
+    viewer.event = lambda kind, **fields: events.append((kind, fields))
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
+    assert events == [("online", {"online": False, "reason": "reason_timeout"})]
+    # the user's own terminal gets the whole text, address included
+    assert "the Amiga does not answer: amigentd at 10.0.0.8:6801 not answering: timed out" in \
+        capsys.readouterr().err
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
+    assert len(events) == 1
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: connection refused")
+    assert events[-1][1] == {"online": False, "reason": "reason_refused"}
+    viewer._set_online(False, "tile decoder blew up at /tmp/secret")
+    assert events[-1][1]["reason"] == ""
+    assert "tile decoder blew up" in capsys.readouterr().err
+    viewer._set_online(True)
+    assert events[-1] == ("online", {"online": True, "reason": ""})
+    assert "connected to amiga.local" in capsys.readouterr().err
+    viewer._set_online(True)
+    assert len(events) == 4
+
+
+def test_every_reason_key_has_its_text_in_every_language():
+    from pathlib import Path
+
+    from amigent.viewer import CONNECTION_REASONS
+
+    locales = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web" / "locales"
+    english = json.loads((locales / "en.json").read_text(encoding="utf-8"))
+    assert {k: english[k] for k in CONNECTION_REASONS} == CONNECTION_REASONS
+    for path in locales.glob("*.json"):
+        texts = json.loads(path.read_text(encoding="utf-8"))
+        assert all(texts.get(k) for k in CONNECTION_REASONS), path.name
+
+
+def test_page_shows_only_known_link_reasons():
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
+    script = (web / "viewer.js").read_text(encoding="utf-8")
+    shown = script.split("function shownLinkReason(key)", 1)[1].split("}", 1)[0]
+    assert "/^reason_[a-z_]+$/.test(key)" in shown and "UI.knows(key)" in shown
+    knows = (web / "ui.js").read_text(encoding="utf-8").split("function knows(key)", 1)[1].split("}", 1)[0]
+    assert "Object.hasOwn(EN, key)" in knows
+    show = script.split("function showState()", 1)[1].split("function showPaused(", 1)[0]
+    assert "shownLinkReason(reason)" in show
+    assert '$("overlay-text").textContent = message' in show
+    assert 't("offline")' in show
+    assert "innerHTML" not in show

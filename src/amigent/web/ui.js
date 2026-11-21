@@ -35,6 +35,7 @@
   const LANGUAGES = {
     en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
     fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
+    ru: "Русский",
   };
 
   function pickLanguage() {
@@ -62,6 +63,11 @@
     let text = TEXT[key] ?? EN[key] ?? key;
     for (const [name, value] of Object.entries(values)) text = text.replaceAll(`{${name}}`, value);
     return text;
+  }
+
+  // Whether English has this text at all: keys from outside the page are checked first.
+  function knows(key) {
+    return Object.hasOwn(EN, key);
   }
 
   // The Mac variant of a text where there is one ("tip" -> "tip_mac").
@@ -289,7 +295,7 @@
   }
 
   window.amigentUI = {
-    store, MAC, LANGUAGES, language, pickLanguage, ready, t, mac, translate,
+    store, MAC, LANGUAGES, language, pickLanguage, ready, t, knows, mac, translate,
     THEMES, setTheme, theme: () => store.get("theme", "auto"),
     toast, ask, menu, tabs,
   };

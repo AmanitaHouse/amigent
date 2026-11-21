@@ -1612,7 +1612,7 @@ def amiga_pause_screen(seconds: int = 300) -> str:
         left = _with_ctl(lambda: _session().ctl.pause_screen(seconds))
     except AttributeError:
         raise AmigaError("pausing the screen needs amigentd's command channel; run amigent-setup --update") from None
-    _session().screen.paused_until = time.monotonic() + left if left else 0.0
+    _session().screen.note_pause(left)
     return f"screen paused for {left} s; amiga_pause_screen(0) ends it" if left else "screen pause ended"
 
 
@@ -2064,6 +2064,27 @@ def amiga_key(combo: str) -> str:
     """Press a key or combination: 'return', 'esc', 'lamiga+n', 'ctrl+c', 'f1', 'help'."""
     _with_screen(lambda: _session().screen.press(combo))
     return f"pressed {combo}"
+
+
+@mcp.tool()
+def amiga_hrtmon() -> str:
+    """Load the HRTmon debugger resident on the Amiga, for the user at its keyboard.
+
+    This only loads it; never enter it. HRTmon is entered by its hotkey or an
+    NMI, and once entered it halts the whole system: the network and amigentd
+    stop, and Amigent loses this Amiga until someone at the Amiga's own keyboard
+    leaves the monitor. So never press its hotkey with amiga_key. HRTmon comes
+    from Aminet (dev/debug/HRTmon), not with the OS; if it is not installed the
+    reply says so.
+    """
+    from .hrtmon import LOADED, MISSING
+    ctl = _session().ctl
+    if _with_ctl(lambda: ctl.exec("Which >NIL: HRTmon")).rc != 0:
+        return MISSING
+    started = _with_ctl(lambda: ctl.exec("Run >NIL: HRTmon"))
+    if started.rc != 0:
+        raise AmigaError(f"HRTmon did not load: Run answered {started.rc}.")
+    return LOADED
 
 
 @mcp.tool()

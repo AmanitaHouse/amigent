@@ -214,6 +214,11 @@ folder on another disk, with the scripts, amigentd, the key, the certificate and
 the repair modules, to repair from when the first disk is gone; the Amiga
 remembers the folder, so later updates renew it without the option.
 
+`amigent-setup --update` never puts an older amigentd over a newer one: with the
+same version number the date in its version string decides, and a build of your
+own with the same number stays. `--force` replaces it anyway, for instance to go
+back to the released build.
+
 Either way key, certificate and the start line in `S:User-Startup` (`TLSONLY`
 included) stay, and so does the copy for `amigent-repair` in the scripts folder,
 which gets the new amigentd too. Should the new amigentd not start, the Amiga
@@ -256,6 +261,7 @@ starts the old one again.
 | `amiga_software_failure` | a Software Failure requester: its text, the guru in words, and Suspend (never Reboot) |
 | `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
 | `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
+| `amiga_hrtmon` | load HRTmon (Aminet dev/debug/HRTmon) for the user at the Amiga; entering it halts the system, so the agent never does |
 | `amiga_gurus` | guru codes in words, the last one and those MCP logged |
 | `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
 | `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |
@@ -518,8 +524,11 @@ or the close gadget ends it, C clears the log.
   on port 6802, and the PC accepts only the certificate `amigent-setup` made for
   that Amiga. Once that works, `amigent-setup` starts `amigentd` with `TLSONLY`:
   other computers then get in only encrypted (`--allow-plain` keeps the plain
-  port open). Without TLS the connection is unencrypted, and someone who can
-  read your network traffic could read the key too.
+  port open). Should AmiSSL or the certificate on the Amiga break, they don't
+  get in at all until it is mended at the Amiga; see
+  [PROTOCOL.md](PROTOCOL.md#tls) for how. Without TLS the connection is
+  unencrypted, and someone who can read your network traffic could read the key
+  too.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.
@@ -535,9 +544,10 @@ build, `DEVPACK Work:DevPack` points it to another DevPack folder. `scripts/make
 archive with LhA on the Amiga. Tests for the PC side: `python3 -m pytest -q`.
 
 A cross compiler on the PC works too: `m68k-amigaos-gcc -O2 -m68020 -noixemul -s
--o amigentd amiga/amigentd.c` (checked with GCC 16 from the
-`amigadev/crosstools:m68k-amigaos` Docker image; `-m68000` for the 68000
-build). The released binaries are vbcc's.
+-o amigentd amiga/amigentd.c` (GCC 16 from the `amigadev/crosstools:m68k-amigaos`
+Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's.
+The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
+whenever something in `amiga/` changes and keeps them as an artifact of the run.
 
 ## Translations
 

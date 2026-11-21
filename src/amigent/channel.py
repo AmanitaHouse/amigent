@@ -50,10 +50,7 @@ def pc_outdated(protocol: int) -> str:
     return (f"amigentd on the Amiga is newer than Amigent {__version__} on this PC. Update the PC "
             "side too: run \"pipx upgrade amigent\", then restart the AI app and the remote desktop.")
 PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
-PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost only
-PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
-                     "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
-                     "to this one, or run amigent-setup again.")
+PLAIN_CLOSED, PLAIN_CLOSED_TEXT = tls.PLAIN_CLOSED, tls.PLAIN_CLOSED_TEXT
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
@@ -262,8 +259,8 @@ class AmigaChannel(VolumeFlush):
             if self.protocol < CHANNEL_PROTOCOL:
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
-            if flags & PLAIN_CLOSED and not hasattr(self._sock, "version"):
-                raise AmigaError(PLAIN_CLOSED_TEXT)
+            if refused := tls.plain_closed(flags, hasattr(self._sock, "version")):
+                raise AmigaError(refused)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:

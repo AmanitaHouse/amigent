@@ -8,6 +8,8 @@ OS_NAMES = {47: "AmigaOS 3.2", 46: "AmigaOS 3.1.4", 45: "AmigaOS 3.9", 44: "Amig
             40: "AmigaOS 3.1", 39: "AmigaOS 3.0", 37: "AmigaOS 2.04", 36: "AmigaOS 2.0", 34: "AmigaOS 1.3"}
 # Kickstart 3.0 is exec 39. C:Reboot shipped with that Workbench.
 OS3_EXEC = 39
+# ColdReboot() arrived with Kickstart 2.0. Exec 34 and 35 do not have it.
+COLDREBOOT_EXEC = 36
 
 # PowerPC boards on a 68k Amiga bring one of these; Version FILE reads the version string
 # without opening the library, which without a board could stop at a requester.
@@ -25,16 +27,24 @@ def describe_system(version: str, cpu: str) -> dict:
     major = int(kick.group(1)) if kick else 0
     morphos = re.search(r"MorphOS(?: version)? ?(\d+\.\d+)?", version)
     os4 = re.search(r"AmigaOS 4(?:\.\d+)*", version)
+    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
+    ppc = re.search(r"\b(?:PowerPC|PPC)[ \w./-]*", cpu)
     if morphos:
         os_name = "MorphOS" + (f" {morphos.group(1)}" if morphos.group(1) else "")
     elif os4:
         os_name = os4.group(0)
+    elif re.search(r"\bApolloOS\b", version):
+        os_name = "ApolloOS"
+    elif re.search(r"\bAROS\b", version):
+        os_name = "AROS"
+    elif major >= 50 and not ppc and "68080" in chips:
+        os_name = "ApolloOS"  # exec 51 on a 68080; AmigaOS 4 runs on PowerPC
+    elif major >= 50 and not ppc and chips:
+        os_name = "AROS"  # exec 50 or later on a 68k CPU is not AmigaOS 4
     elif major >= 50:  # 50 and later are AmigaOS 4 (MorphOS says its name)
         os_name = "AmigaOS 4"
     else:
         os_name = OS_NAMES.get(major, f"Kickstart {major}" if major else "")
-    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
-    ppc = re.search(r"\b(?:PowerPC|PPC)[ \w./-]*", cpu)
     return {
         "os": os_name,
         "kickstart": f"{kick.group(1)}.{kick.group(2)}" if kick else "",
@@ -44,13 +54,29 @@ def describe_system(version: str, cpu: str) -> dict:
     }
 
 
+def _exec_major(version: str) -> int | None:
+    major = str(version).split(".", 1)[0]
+    return int(major) if major.isdigit() else None
+
+
 def exec_before_os3(version: str) -> bool:
     """True for an exec version older than 3.0, such as '37.175' (2.04).
 
     A blank or unreadable version is not treated as old.
     """
-    major = str(version).split(".", 1)[0]
-    return major.isdigit() and int(major) < OS3_EXEC
+    major = _exec_major(version)
+    return major is not None and major < OS3_EXEC
+
+
+def exec_coldreboot(version: str) -> bool:
+    """True when this exec has ColdReboot(), from 36 up, such as '36.16'.
+
+    A blank or unreadable version is not treated as having it. Exec 34 and
+    35 can still be handed the reset chord's key-downs; they do not reset,
+    and that chord never sends the key-ups.
+    """
+    major = _exec_major(version)
+    return major is not None and major >= COLDREBOOT_EXEC
 
 
 def native_ppc(facts: dict) -> bool:

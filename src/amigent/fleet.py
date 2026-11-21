@@ -28,7 +28,7 @@ from .amigentd import AmigentdError
 from .channel import Commands
 from .power import flush_volumes, reboot
 from .secret import FOLDER
-from .viewer import WEB, Viewer, open_window
+from .viewer import WEB, Viewer, open_window, status_free_bytes
 from .webserver import QuietServer, TokenHandler
 
 PREVIEW_EVERY = 20  # seconds between previews of one Amiga; the link has no cycles to waste
@@ -182,7 +182,7 @@ class Fleet:
                          "online": False if conflicts else e["online"],
                          "error": ("Address also assigned to " + ", ".join(conflicts)) if conflicts else e["error"],
                          "os": info.get("os", ""), "cpu": info.get("cpu", ""),
-                         "free": info.get("chip_free", 0) + info.get("fast_free", 0),
+                         "free": status_free_bytes(info.get("chip_free"), info.get("fast_free")),
                          "info": info, "seen": e["seen"], "preview": bool(e["preview"]),
                          "watching": bool(e["viewer"] and e["viewer"].clients)})
         return rows

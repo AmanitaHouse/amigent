@@ -23,6 +23,8 @@ import time
 from . import __version__, machines, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
+from .daemons import (CPU_68000, CPU_68020, CPU_68080, Machine, available_names, choose,
+                      consider_replacement, detect_cpu)
 from .errors import AmigaError
 from .legacy import (UNDO_ALLOW, allow_script, fetch_amigactld,  # noqa: F401 (allow_script: old address)
                      reach_amigactld, same_network, startup_script)
@@ -31,6 +33,7 @@ from .paths import AMIGA
 from .secret import new_key, own_key, save_key
 
 SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
+AFF_68080 = 1 << 10  # exec's AttnFlags bit for the 68080 (AFB_68080 10 in ApolloOS's cpu_m68k.h)
 
 
 def find_amiga() -> str | None:
@@ -53,21 +56,144 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
-def amigentd_build(link: Amigentd) -> str:
-    """amigentd.000 for a stock 68000/68010, amigentd for 68020 and up."""
-    code = link.run("CPU CHECK 68020")
-    if code not in (0, 5):
-        raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
+def apollo_os(info: dict | None = None, version_text: str = "") -> bool:
+    """ApolloOS, as opposed to AmigaOS on the same Vampire.
+
+    The public ApolloOS tree calls the system ApolloOS, its exec is version 51
+    and sets the 68080 attention bit. AmigaOS on a Vampire runs exec 40 to 47
+    and keeps the plain amigentd.
+    """
+    info = info or {}
+    if info.get("os") == "ApolloOS" or "ApolloOS" in (version_text or ""):
+        return True
+    try:
+        major = int(str(info.get("exec_version", "0")).split(".", 1)[0])
+    except ValueError:
+        major = 0
+    try:
+        flags = int(str(info.get("attn_flags", "0") or "0"), 0)
+    except ValueError:
+        flags = 0
+    return major >= 51 and bool(flags & AFF_68080)
+
+
+def _chosen(machine: Machine) -> str:
+    """The packaged daemon for ``machine``, or a stop when none can run there."""
+    chosen = choose(machine, available_names(AMIGA / "bin"))
+    if chosen is None:
+        raise SystemExit("this package has no compatible amigentd for this Amiga, so nothing was changed.")
+    return chosen.name
+
+
+def _machine(cpu: int | None, apollo: bool) -> Machine:
+    """ApolloOS only runs on a 68080; CPU CHECK 68020 tells no more than 68020 or better."""
+    if apollo and cpu is not None and cpu >= CPU_68020:
+        return Machine(CPU_68080, apollo=True)
+    return Machine(cpu)
+
+
+def select_build(cpu_rc: int, info: dict | None = None, version_text: str = "") -> str:
+    """amigentd.000 on a 68000, amigentd.apollo on ApolloOS, amigentd otherwise.
+
+    amigentd.apollo is optional. When this package does not contain it, an
+    ApolloOS machine gets the same amigentd a 68020 gets today.
+    """
+    if cpu_rc not in (0, 5):
+        raise SystemExit(f"C:CPU answered {cpu_rc}, so the CPU is unknown. Copy C:CPU from the "
                          "Workbench disk and try again.")
-    return "amigentd.000" if code == 5 else "amigentd"
+    cpu = CPU_68000 if cpu_rc == 5 else CPU_68020
+    return _chosen(_machine(cpu, apollo_os(info, version_text)))
+
+
+def amigentd_build(link: Amigentd) -> str:
+    """The best packaged daemon that can run on this Amiga.
+
+    A missing 68020 build falls back to the 68000 build when that file is
+    packaged. An unknown CPU may take only the 68000 build on a fresh install.
+    ApolloOS is selected only when the probe says so and the Apollo daemon is
+    already in this package.
+    """
+    cpu = detect_cpu(link.run)
+    if cpu is None:
+        print("C:CPU did not say whether this is a 68020 or better (it may be missing), so the "
+              "68000 build of amigentd goes on; it runs on every Amiga. amigent-setup --update "
+              "--force puts the faster one on once C:CPU answers.")
+    apollo = cpu is not None and cpu >= CPU_68020 and _apollo_by_probe(link)
+    return _chosen(_machine(cpu, apollo))
+
+
+def build_for_channel(channel) -> str:
+    """The build an Amiga that already runs amigentd should get.
+
+    An unknown CPU keeps the installed daemon. A fresh install may still use the
+    68000 build, because there is no installed daemon to preserve.
+    """
+    cpu = detect_cpu(lambda command: channel.exec(command).rc)
+    if cpu is None:
+        raise SystemExit("the CPU could not be identified, so the installed amigentd was left in place.")
+    apollo = cpu >= CPU_68020 and _apollo_packaged() and _apollo_by_channel(channel)
+    return _chosen(_machine(cpu, apollo))
+
+
+def _apollo_packaged() -> bool:
+    """Only an Apollo build makes ApolloOS matter; without one nothing is asked."""
+    return (AMIGA / "bin" / "amigentd.apollo").is_file()
+
+
+def _apollo_by_channel(channel) -> bool:
+    """ApolloOS by what the running amigentd says, else exec's version text, else the probe."""
+    try:
+        info = channel.sysinfo() or {}
+    except (AmigaError, AttributeError):
+        info = {}
+    if _reported(info):  # a daemon that already described itself is trusted
+        return apollo_os(info)
+    try:
+        version_text = channel.exec("Version FULL exec.library").output
+    except (AmigaError, AttributeError):
+        version_text = ""
+    # The probe reads exec's version and AttnFlags. A probe that is missing or
+    # does not succeed leaves the classic choice in place.
+    return apollo_os({}, version_text) or apollo_os({}, _probe_output(channel))
+
+
+def _probe_output(channel) -> str:
+    """What the small ApolloOS probe printed, or '' when it cannot be run."""
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not probe.is_file():
+        return ""
+    try:
+        channel.write_file("T:amigent-apollo-probe", probe.read_bytes())
+        channel.exec("Protect T:amigent-apollo-probe +e")
+        return channel.exec("T:amigent-apollo-probe").output
+    except (AmigaError, AttributeError, OSError):
+        return ""
+
+
+def _reported(info: dict) -> bool:
+    return bool(info.get("os") or info.get("exec_version") or info.get("attn_flags"))
+
+
+def _apollo_by_probe(link: Amigentd) -> bool:
+    """SETUP only returns a program's exit code. 0 means the probe said ApolloOS.
+
+    A missing probe is an unsuccessful probe: the caller keeps the classic binary.
+    Without an Apollo build in the package the probe is not even sent.
+    """
+    probe = AMIGA / "bin" / "amigent-apollo-probe"
+    if not _apollo_packaged() or not probe.is_file():
+        return False
+    link.put("T:amigent-apollo-probe", probe.read_bytes())
+    link.run("Protect T:amigent-apollo-probe +e")
+    return link.run("T:amigent-apollo-probe") == 0
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
+    build = amigentd_build(link)
     if with_actld:
         binary = fetch_amigactld()
         print("uploading amigactld")
         link.put("C:amigactld", binary)
-    build = amigentd_build(link)
     print(f"uploading {build}")
     link.put("C:amigentd.new", (AMIGA / "bin" / build).read_bytes())
     run(link, f"MakeDir >NIL: {home}")
@@ -214,24 +340,38 @@ def update_windows(channel, home: str | None) -> None:
             return
 
 
-def update(host: str, home: str | None, spare: str | None = None) -> int:
+def update(host: str, home: str | None, spare: str | None = None, force: bool = False) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
     try:
         channel.connect()
-        cpu = channel.exec("CPU CHECK 68020").rc
-        if cpu not in (0, 5):
-            print(f"C:CPU answered {cpu}, so the CPU is unknown. Copy C:CPU from the Workbench "
-                  "disk and try again.")
+        try:
+            build = build_for_channel(channel)
+            new = (AMIGA / "bin" / build).read_bytes()
+        except SystemExit as e:
+            print(e)
+            channel.close()
             return 1
-        build = "amigentd.000" if cpu == 5 else "amigentd"
-        new = (AMIGA / "bin" / build).read_bytes()
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
         update_windows(channel, home)
-        if channel.read_file("C:amigentd") == new:
-            update_folders(channel, home, spare, new)
-            print(f"amigentd on {host} is already the one from Amigent {__version__}.")
+        try:
+            installed = channel.read_file("C:amigentd")
+        except AmigaError as e:
+            if e.code is None:
+                raise  # the line went dead; that says nothing about C:amigentd
+            installed = None  # the Amiga answered: there is no C:amigentd to read
+        if force and installed != new:
+            replace, reason = True, ""
+        else:
+            replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
+        if not replace:
+            # the scripts are renewed all the same; the folders get the amigentd that runs
+            update_folders(channel, home, spare, installed or new)
+            if installed == new:
+                print(f"amigentd on {host} is already the one from Amigent {__version__}.")
+            else:
+                print(reason)
             channel.close()
             return 0
         print(f"uploading {build} to {host}")
@@ -294,9 +434,13 @@ def main() -> int:
                         "key, repair modules), to repair from when the first is gone; remembered")
     parser.add_argument("--update", action="store_true",
                         help="replace the amigentd that already runs with this version's, by network")
+    parser.add_argument("--force", action="store_true",
+                        help="with --update: put this version's amigentd on even when the one there "
+                        "looks newer or is a build of its own")
     args = parser.parse_args()
     if args.update:
-        return update(machines.identity(machines.pick(args.host or "")), args.home, args.spare)
+        return update(machines.identity(machines.pick(args.host or "")), args.home, args.spare,
+                      args.force)
     args.home = args.home or "SYS:amigent"
     if args.serve:
         from .serve import serve

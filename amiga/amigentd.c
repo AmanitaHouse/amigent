@@ -6,7 +6,8 @@
  *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
- * TLSONLY: once the TLS port is up, the plain one talks to localhost only.
+ * TLSONLY: remote plaintext is refused whether or not the TLS port opened.
+ * Loopback stays open for the TLS pump, and SETUP keeps the plain port open.
  * NOTEXT, NODEBUG: don't record the text programs draw, or their debug output.
  * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
  * TLSONLY.
@@ -3187,11 +3188,20 @@ static void free_pictures(void)
     cconn = pconn = 0;
 }
 
-/* The screen client went away of itself (closed, broke off or fell silent)
- * and no newcomer took its place. */
+/* The screen client went away of itself (closed, broke off or fell silent).
+ * serve() may already be holding a newcomer that asked for the screen, and
+ * the failure of its first command is one way this is reached. Freeing here
+ * would drop the picture that newcomer still uses. With nobody waiting,
+ * free_pictures() releases both pictures and, unless the ZZ9000 has been
+ * given up, its mirror. */
 static void lose_client(void)
 {
+    LONG i;
+
     drop_client();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0 && pend[i].screen)
+            return;
     free_pictures();
 }
 
@@ -3384,11 +3394,13 @@ static void accept_pending(void)
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
     load_key();
-    locked = tls_only && tls_open && !setup_mode;
+    /* Operational TLSONLY closes remote plaintext whether or not the TLS
+     * port is listening. SETUP is only the operator's SETUP argument. */
+    locked = tls_only && !setup_mode;
     hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0);
     l.base = SocketBase;
     l.fd = fd;
-    /* TLSONLY: strangers get the hello, so they know where the door is, then out.
+    /* Strangers get the hello, so they know where the door is, then out.
      * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga. */
     if (!l_send(&l, hello, 8, HELLO_SECONDS) ||
         (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK))) {

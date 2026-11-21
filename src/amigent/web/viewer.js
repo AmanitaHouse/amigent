@@ -137,9 +137,15 @@
   let amigaOnline = null;
   let host = "";
   let address = "";
-  let reason = "";  // why the Amiga does not answer, as the PC side says it
+  let reason = "";  // why the Amiga does not answer: a reason_* key from the PC side
   let amiga = {};
   let stats = {};
+
+  // The PC side sends a key (reason_*) for why the Amiga does not answer; only
+  // keys the locales know are shown, anything else stays off the page.
+  function shownLinkReason(key) {
+    return /^reason_[a-z_]+$/.test(key) && UI.knows(key) ? t(key) : "";
+  }
 
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
@@ -173,7 +179,7 @@
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
     // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
-    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? reason
+    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? shownLinkReason(reason)
       : amigaOnline === null && address ? where() : "";
     $("offline-actions").hidden = !(socketOpen && amigaOnline === false);
     const up = socketOpen && amigaOnline;
@@ -194,6 +200,14 @@
     const m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, "0");
     if (seconds) $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
     $("about-picture").textContent = seconds ? t("picture_paused", { time: `${m}:${s}` }) : t("picture_live");
+  }
+
+  // null when SYSINFO did not send an integer. 0 is a real reading.
+  function knownBytes(value) {
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+    if (typeof value === "number") return Number.isInteger(value) && value >= 0 ? value : null;
+    if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return null;
+    return Number(value.trim());
   }
 
   function bytes(n) {
@@ -219,7 +233,9 @@
       toldOutdated = true;
       toast(t("pc_outdated"), true);
     }
-    const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
+    const chip = knownBytes(info.chip_free);
+    const fast = bytes(knownBytes(info.fast_free) ?? 0);
+    const memory = chip === null ? t("mem_fast_only", { fast }) : t("mem_line", { chip: bytes(chip), fast });
     $("about-system").textContent = systemLine(info) || "–";
     $("about-cpu").textContent = cpuLine(info) || "–";
     $("about-memory").textContent = memory;
@@ -236,7 +252,7 @@
       list.append(row);
     }
     if (!list.children.length) list.textContent = "–";
-    $("st-mem").textContent = bytes(info.chip_free + info.fast_free);
+    $("st-mem").textContent = bytes((chip ?? 0) + (knownBytes(info.fast_free) ?? 0));
     $("st-free").hidden = false;
     showLink();
     showState();

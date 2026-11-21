@@ -29,11 +29,12 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, roster, update
+from . import __version__, machines, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
-from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
+from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
+                     native_ppc, ppc_software)
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -41,6 +42,75 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
                         _Handler, _Server)
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
+
+# Why the Amiga does not answer, as a key the page translates (locales/*.json).
+# Anything not recognised becomes no reason on the page, so a greeting, a path or
+# an address never reaches it; the terminal that started the viewer gets the raw text.
+CONNECTION_REASONS = {
+    "reason_key_wanted": "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY.",
+    "reason_key_refused": ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+                           "must match S:amigent.key on the Amiga."),
+    "reason_closed_by_daemon": "amigentd closed the connection.",
+    "reason_stopped_answering": "amigentd stopped answering.",
+    "reason_unexpected_greeting": "The Amiga sent an unexpected greeting.",
+    "reason_timeout": "The Amiga did not answer in time.",
+    "reason_refused": "The Amiga refused the connection.",
+    "reason_unreachable": "The Amiga cannot be reached on the network.",
+    "reason_closed": "The connection to the Amiga was closed.",
+    "reason_unresolved": "The Amiga's address could not be resolved.",
+    "reason_plain_closed": tls.PLAIN_CLOSED_TEXT,
+    "reason_no_tls": tls.NO_TLS_TEXT,
+    "reason_no_certificate": tls.NO_CERT_TEXT,
+    "reason_tls_mismatch": "The Amiga's TLS certificate does not match the saved one; run amigent-setup again.",
+    "reason_pin_ambiguous": ("Two saved Amigas share this address and their TLS certificates differ; "
+                             "fix the address in Your Amigas or run amigent-setup again."),
+    "reason_machine_changed": "Machine changed; select it again in Your Amigas.",
+}
+
+
+def connection_reason(text: str) -> str:
+    """The key of a known connection failure in text, or '' when there is none."""
+    raw = text or ""
+    low = raw.lower()
+    if "only encrypted connections" in raw:
+        return "reason_plain_closed"
+    if "amissl does not open" in low:
+        return "reason_no_tls"
+    if "amigent-tls.pem does not load" in low:
+        return "reason_no_certificate"
+    if "certificate_verify_failed" in low or "certificate verify failed" in low:
+        return "reason_tls_mismatch"
+    if "ambiguous tls pin" in low:
+        return "reason_pin_ambiguous"
+    if "wants a key" in raw:
+        return "reason_key_wanted"
+    if "refused the key" in raw:
+        return "reason_key_refused"
+    if "connection closed by amigentd" in raw:
+        return "reason_closed_by_daemon"
+    if "stopped answering" in raw:
+        return "reason_stopped_answering"
+    if "unexpected greeting" in raw:
+        return "reason_unexpected_greeting"
+    if "not answering" not in raw:
+        return ""
+    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
+                                    "semaphore timeout")):
+        return "reason_timeout"
+    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
+        return "reason_refused"
+    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
+                                    "winerror 10065", "winerror 10051")):
+        return "reason_unreachable"
+    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
+                                    "broken pipe", "winerror 10054", "winerror 10053")):
+        return "reason_closed"
+    if any(part in low for part in ("name or service not known", "nodename nor servname",
+                                    "getaddrinfo", "no such host", "winerror 11001")):
+        return "reason_unresolved"
+    return ""
+
+
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
@@ -97,6 +167,42 @@ def ftxt_text(data: bytes) -> str:
     return b"".join(out).decode("iso-8859-1")
 
 
+def reported_bytes(info: dict, key: str) -> int | None:
+    """One SYSINFO byte count, or None when the daemon did not send it.
+
+    ``0`` and ``"0"`` are real readings. A missing key, a blank value and a
+    value that is not an integer are not.
+    """
+    if key not in info:
+        return None
+    raw = info[key]
+    if raw is None or isinstance(raw, bool) or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if not isinstance(raw, str) or not raw.strip().isdigit():
+        return None
+    return int(raw.strip(), 10)
+
+
+def counted_bytes(info: dict, key: str) -> int:
+    """``reported_bytes``, with a missing field read as ``0``.
+
+    Fast RAM and the totals still use this, so an older reply keeps its number.
+    """
+    value = reported_bytes(info, key)
+    return 0 if value is None else value
+
+
+def status_free_bytes(chip_free, fast_free) -> int:
+    """Available Chip RAM plus available Fast RAM.
+
+    An unreported Chip RAM reading adds nothing. A reported zero still does.
+    """
+    return counted_bytes({"chip_free": chip_free}, "chip_free") + counted_bytes(
+        {"fast_free": fast_free}, "fast_free")
+
+
 class Viewer:
     """Streams the screen to every open page and plays their input on the Amiga.
 
@@ -133,7 +239,7 @@ class Viewer:
                          alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
-        self.reason = ""  # why the Amiga does not answer, for the page and the terminal
+        self.reason = ""  # why the Amiga does not answer: a CONNECTION_REASONS key or ""
         self.ever_joined = False
         self.amiga: dict = {}
         self.screen_list: list = []
@@ -290,16 +396,18 @@ class Viewer:
     def retire(self):
         """An address edit or removal invalidates this connection, not its jobs' target."""
         self.enabled = False
-        self.event("online", online=False, reason="Machine changed; select it again in Your Amigas.")
+        self.reason = "reason_machine_changed"
+        self.event("online", online=False, reason=self.reason)
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
             self.ctl.close()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
-        if online != self.online:
+        shown = "" if online else connection_reason(reason)
+        if online != self.online or shown != self.reason:
             self.online = online
-            self.reason = "" if online else reason
+            self.reason = shown
             self.event("online", online=online, reason=self.reason)
             # stderr: the terminal that started amigent-viewer (stdout is the MCP server's protocol)
             stamp = time.strftime("%H:%M:%S")
@@ -359,19 +467,23 @@ class Viewer:
         info = self._ctl(self.ctl.sysinfo)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
-        number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
+        # chip_free stays None when SYSINFO omits it, so a page can tell a real
+        # zero from an older daemon. The other counts keep "missing means 0".
         return {**self._system, "tcp": info.get("bsdsocket", ""),
-                "chip_free": number("chip_free"), "chip_total": number("chip_total"),
-                "fast_free": number("fast_free"), "fast_total": number("fast_total"),
+                "chip_free": reported_bytes(info, "chip_free"),
+                "chip_total": counted_bytes(info, "chip_total"),
+                "fast_free": counted_bytes(info, "fast_free"),
+                "fast_total": counted_bytes(info, "fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0))),
                 "link": self.link()}
 
     def link(self) -> dict:
         """How the picture travels, for the page's Connection tab: no round trip needed."""
-        protocol = int(getattr(self.screen, "protocol", 0) or 0)
-        return {"port": getattr(self.screen, "port", 0), "protocol": protocol,
-                "tls": hasattr(getattr(self.screen, "_sock", None), "version"),
+        screen = getattr(self, "screen", None)  # a half-built viewer in tests has none
+        protocol = int(getattr(screen, "protocol", 0) or 0)
+        return {"port": getattr(screen, "port", 0), "protocol": protocol,
+                "tls": hasattr(getattr(screen, "_sock", None), "version"),
                 "amiga_outdated": 0 < protocol < NEWEST_PROTOCOL}
 
     def _answers(self) -> bool:
@@ -470,7 +582,7 @@ class Viewer:
         except (AmigaError, OSError, AttributeError) as e:  # AttributeError: amigactld only
             self.event("toast", key="pause_failed", text=str(e))
             return
-        self.screen.paused_until = time.monotonic() + left if left else 0.0
+        self.screen.note_pause(left)
         self.event("stats", kbps=0, rtt=round(self.rtt, 1), w=self.screen.width,
                    h=self.screen.height, paused=left)
         self.feed.ring()  # a resume wants a fresh look now, not in five seconds
@@ -500,14 +612,23 @@ class Viewer:
     def _restart(self) -> None:
         self.event("toast", key="restarting")
         try:
-            # Workbench 3.0 added C:Reboot. An older system still resets from
-            # the keyboard chord, which is what the viewer sends instead.
-            if self._reboot_missing() and exec_before_os3(self._exec_version()):
-                if not self.online:
-                    raise AmigaError("the Amiga is not connected")
-                self._ctl(lambda: self.ctl.flush(self.flush_volumes))
-                self._submit_reset_chord()
-                return
+            # Workbench 3.0 added C:Reboot. Exec 36, 37 and 38 still reset
+            # from the keyboard chord. Exec below 36 is not sent the chord:
+            # the three key-downs have no key-up, and ColdReboot() is absent,
+            # so the modifiers would stay down on a machine that does not reset.
+            # The daemon still requires the three keys inside five seconds.
+            if self._reboot_missing():
+                version = self._exec_version()
+                if exec_before_os3(version):
+                    if not exec_coldreboot(version):
+                        raise AmigaError(
+                            f"unsupported operation: exec {version} cannot ColdReboot() "
+                            "and has no C:Reboot")
+                    if not self.online:
+                        raise AmigaError("the Amiga is not connected")
+                    self._ctl(lambda: self.ctl.flush(self.flush_volumes))
+                    self._submit_reset_chord()
+                    return
             if self.restart:
                 self.restart()
             else:

@@ -27,7 +27,7 @@
         i.workbench && t("workbench_n", { version: i.workbench })].filter(Boolean).join(", ")],
       [t("about_cpu"), [i.cpu, i.fpu, i.ppc].filter(Boolean).join(" + ")],
       [t("about_memory"), i.chip_total ? t("mem_detail", {
-        chip: bytes(i.chip_free), chip_total: bytes(i.chip_total),
+        chip: i.chip_free == null ? "–" : bytes(i.chip_free), chip_total: bytes(i.chip_total),
         fast: bytes(i.fast_free), fast_total: bytes(i.fast_total) }) : ""],
       [t("about_network"), i.tcp ? `bsdsocket.library ${i.tcp}` : ""],
       ...(i.volumes || []).map((v) => [v.name + ":", t("free_of", { free: bytes(v.free), size: bytes(v.size) })]),

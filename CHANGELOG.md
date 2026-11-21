@@ -106,6 +106,7 @@ Versions follow [semver](https://semver.org). The number lives in
 - `amiga_hrtmon` loads the HRTmon debugger from Aminet for the user at the
   Amiga. The agent never enters it: that halts the system. (#37)
 - The remote desktop in Russian. (#35)
+- Greek and Turkish for the remote desktop and the overview.
 
 ### Thanks
 

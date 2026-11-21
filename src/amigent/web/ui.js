@@ -35,7 +35,7 @@
   const LANGUAGES = {
     en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
     fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
-    ru: "Русский",
+    ru: "Русский", el: "Ελληνικά", tr: "Türkçe",
   };
 
   function pickLanguage() {

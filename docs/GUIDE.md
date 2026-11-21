@@ -554,4 +554,4 @@ whenever something in `amiga/` changes and keeps them as an artifact of the run.
 Each language of the remote desktop is one file in
 [`src/amigent/web/locales`](../src/amigent/web/locales). Copy `en.json`,
 translate the values, keep the `{placeholders}` and add the language code to
-`LANGUAGES` in `viewer.js`. The tests report missing texts.
+`LANGUAGES` in `ui.js`. The tests report missing texts.

@@ -128,27 +128,7 @@ def test_no_running_viewer_without_state(monkeypatch, tmp_path):
 
 # Texts of the 1.5.0 redesign that wait for their translation: English fills in until then.
 # Every other text must be in every language; German is always complete.
-AWAITING_TRANSLATION = {
-    "about_tab_amiga", "about_tab_link", "about_version", "advanced", "amiga_outdated",
-    "appearance", "combo_tip", "cursor", "esc_leaves", "exists_title", "fleet_hint", "fleet_manage",
-    "fleet_rc", "fleet_restart_title", "game_mode", "game_mode_tip", "game_pill", "games", "get_go",
-    "get_pick", "hold_right_hint", "kb_direct", "kb_direct_tip", "key_alt", "key_ctrl", "key_del",
-    "key_down", "key_esc", "key_help", "key_lamiga_short", "key_left", "key_ramiga_short",
-    "key_return", "key_right", "key_shift", "key_tab", "key_up", "kickstart_n", "link_address",
-    "link_picture", "link_port", "link_protocol", "link_speed", "link_tls", "link_tls_off",
-    "link_tls_on", "machine_switch", "machines_connect_address", "machines_edit_title",
-    "machines_manage", "machines_none", "machines_overview", "machines_placeholder",
-    "machines_seen", "mem_detail", "menu_shortcuts", "menu_update", "more", "more_update",
-    "mouse_buttons", "mouse_pill", "next_key", "offline_try", "panel_hint", "panel_hint_mac",
-    "picture_live", "picture_paused", "rel_mouse", "replace", "sc_altgr", "sc_amiga",
-    "sc_amiga_mac", "sc_drop", "sc_esc", "sc_full", "sc_insert", "sc_lock", "sc_paste",
-    "sc_paste_mac", "sc_pgup", "sc_type", "sc_wheel", "sck_altgr", "sck_altgr_mac", "sck_amiga",
-    "sck_amiga_mac", "sck_drop", "sck_insert", "sck_lock", "sck_paste", "sck_paste_mac", "sck_pgup",
-    "sck_type", "sck_type_mac", "sck_wheel", "shell_break", "shell_eof", "shell_hint", "shortcuts",
-    "st_free", "st_link", "st_ping", "st_screen", "status_open", "tab_mouse", "tab_shell",
-    "theme_auto", "theme_dark", "theme_light", "type_keys", "type_keys_mac", "update_ready",
-    "upload_done", "upload_failed", "version_line", "version_pc", "workbench_n",
-}
+AWAITING_TRANSLATION: set[str] = set()  # keys added in English that other languages still lack
 
 
 def test_every_language_has_every_text():

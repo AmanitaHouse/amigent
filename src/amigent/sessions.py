@@ -37,6 +37,8 @@ class MachineSession:
         self.job_numbers = []
         self.self_path = {}
         self.gdb = {}
+        self.graphics = None  # graphics.Info once amiga_graphics has looked
+        self.slow_bus_told = False
 
 
     def refresh_address(self):
@@ -69,6 +71,8 @@ class MachineSession:
             self.gdb.pop("where", None)
         self.system_seen.clear()
         self.fpu = None
+        self.graphics = None
+        self.slow_bus_told = False
         self.others_seen.update(at=-1e9, text='', told='')
         self.last_shot = None
         self.last_look = 0.0

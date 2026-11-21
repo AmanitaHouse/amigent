@@ -207,6 +207,13 @@ Versions follow [semver](https://semver.org). The number lives in
   and codec. It reads amigus.library's records and reserves nothing. (#45)
 - `amiga_audio_levels` reads an AmiGUS card's left and right output level for
   a few seconds, with the small program `amigent-levels` on the Amiga. (#45)
+- `amiga_graphics` tells the graphics board: Picasso96 or CyberGraphX, the
+  card and chip driver with versions, the board's Zorro bus, and Warp3D and
+  MiniGL. `amiga_screen_modes` lists the Picasso96 screen modes with the colour
+  depths switched on, explains a missing mode, and switches single depths on or
+  off with a copy first and undo in one call. On a Zorro II card the remote
+  desktop asks for smaller pieces and looks less often. Boards other than
+  PiStorm and UAE are not tested. (#22)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

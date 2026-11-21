@@ -452,6 +452,18 @@ class Viewer:
             self.screen_list = listing
             self.event("screens", screens=listing)
 
+    def _graphics(self) -> str:
+        """The card's driver, and on a Zorro II card a gentler screen loop (#22)."""
+        from . import graphics
+        try:
+            loaded = memory.parse(self._ctl(self.ctl.loaded))
+            info = graphics.detect(loaded, lambda a, n: self._ctl(lambda: self.ctl.peek(a, n)))
+        except (AmigaError, AttributeError, TypeError, ValueError):
+            return ""  # amigentd before 1.4.0: the loop stays as it was
+        if feed := getattr(self, "feed", None):  # a half-built viewer in tests has none
+            feed.planner.slow_bus = info.slow_bus
+        return ", ".join(f"{c[0]} {c[1]}" for c in info.cards)
+
     def read_amiga(self) -> dict:
         """Facts about the Amiga that cost it well under a second to tell."""
         if not self._system:
@@ -476,6 +488,8 @@ class Viewer:
             self._system.update(fpu=fpu.short(), processor=fpu.line(), fpu_state=fpu.state(),
                                 fpu_cpu=fpu.cpu, fpu_chip=fpu.kind if fpu.state() == "chip" else "",
                                 fpu_library=fpu.library)
+        if "graphics" not in self._system:
+            self._system["graphics"] = self._graphics()
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
         # chip_free stays None when SYSINFO omits it, so a page can tell a real

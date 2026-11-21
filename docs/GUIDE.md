@@ -257,6 +257,7 @@ starts the old one again.
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
 | `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_graphics`, `amiga_screen_modes` | the graphics board: Picasso96 or CyberGraphX, card and chip driver with versions, the Zorro bus, Warp3D and MiniGL; the Picasso96 screen modes with the colour depths switched on, one switched on or off after a copy (`confirm=True`), undone in one call |
 | `amiga_amigus_status`, `amiga_audio_levels` | an AmiGUS card: which driver holds PCM, wavetable and codec, without reserving anything; its left and right output level over a few seconds |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
@@ -381,6 +382,27 @@ Before `amiga_run` starts a program on an Amiga without an FPU, or on a
 FPU instructions; on an Amiga without an FPU it does not start one that has
 them (`check_fpu=False` runs it anyway). This is a heuristic: a program may
 test for an FPU before using it.
+
+Graphics boards: `amiga_graphics` reads what is loaded (`rtg.library`,
+`cybergraphics.library`, the `.card` and `.chip` drivers, Warp3D and MiniGL),
+the graphics boards in expansion.library's list, and `Version FILE` of
+`LIBS:Warp3D.library` and `LIBS:minigl.library`. `amiga_screen_modes` reads
+`DEVS:Picasso96Settings` and shows each resolution with its depths;
+`need="640x480x32"` says why a program does not get a mode. Switching depths
+on or off (`action="on"` or `"off"`, `confirm=True`) first copies the file to
+`DEVS:Picasso96Settings.amigent-undo` (the first state also to
+`.amigent-orig`); `action="undo", confirm=True` puts it back, a second undo
+redoes. Picasso96 reads the file when it starts, so a change counts after a
+restart. With CyberGraphX the board is only recognised; modes are managed for
+Picasso96. On a card in a Zorro II slot every look at the screen reads the
+card over the slow bus, so the remote desktop asks for smaller pieces and looks
+less often there, and `amiga_screenshot` suggests a region; a ZZ9000 keeps its
+own encoder, and PiStorm, UAE and CPU-slot cards stay as they were. Tried with
+PiStorm's VideoCore and UAE's uaegfx. The ZZ9000, Picasso II and IV,
+CyberVision 64 and 64/3D, CyberVisionPPC, BlizzardVisionPPC, Merlin, Piccolo,
+Spectrum, Retina, Domino, Vampire SAGA, Mediator cards and CyberGraphX are not
+tested with this: their names come from the Zorro ID table and the driver
+names, and `amiga_graphics` says so.
 
 ## Remote desktop
 

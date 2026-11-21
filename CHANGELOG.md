@@ -90,6 +90,18 @@ Versions follow [semver](https://semver.org). The number lives in
 - `amiga_follow` copies into `follow/<id>/` in `~/.config/amigent/` by default,
   one folder per Amiga, instead of `follow/` itself. (#40)
 
+### Classic PiStorm
+
+- `amiga_pistorm` manages the original PiStorm emulator under Linux on the
+  Raspberry Pi over SSH, with your own key and the system's `ssh`; Amigent
+  stores no passwords. It shows how the emulator is started (systemd unit or
+  by hand) and which `.cfg` it reads, shows and changes that file with a copy
+  on the Pi and a one-call undo, restarts the emulator, reads its log, and
+  tells the Pi's temperature and under-voltage state. Read-only unless
+  `confirm=True`. `amigent-fleet --pi NAME ADDRESS` keeps the Pi with the
+  Amiga's entry. Untested on real hardware so far
+  ([#25](https://github.com/akustikrausch/amigent/issues/25)).
+
 ### Installing and updating
 
 - `amigent-setup` picks the amigentd build from a catalogue: the 68000 build

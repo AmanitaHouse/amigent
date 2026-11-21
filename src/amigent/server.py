@@ -2561,6 +2561,49 @@ def amiga_power(action: str) -> str:
     return f"power {action}"
 
 
+@mcp.tool()
+def amiga_pistorm(action: str = "status", text: str = "", file: str = "", lines: int = 100,
+                  pi: str = "", confirm: bool = False) -> str:
+    """The classic PiStorm emulator under Linux on the Amiga's Raspberry Pi, over SSH.
+
+    Not for Emu68, which has no Linux. Untested on real hardware so far.
+    The login uses the system's ssh with your own key (BatchMode, your
+    known_hosts); Amigent stores no passwords. Read-only unless confirm=True.
+
+    action: status (how the emulator runs, systemd unit or run script, which
+    .cfg it reads, the Pi's temperature and under-voltage state), config (show
+    the .cfg; file= another one), set_config (text= the whole new .cfg: without
+    confirm the difference only; with confirm a copy stays on the Pi first),
+    undo (puts the last copy back), restart (the way it was started), log
+    (its last lines), set_pi (pi='[user@]address' of the Pi, '' removes it).
+    """
+    from . import pistorm
+    action = action.strip().lower()
+    host = _session().host
+    if action == "set_pi":
+        if not confirm:
+            return f"set_pi would keep {pi or 'no Pi'} with this Amiga; confirm=True saves it"
+        entry = pistorm.set_pi(host, pi)
+        return f"{entry['name']}: Pi {entry.get('pi') or 'removed'}"
+    board = pistorm.Pi(host)
+    if action == "status":
+        return board.status()
+    if action == "config":
+        path, content = board.read_config(file)
+        return f"{path}:\n{content}"
+    if action == "set_config":
+        if not text.strip():
+            raise AmigaError("set_config needs text= the whole new .cfg (read it first with action='config')")
+        return board.write_config(text, file, confirm)
+    if action == "undo":
+        return board.undo(confirm)
+    if action == "restart":
+        return board.restart(confirm)
+    if action == "log":
+        return board.log(lines)
+    raise AmigaError("action must be status, config, set_config, undo, restart, log or set_pi")
+
+
 # ---- 1.3.0: text instead of pictures, steps in one call, waiting on the Amiga
 
 def _amiga() -> str:

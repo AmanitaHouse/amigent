@@ -3,6 +3,7 @@
 Usage: amigent-fleet                       open the overview
        amigent-fleet --add NAME ADDRESS     remember an Amiga
        amigent-fleet --remove NAME
+       amigent-fleet --pi NAME [USER@]ADDRESS   the Raspberry Pi of a classic PiStorm
        amigent-fleet --list
 
 Every Amiga gets a Viewer in this one process, so previews and remote desktop
@@ -350,6 +351,8 @@ def _main() -> None:
     parser.add_argument("--rename", nargs=2, metavar=("NAME", "NEW_NAME"))
     parser.add_argument("--default", metavar="NAME")
     parser.add_argument("--address", nargs=2, metavar=("NAME", "ADDRESS"))
+    parser.add_argument("--pi", nargs=2, metavar=("NAME", "PI"),
+                        help="[user@]address of the Raspberry Pi with the classic PiStorm emulator; '' removes it")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--run", metavar="COMMAND", help="run on every Amiga and compare")
     parser.add_argument("--port", type=int, default=int(os.environ.get("AMIGENT_FLEET_PORT", "6820")))
@@ -369,6 +372,10 @@ def _main() -> None:
         if args.default:
             machines.edit(args.default, make_default=True)
             return
+        if args.pi:
+            from .pistorm import set_pi
+            set_pi(*args.pi)
+            return
         if args.remove:
             if not machines.forget(args.remove):
                 parser.error(f"no Amiga called {args.remove}")
@@ -380,7 +387,7 @@ def _main() -> None:
         return
     if args.list or not amigas:
         for a in amigas:
-            print(f"{a['name']}\t{a['host']}")
+            print(f"{a['name']}\t{a['host']}" + (f"\tpi {a['pi']}" if a.get("pi") else ""))
         if not amigas:
             print("No Amigas yet: amigent-fleet --add NAME ADDRESS")
         return

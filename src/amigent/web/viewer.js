@@ -523,8 +523,13 @@ registerProcessor("amigent-pcm", AmigentPcm);
     playerQueue.length = 0;
     playerBoot = null;
     if (player) {
-      player.disconnect();
+      try { player.disconnect(); } catch (_) {}
       player = null;
+    }
+    if (audioCtx) {
+      const ctx = audioCtx;
+      audioCtx = null;
+      try { ctx.close(); } catch (_) {}
     }
     if (tell) send({ t: "audio", on: false });
   }

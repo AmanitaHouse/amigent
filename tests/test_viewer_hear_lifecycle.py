@@ -7,7 +7,7 @@ import pytest
 
 from amigent.channel import PLAIN_CLOSED
 from amigent.errors import AmigaError
-from amigent.viewer import Viewer, pcm_message
+from amigent.viewer import AUDIO_DRAIN_MAX, AUDIO_PCM_BUDGET, Viewer, pcm_message
 
 
 class Link:
@@ -18,6 +18,7 @@ class Link:
         self.stopped = 0
         self.closed = 0
         self.reads = []
+        self.read_calls = 0
 
     def connect_audio(self, *, tls):
         self.tls = tls
@@ -27,6 +28,7 @@ class Link:
         self.started += 1
 
     def audio_read(self):
+        self.read_calls += 1
         if not self.reads:
             return None
         item = self.reads.pop(0)
@@ -53,12 +55,10 @@ def _page():
     return viewer
 
 
-def test_hear_off_stops_and_releases():
+def test_hear_enable_and_disable_releases_once():
     viewer = _page()
     viewer.submit({"t": "audio", "on": True})
     link = Link()
-    # First chunk then keep reading until Hear OFF flips mid-loop via submit below.
-    # Drive one chunk, then turn off before next read returns.
     link.reads = [(48000, b"\x01\x00\x02\x00")]
 
     def between():
@@ -67,33 +67,45 @@ def test_hear_off_stops_and_releases():
 
     viewer._play_audio(link, between)
     assert link.started == 1 and link.stopped == 1 and link.closed == 1
+    assert viewer.hear is False
     assert ("audio", {"on": False}) in viewer.sent
-    assert not viewer.hear
 
 
-def test_daemon_end_marker_while_hearing_returns_without_stop():
-    """Current stock behaviour: end marker with Hear still on skips release."""
+def test_daemon_end_marker_clears_hear_and_stops():
     viewer = _page()
     viewer.submit({"t": "audio", "on": True})
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
-    assert viewer.hear is True
-    assert link.started == 1 and link.stopped == 0 and link.closed == 0
+    assert viewer.hear is False
+    assert link.started == 1 and link.stopped == 1 and link.closed == 1
 
 
-def test_media_like_loop_restarts_after_daemon_end():
-    """Simulates _media calling _play_audio again while Hear remains on."""
+def test_media_like_loop_does_not_restart_after_daemon_end():
     viewer = _page()
     viewer.submit({"t": "audio", "on": True})
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
-    assert viewer._hearing()
-    # Second entry as _media would do
-    link.reads = [(48000, b"\x05\x00\x06\x00"), None]
+    assert not viewer._hearing()
+    # _media would only call _play_audio again when _hearing(); simulate guard
+    if viewer._hearing() and viewer._audio_ready():
+        viewer._play_audio(link)
+    assert link.started == 1
+
+
+def test_user_can_restart_hear_after_complete_cleanup():
+    viewer = _page()
+    viewer.submit({"t": "audio", "on": True})
+    link = Link()
+    link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
-    assert link.started == 2  # silent restart — safety gap for HW UI sessions
+    assert viewer.hear is False
+    viewer.submit({"t": "audio", "on": True})
+    link2 = Link()
+    link2.reads = [(48000, b"\x05\x00\x06\x00"), None]
+    viewer._play_audio(link2)
+    assert link2.started == 1 and viewer.hear is False
 
 
 def test_tls_or_amiga_error_drop_requires_user_reclick():
@@ -103,9 +115,17 @@ def test_tls_or_amiga_error_drop_requires_user_reclick():
     link.reads = [AmigaError("TLS handshake failed")]
     with pytest.raises(AmigaError):
         viewer._play_audio(link)
-    viewer._drop_audio(link)
+    # _play_audio finally already cleared hear and released
     assert viewer.hear is False and link.closed == 1
     assert not viewer._hearing()
+
+
+def test_unsupported_audio_capability_clears_request():
+    viewer = _page()
+    viewer.amiga = {}
+    viewer.submit({"t": "audio", "on": True})
+    assert viewer._hearing() and not viewer._audio_ready()
+    assert viewer.hear is False
 
 
 def test_last_client_leave_clears_hear():
@@ -116,7 +136,65 @@ def test_last_client_leave_clears_hear():
     assert viewer.hear is False and not viewer._hearing()
 
 
+def test_drain_is_bounded():
+    viewer = _page()
+    viewer.submit({"t": "audio", "on": True})
+    link = Link()
+    # endless non-None reads during drain after stop
+    link.reads = [(48000, b"\x01\x00\x02\x00")]
+    # after first chunk, turn off so play loop exits into release drain
+    def between():
+        viewer.submit({"t": "audio", "on": False})
+        # flood drain
+        link.reads.extend([(48000, b"\x00\x00\x00\x00")] * (AUDIO_DRAIN_MAX + 20))
+
+    viewer._play_audio(link, between)
+    # one play read + at most AUDIO_DRAIN_MAX drain reads
+    assert link.read_calls <= 1 + AUDIO_DRAIN_MAX
+    assert link.stopped == 1 and link.closed == 1
+
+
+def test_aggregate_pcm_budget_stops_stream():
+    viewer = _page()
+    viewer.submit({"t": "audio", "on": True})
+    link = Link()
+    chunk = b"\x01\x00\x02\x00" * 256  # 1024 bytes
+    n = (AUDIO_PCM_BUDGET // len(chunk)) + 4
+    link.reads = [(48000, chunk)] * n
+    viewer._play_audio(link)
+    pcm_msgs = [m for m in viewer.sent if isinstance(m, (bytes, bytearray)) and m[:1] == b"\x05"]
+    total = sum(len(m) - 5 for m in pcm_msgs)
+    assert total <= AUDIO_PCM_BUDGET
+    assert viewer.hear is False and link.stopped == 1
+
+
+def test_repeated_start_stop_is_safe():
+    viewer = _page()
+    for _ in range(3):
+        viewer.submit({"t": "audio", "on": True})
+        link = Link()
+        link.reads = [(48000, b"\x01\x00\x02\x00"), None]
+        viewer._play_audio(link)
+        assert viewer.hear is False
+        viewer._drop_audio(link)  # repeated stop
+        assert link.closed >= 1
+
+
+def test_protocol5_without_audio_capability():
+    viewer = _page()
+    viewer.amiga = {"os": "AmigaOS", "audio": ""}
+    viewer.submit({"t": "audio", "on": True})
+    assert not viewer._audio_ready() and viewer.hear is False
+
+
 def test_pcm_message_framing_unchanged():
     pcm = b"\x01\x00\x02\x00" * 4
     msg = pcm_message(47931, pcm)
     assert msg[0] == 5 and struct.unpack(">I", msg[1:5]) == (47931,) and msg[5:] == pcm
+
+
+def test_page_stophear_closes_audiocontext_in_source():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src/amigent/web/viewer.js").read_text(encoding="utf-8")
+    assert "ctx.close()" in js
+    assert "audioCtx = null" in js

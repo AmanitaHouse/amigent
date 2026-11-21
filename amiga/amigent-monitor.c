@@ -50,7 +50,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char version[] = "$VER: amigent-monitor 1.4.0 (18.11.2026)";
+const char version[] = "$VER: amigent-monitor 1.5.0 (21.11.2026)";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
@@ -504,7 +504,7 @@ static void draw_head(void)
     SetFont(rp, font);
     text_at(x, y, mid, black, "agent link monitor", 18);
     x += 19 * fw;
-    strcpy(buf, "coded by " AUTHOR "  1.4.0");
+    strcpy(buf, "coded by " AUTHOR "  1.5.0");
     n = strlen(buf);
     if (W - 8 - n * fw < x)
         n = strlen(strcpy(buf, AUTHOR));

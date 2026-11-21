@@ -32,7 +32,8 @@ from pathlib import Path
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import PLAIN_CLOSED_TEXT, Commands, apollo_commands, audio_uses_tls, pc_outdated
+from .channel import (LOADED_PROTOCOL, PLAIN_CLOSED_TEXT, Commands, apollo_commands,
+                      audio_uses_tls, pc_outdated)
 from .daemons import describe_connected
 from .paths import AMIGA
 from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
@@ -49,6 +50,34 @@ STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
 # Hear streaming safeguards (product defaults — not the 10 s HW test cap).
 AUDIO_DRAIN_MAX = 64  # bounded end-marker / stop drain reads
 AUDIO_PCM_BUDGET = 8 * 1024 * 1024  # aggregate PCM broadcast per Hear session
+
+
+def apollo_machine(info: dict | None) -> bool:
+    """Same Apollo identity the Viewer page uses for memory/Hear labelling."""
+    if not info:
+        return False
+    if info.get("os") == "ApolloOS":
+        return True
+    return "68080" in str(info.get("cpu") or "")
+
+
+def hear_eligible(info: dict | None, *, connected: bool = True) -> bool:
+    """Whether stock Viewer Hear may be shown or start AUDIO.
+
+    Requires an active connection, Apollo identity (not protocol alone),
+    protocol ≥ 6, and SYSINFO ``audio=1``. Protocol 6 without Apollo stays hidden.
+    """
+    if not connected or not info:
+        return False
+    if not apollo_machine(info):
+        return False
+    try:
+        protocol = int(info.get("daemon_protocol") or 0)
+    except (TypeError, ValueError):
+        return False
+    if protocol < LOADED_PROTOCOL:
+        return False
+    return info.get("audio") == "1"
 
 # Shown as themselves. Anything else that fails the link stays the generic
 # "not answering" line, so a greeting, a path or an OS detail is not printed.
@@ -345,7 +374,12 @@ class Viewer:
             threading.Thread(target=self._pause, args=(seconds,), daemon=True).start()
             return
         if op.get("t") == "audio":
-            self.hear = op.get("on") is True
+            want = op.get("on") is True
+            if want and not hear_eligible(self.amiga, connected=self.online is True):
+                self.hear = False
+                self.event("audio", on=False)
+                return
+            self.hear = want
             return
         self.inputs.put(op)
         self.feed.ring()
@@ -357,6 +391,7 @@ class Viewer:
             raise ValueError("not an address")
         machines.move(self.host, new)
         self.hear = False
+        self.amiga = {}
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
@@ -368,6 +403,7 @@ class Viewer:
         if online != self.online:
             if not online:
                 self.hear = False
+                self.amiga = {}
             self.online = online
             self.reason = "" if online else connection_reason(reason)
             self.event("online", online=online, reason=self.reason)
@@ -406,11 +442,8 @@ class Viewer:
             return bool(self.hear and self.clients)
 
     def _audio_ready(self) -> bool:
-        """Whether SYSINFO offered AUDIO. A described machine without it drops the request."""
-        info = self.amiga or {}
-        if not info:
-            return False
-        if info.get("audio") == "1":
+        """Whether this connection may stream Hear (Apollo + protocol ≥ 6 + audio=1)."""
+        if hear_eligible(self.amiga, connected=self.online is True):
             return True
         if self.hear:
             self.hear = False

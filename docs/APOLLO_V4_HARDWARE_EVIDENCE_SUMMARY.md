@@ -35,7 +35,7 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  
-- Native Apollo probe **execution**  
+- Native Apollo probe **execution** (Stage 3A prepared — `docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md`; not yet run on V4)  
 - First-install automatic daemon selection  
 - Upgrade / fallback / Amigent-Update  
 - Fork-specific AMMX / live PIP picture paths  

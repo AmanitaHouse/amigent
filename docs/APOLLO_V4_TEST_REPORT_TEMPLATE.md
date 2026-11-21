@@ -15,7 +15,7 @@ Fill one report per test session. Mark every hardware row **NOT RUN** until exec
 | Test date (UTC) | |
 | Operator | |
 | Authorisation reference | _(inventory / stage2-port / L3–L4)_ |
-| Session stage | 1 inventory / 2A backup / 2B exclusive candidate / 3 Apollo features |
+| Session stage | 1 inventory / 2A backup / 2B exclusive candidate / 3A probe / 3 Apollo features |
 | Independent console confirmed? | yes / no — physical Shell required for 2B |
 | Candidate staged before production QUIT? | yes / no (2B runbook) |
 | Concurrent second PORT used? | yes / no — if yes, note hooks owner |

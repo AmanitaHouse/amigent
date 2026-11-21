@@ -123,7 +123,15 @@
     "F-DAE_protocol6": "PASSED_ON_HARDWARE",
     "U-DAE_AUDIO": "NOT_RUN",
     "F-DAE_AUDIO": "NOT_RUN",
-    "native_apollo_probe_execution": "NOT_RUN",
+    "native_apollo_probe_execution": "NOT_RUN — Stage 3A prepared; see docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md",
+    "stage3a": {
+      "status": "prepared_awaiting_authorisation",
+      "runbook": "docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md",
+      "concurrent_with_production": true,
+      "U-PRB_sha256": "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4",
+      "F-PRB_sha256": "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265",
+      "staging_dir_proposed": "Programs:AmiGent-Stage3A"
+    },
     "viewer_Hear_playback": "NOT_RUN",
     "apollo_monitor": "NOT_RUN",
     "HRTmon": "NOT_RUN",

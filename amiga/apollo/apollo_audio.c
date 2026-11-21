@@ -6,8 +6,6 @@
 #include <exec/libraries.h>
 #include <exec/execbase.h>
 #include <proto/exec.h>
-#include <proto/dos.h>
-#include <dos/dos.h>
 
 #include "apollo_audio.h"
 
@@ -266,94 +264,6 @@ static ULONG half_tag(const UBYTE *src, ULONG n)
     return t;
 }
 
-static void dump_follow(BPTR fh, ULONG p)
-{
-    UBYTE b[48];
-    ULONG n = 0, i;
-
-    Write(fh, &p, 4);
-    if (p > 0x1000UL && ram(p) && ram(p + 47)) {
-        CopyMem((APTR)p, b, 48);
-        n = 48;
-    }
-    Write(fh, &n, 4);
-    if (n)
-        Write(fh, b, n);
-    /* A hook's data pointer sits 16 bytes in. One step further, if it is. */
-    if (n >= 20) {
-        ULONG data = (ULONG)b[16] << 24 | (ULONG)b[17] << 16 | (ULONG)b[18] << 8 | b[19];
-        ULONG m = 0;
-
-        (void)i;
-        Write(fh, &data, 4);
-        if (data > 0x1000UL && data != p && ram(data) && ram(data + 47)) {
-            CopyMem((APTR)data, b, 48);
-            m = 48;
-        }
-        Write(fh, &m, 4);
-        if (m)
-            Write(fh, b, m);
-    }
-}
-
-/* One raw snapshot of the driver block, the audio control, and a short look
- * through every pointer in them. Write only, no formatting. */
-static void dump_mix(void)
-{
-    static UBYTE done;
-    BPTR fh;
-    UBYTE priv[504], ctrlb[256];
-    ULONG ctrl, i, seen[80], nseen = 0;
-
-    if (done || !stream_hold || !TypeOfMem((APTR)stream_hold))
-        return;
-    done = 1;
-    fh = Open("T:audio-mem", MODE_NEWFILE);
-    if (!fh)
-        return;
-    CopyMem((APTR)stream_hold, priv, 504);
-    Write(fh, priv, 504);
-    ctrl = peek((UBYTE *)stream_hold + PRIV_BACK);
-    if (ram(ctrl) && ram(ctrl + 255))
-        CopyMem((APTR)ctrl, ctrlb, 256);
-    else {
-        for (i = 0; i < 256; i++)
-            ctrlb[i] = 0;
-    }
-    Write(fh, ctrlb, 256);
-    for (i = 0; i < 504; i += 4) {
-        ULONG p = (ULONG)priv[i] << 24 | (ULONG)priv[i + 1] << 16 |
-                  (ULONG)priv[i + 2] << 8 | priv[i + 3];
-        ULONG k, dup = 0;
-
-        if (p < 0x10000UL)
-            continue;
-        for (k = 0; k < nseen; k++)
-            if (seen[k] == p)
-                dup = 1;
-        if (dup || nseen >= 40)
-            continue;
-        seen[nseen++] = p;
-        dump_follow(fh, p);
-    }
-    for (i = 0; i < 256; i += 4) {
-        ULONG p = (ULONG)ctrlb[i] << 24 | (ULONG)ctrlb[i + 1] << 16 |
-                  (ULONG)ctrlb[i + 2] << 8 | ctrlb[i + 3];
-        ULONG k, dup = 0;
-
-        if (p < 0x10000UL)
-            continue;
-        for (k = 0; k < nseen; k++)
-            if (seen[k] == p)
-                dup = 1;
-        if (dup || nseen >= 80)
-            continue;
-        seen[nseen++] = p;
-        dump_follow(fh, p);
-    }
-    Close(fh);
-}
-
 /* The half the DAC just finished, queued once. Looping it sounds like a buzz,
  * not like the tone those samples belong to. */
 static void remember_half(const UBYTE *src, ULONG n)
@@ -366,8 +276,6 @@ static void remember_half(const UBYTE *src, ULONG n)
     if (n >= 4)
         fifo_write(grain, n);
     audio_seq++;
-    if (audio_seq == 4)
-        dump_mix();
 }
 
 LONG apollo_audio(UBYTE *dst, LONG cap, ULONG *rate, ULONG ms)
@@ -626,23 +534,12 @@ static BOOL watch_wide(ULONG *rate, ULONG checks)
         audio_bytes += grain_n;
     }
     audio_seq++;
-    if (audio_seq == 4)
-        dump_mix();
     return TRUE;
 }
 
-/* The mix pointer for each pass kept this tone. One write, after the watch. */
+/* Kept for the public audio header. No diagnostic file is written here. */
 void apollo_mix_ptrs(void)
 {
-    BPTR fh;
-
-    if (!mix_ptr_n)
-        return;
-    fh = Open("T:audio-ptrs", MODE_NEWFILE);
-    if (!fh)
-        return;
-    Write(fh, mix_ptr, (ULONG)mix_ptr_n * 4);
-    Close(fh);
     mix_ptr_n = 0;
 }
 

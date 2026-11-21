@@ -236,6 +236,18 @@
     const memory = chip === null ? t("mem_fast_only", { fast }) : t("mem_line", { chip: bytes(chip), fast });
     $("about-system").textContent = systemLine(info) || "–";
     $("about-cpu").textContent = cpuLine(info) || "–";
+    // Family comes from the file SYSINFO named, never from this machine's OS or CPU. After an
+    // update that file may already be the replacement while the connected process is the old one,
+    // so a match is shown as a named file, not as the proven running binary.
+    const unknown = t("not_reported");
+    const family = info.daemon_family || unknown;
+    const version = info.daemon_version || unknown;
+    $("about-daemon").textContent = info.daemon_identity === "named file"
+      ? `${family} (${t("named_file")}) · ${version}` : `${family} · ${version}`;
+    $("about-protocol").textContent = info.daemon_protocol ? String(info.daemon_protocol) : unknown;
+    $("about-daemon-cpu").textContent = info.daemon_target || unknown;
+    const caps = info.daemon_capabilities || [];
+    $("about-daemon-caps").textContent = caps.length ? caps.join(", ") : unknown;
     $("about-memory").textContent = memory;
     $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
     const list = $("about-volumes");

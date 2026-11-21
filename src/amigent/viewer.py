@@ -33,6 +33,8 @@ from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
+from .daemons import describe_connected
+from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
                      exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
 from .screenfeed import Feed, InputQueue
@@ -244,6 +246,7 @@ class Viewer:
         self.amiga: dict = {}
         self.screen_list: list = []
         self._system: dict = {}
+        self._forget_daemon()
         self.alone_since = time.monotonic()
         self.screen.listeners.append(self._on_screen)
 
@@ -397,6 +400,7 @@ class Viewer:
         """An address edit or removal invalidates this connection, not its jobs' target."""
         self.enabled = False
         self.reason = "reason_machine_changed"
+        self._forget_daemon()
         self.event("online", online=False, reason=self.reason)
         with self.lock():
             self.screen.close()
@@ -406,6 +410,10 @@ class Viewer:
     def _set_online(self, online: bool, reason: str = "") -> None:
         shown = "" if online else connection_reason(reason)
         if online != self.online or shown != self.reason:
+            if not online:
+                # the next daemon to answer may be another file, or another Amiga
+                self.amiga = {}
+                self._forget_daemon()
             self.online = online
             self.reason = shown
             self.event("online", online=online, reason=self.reason)
@@ -494,7 +502,9 @@ class Viewer:
                    for v in self._ctl(self.ctl.volumes)]
         # chip_free stays None when SYSINFO omits it, so a page can tell a real
         # zero from an older daemon. The other counts keep "missing means 0".
+        protocol = getattr(getattr(self.ctl, "backend", None), "protocol", 0) or self.screen.protocol
         return {**self._system, "tcp": info.get("bsdsocket", ""),
+                **self._connected_daemon(info, protocol),
                 "chip_free": reported_bytes(info, "chip_free"),
                 "chip_total": counted_bytes(info, "chip_total"),
                 "fast_free": counted_bytes(info, "fast_free"),
@@ -502,6 +512,28 @@ class Viewer:
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0))),
                 "link": self.link()}
+
+    def _forget_daemon(self) -> None:
+        """Drop the connected daemon's file: it belongs to this session, not to the next one."""
+        self._daemon_path = ""
+        self._daemon_bytes: bytes | None = None
+        self._daemon_version = ""
+
+    def _connected_daemon(self, info: dict, protocol: int) -> dict:
+        """Protocol from the handshake; family only from the file SYSINFO named (``self=``)."""
+        path = str(info.get("self") or "")
+        blob, version = None, ""
+        if path and path == getattr(self, "_daemon_path", "") and getattr(self, "_daemon_bytes", None) is not None:
+            blob, version = self._daemon_bytes, self._daemon_version
+        elif path and "\n" not in path and '"' not in path:  # quoted for Version: no spaces split it
+            try:
+                blob = self._ctl(lambda: self.ctl.read_file(path))
+                reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
+                version = reported.output.strip().split("\n", 1)[0]
+                self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version
+            except (AmigaError, OSError, AttributeError):
+                blob, version = None, ""
+        return describe_connected(protocol, version, blob, info, AMIGA / "bin")
 
     def link(self) -> dict:
         """How the picture travels, for the page's Connection tab: no round trip needed."""

@@ -108,6 +108,32 @@ def identify(data: bytes, directory: Path) -> Spec | None:
     return None
 
 
+def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
+                       info: dict, directory: Path) -> dict:
+    """Identity of the connected session, separate from the computer it runs on.
+
+    Protocol and capabilities come from the live daemon. Family and CPU target
+    come only from the file SYSINFO named in ``self=``. That path is where the
+    process started; after an in-place update the bytes on disk may already be
+    the replacement, so ``daemon_identity`` says "named file" and never claims
+    a proven running image. The machine's OS and CPU are never used for the
+    family. What the daemon did not tell is "" (a page shows its own localised
+    "not reported"); this module only reports and never selects or installs.
+    """
+    spec = identify(file_bytes, directory) if file_bytes else None
+    capabilities = [name for key, name in (("audio", "AUDIO"), ("loaded", "loaded"), ("probe", "probe"),
+                                           ("poke", "POKE"), ("trace", "TRACE"))
+                    if info.get(key) == "1"]
+    return {
+        "daemon_protocol": protocol if protocol else None,
+        "daemon_version": (version or "").strip(),
+        "daemon_family": spec.label if spec else "",
+        "daemon_target": spec.target if spec else "",
+        "daemon_identity": "named file" if file_bytes is not None else "",
+        "daemon_capabilities": capabilities,
+    }
+
+
 def _ver_text(data: bytes) -> bytes | None:
     mark = b"$VER: amigentd "
     at = data.find(mark)

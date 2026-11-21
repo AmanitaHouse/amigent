@@ -40,6 +40,16 @@ Versions follow [semver](https://semver.org). The number lives in
   Migration keeps the original files. After a downgrade, older versions see
   the pre-migration history. Later writes remain under the machine ID.
 
+### Installing and updating
+
+- `amigent-setup` picks the amigentd build from a catalogue: the 68000 build
+  where the 68020 one is missing, and it tells why when C:CPU gives no answer.
+  `--update` never replaces a newer amigentd or a build of its own; with the
+  same version the build date decides, and `--force` replaces it anyway. (#38)
+- ApolloOS is told from AmigaOS on the same Vampire (exec 51 and the 68080
+  bit), for an Apollo build of amigentd once there is one; until then nothing
+  changes there. ApolloOS and AROS are no longer called AmigaOS 4. (#31)
+
 ### Security
 
 - With `TLSONLY`, amigentd now turns away plain connections from other
@@ -59,6 +69,21 @@ Versions follow [semver](https://semver.org). The number lives in
   of starting from black. (#29)
 - A screen pause of 120 s is reported as 120 s, not 121. (#32)
 - `amigent-doctor --help` exits with 0. (#34)
+- The remote desktop no longer sends the reset chord to Kickstart 1.3 and
+  older, which cannot reset that way and kept the keys down. (#28)
+- Auto packing waits for a real measurement of the line on a fast CPU instead
+  of a guess that never ended. (#30)
+- An amigentd that does not report free Chip RAM shows it as unknown, not as
+  0 bytes. (#33)
+- When the remote desktop cannot reach the Amiga it gives one of a few fixed
+  reasons in the page's language, including a TLS certificate that does not
+  match; the full text goes to the terminal only. (#36)
+
+### Tools and languages
+
+- `amiga_hrtmon` loads the HRTmon debugger from Aminet for the user at the
+  Amiga. The agent never enters it: that halts the system. (#37)
+- The remote desktop in Russian. (#35)
 
 ### Thanks
 

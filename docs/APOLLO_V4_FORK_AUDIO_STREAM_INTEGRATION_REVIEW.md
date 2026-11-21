@@ -3,7 +3,7 @@
 **Status:** Offline review complete — **ready to merge into fork `main` (not merged yet)**  
 **Native review branch:** `review/fork-audio-stream-safety-main` @ `065c112`  
 **Source lineage:** `contrib/fork-audio-stream-safety` @ `496f142` (same patch; cherry-picked onto `79880b8`)  
-**Docs tip:** `validation/apollo-v4-evidence-prep` @ `f0b8953`  
+**Docs tip:** `validation/apollo-v4-evidence-prep` @ `be73ddb`  
 **Fork `main`:** `79880b8` (unchanged)
 
 ## Suggested PR title

@@ -967,6 +967,107 @@ def _backtrace(t, most: int) -> str:
     return "\n".join(lines)
 
 
+TASK_POLL = (1.0, 3.0)  # seconds between looks at the task list: first, at most
+
+
+def _task_hits(tasks: list, which: str) -> list:
+    """Tasks that match like amiga_task: an address, else name or program."""
+    w = which.strip()
+    if w.startswith(("$", "0x")) or re.fullmatch(r"[0-9a-fA-F]{8}", w):
+        try:
+            return [memory.find_task(tasks, w)]
+        except ValueError:
+            return []
+    return memory.match_tasks(tasks, w)
+
+
+@mcp.tool()
+def amiga_wait_task(name: str, gone: bool = False, timeout: float = 30) -> str:
+    """Wait until a task or process with this name runs (or, gone=True, until none does).
+
+    For programs a script started with Run: amiga_exec returns when the script
+    ends, this waits for what it started. name matches like amiga_task: a task
+    name, a program as amiga_tasks shows it (its file name is enough), or an
+    address. Looks at the task list every one to three seconds, so it is gentle
+    on a slow line. Needs amigentd 1.4.0.
+    """
+    if not name.strip():
+        raise AmigaError("name: a task name, a program or an address")
+    timeout = max(0.0, min(float(timeout), 3600.0))
+    start, pause, first = time.monotonic(), TASK_POLL[0], True
+    while True:
+        hits = _task_hits(_tasks(), name)
+        took = time.monotonic() - start
+        if gone and not hits:
+            return (f"no task matches {name!r}: none was running" if first else
+                    f"no task matches {name!r} any more; gone after {took:.0f} s")
+        if hits and not gone:
+            return (f"{len(hits)} task(s) match {name!r}" + (f" after {took:.0f} s" if not first else "")
+                    + ":\n" + memory.task_table(hits))
+        if took >= timeout:
+            if gone:
+                return (f"timeout: {len(hits)} task(s) matching {name!r} still there after {timeout:g} s:\n"
+                        + memory.task_table(hits))
+            return f"timeout: no task matches {name!r} after {timeout:g} s"
+        first = False
+        time.sleep(min(pause, max(0.0, timeout - took)))
+        pause = min(pause * 1.5, TASK_POLL[1])
+
+
+@mcp.tool()
+def amiga_amigus_status() -> str:
+    """The AmiGUS sound card, read only: is a card there, are amigus.library and
+    the AHI driver AmiGUS.audio loaded, and which parts (PCM, wavetable, codec)
+    are reserved right now, by whom.
+
+    Reads amigus.library's own records, so nothing is reserved to find out.
+    Says clearly when there is no AmiGUS. Needs amigentd 1.4.0.
+    """
+    from . import amigus
+    loaded = _loaded()
+    try:
+        tasks = _tasks()
+    except AmigaError:
+        tasks = []
+    ctl = _session().ctl
+    sysbase = int.from_bytes(_with_ctl(lambda: ctl.peek(4, 4)), "big")
+    return amigus.status(loaded, tasks, lambda a, n: _with_ctl(lambda: ctl.peek(a, n)), sysbase)
+
+
+LEVELS_HELPER = "T:amigent-levels"
+
+
+@mcp.tool()
+def amiga_audio_levels(seconds: int = 2, hz: int = 10, peak: bool = True) -> str:
+    """Left and right output level of an AmiGUS card over time, read back from the card.
+
+    seconds 1-30, hz 1-50 samples a second; peak=True takes the maximum of each
+    interval, else the average. Shows for each channel whether it carries
+    sound, with a series in percent of full scale: e.g. to hear whether two
+    players play at once. Reads the card's level registers as the AmiGUS
+    Mixer does, reserves nothing, so it works while the AHI driver plays.
+    Copies the small program amigent-levels to T: and runs it.
+    """
+    from . import amigus
+    from .paths import AMIGA
+    seconds, hz = max(1, min(int(seconds), 30)), max(1, min(int(hz), 50))
+    local = AMIGA / "bin" / "amigent-levels"
+    if not local.exists():
+        raise AmigaError("amigent-levels is not part of this Amigent package; build it from "
+                         "amiga/amigent-levels.c (see the note at its top)")
+    data = local.read_bytes()
+    ctl = _session().ctl
+    try:
+        there = _with_ctl(lambda: ctl.read_file(LEVELS_HELPER))
+    except AmigaError:
+        there = None
+    if there != data:
+        _with_ctl(lambda: ctl.write_file(LEVELS_HELPER, data))
+    command = f"{LEVELS_HELPER} SECONDS {seconds} HZ {hz}" + (" PEAK" if peak else "")
+    result = _with_ctl(lambda: ctl.exec(command, None, seconds + 30))
+    return amigus.levels(result.output, seconds, hz, peak)
+
+
 @mcp.tool()
 def amiga_locks(screen_id: str = "") -> str:
     """Who holds the layer locks of a screen and its windows, and who waits for them.

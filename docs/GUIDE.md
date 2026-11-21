@@ -239,6 +239,7 @@ starts the old one again.
 | `amiga_screenshot_color` | a region in full colour, for small text and exact colours |
 | `amiga_wait_change` | wait until something on the screen changes, without sending pictures |
 | `amiga_wait_window`, `amiga_wait_text` | wait on the Amiga until a window or a text appears or goes |
+| `amiga_wait_task` | wait until a task or program runs, or until it has ended |
 | `amiga_do` | several clicks, keys, waits and commands in one call, then one look |
 | `amiga_pause_screen` | stop all screen reading for a while, so a test or benchmark has the CPU |
 | `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
@@ -256,6 +257,7 @@ starts the old one again.
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
 | `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_amigus_status`, `amiga_audio_levels` | an AmiGUS card: which driver holds PCM, wavetable and codec, without reserving anything; its left and right output level over a few seconds |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
 | `amiga_software_failure` | a Software Failure requester: its text, the guru in words (for a line-F guru whether the FPU or its library is missing), and Suspend (never Reboot) |

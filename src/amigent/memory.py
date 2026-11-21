@@ -392,6 +392,17 @@ def task_table(tasks: list[TaskInfo], name: str = "") -> str:
     return "\n".join(rows) or "no such task"
 
 
+def match_tasks(tasks: list[TaskInfo], which: str) -> list[TaskInfo]:
+    """Tasks by name or command: exact names (or the program's file name) first,
+    else every task whose name contains it."""
+    w = which.strip().lower()
+    if not w:
+        return []
+    hits = [t for t in tasks if w in (t.name.lower(), t.command.lower())
+            or t.command.lower().endswith(("/" + w, ":" + w))]
+    return hits or [t for t in tasks if w in t.label.lower()]
+
+
 def find_task(tasks: list[TaskInfo], which: str) -> TaskInfo:
     """By address ($.. or hex) or by name or command, which must be unique."""
     w = which.strip()
@@ -404,10 +415,7 @@ def find_task(tasks: list[TaskInfo], which: str) -> TaskInfo:
             if t.address == at:
                 return t
         raise ValueError(f"no task at ${at:08X}")
-    hits = [t for t in tasks if w.lower() in (t.name.lower(), t.command.lower())
-            or t.command.lower().endswith(("/" + w.lower(), ":" + w.lower()))]
-    if not hits:
-        hits = [t for t in tasks if w.lower() in t.label.lower()]
+    hits = match_tasks(tasks, w)
     if len(hits) != 1:
         raise ValueError(f"{len(hits)} tasks match {which!r}: " + ", ".join(
             f"{t.label} (${t.address:08X})" for t in hits[:8]) if hits else f"no task matches {which!r}")

@@ -1915,7 +1915,7 @@ static void grab_tile(struct BitMap *bm, LONG tx, LONG ty)
  * bookkeeping only happens at a run: the 68000 has no time for second looks. */
 static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
 {
-    const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *lim;
+    const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *q, *lim;
     UBYTE *start = d, c, n;
     LONG k;
 
@@ -1940,9 +1940,22 @@ run:
                 memcpy(d, lit, k);
                 d += k, lit += k;
             }
-            lim = end - s > 128 ? s + 128 : end;
-            for (r = s + 3; r < lim && *r == c; r++)
+            q = end - s > 16 ? s + 16 : end;
+            for (r = s + 3; r < q && *r == c; r++)
                 ;
+            if (r == q && r < end) {  /* a long run: four bytes a compare once aligned */
+                ULONG four = c;
+                lim = end - s > 128 ? s + 128 : end;
+                for (; r < lim && ((ULONG)r & 3) && *r == c; r++)
+                    ;
+                four |= four << 8;
+                four |= four << 16;
+                if (!((ULONG)r & 3))
+                    while (lim - r >= 4 && *(const ULONG *)r == four)
+                        r += 4;
+                for (; r < lim && *r == c; r++)
+                    ;
+            }
             *d++ = (UBYTE)(257 - (r - s));
             *d++ = c;
             s = lit = r;

@@ -159,6 +159,11 @@ Versions follow [semver](https://semver.org). The number lives in
   (#43)
 - amigentd's tile buffers were 14 bytes short for PackBits of noise in a full
   64×64 chunky or 8-plane tile; the last bytes ran past them. (#43)
+- `amiga_screen_text` reads `amigent-monitor` again, and other programs that
+  draw text into a bitmap of their own and copy it to their window against
+  flicker. The monitor's window is marked; `amiga_wait_text`,
+  `amiga_click_text` and a search with `find` leave it out unless it is named,
+  since its log repeats the agent's own calls. (#41)
 
 ### Tools and languages
 

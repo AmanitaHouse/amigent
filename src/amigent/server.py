@@ -2000,7 +2000,7 @@ def _labels_from_text(gadgets: list[dict]) -> None:
         st = _screen_text()
     except AmigaError:
         return
-    rows = [r for w in st.windows for r in w.rows if not r.hidden]
+    rows = [r for w in st.windows if not w.monitor for r in w.rows if not r.hidden]
     for g in gadgets:
         if g["label"] or g["type"] == "sys":
             continue
@@ -2027,7 +2027,7 @@ def amiga_software_failure(action: str = "show") -> str:
     from . import alerts
 
     st = _screen_text()
-    wins = [w for w in st.windows if any(k in (w.title + " " + " ".join(r.text for r in w.rows)).lower()
+    wins = [w for w in st.windows if not w.monitor and any(k in (w.title + " " + " ".join(r.text for r in w.rows)).lower()
                                          for k in ("software failure", "software-fehler", "task held",
                                                    "softwarefehler", "task interferance", "task interference"))]
     if not wins:

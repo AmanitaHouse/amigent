@@ -3805,9 +3805,9 @@ struct monmsg {
     char text[2];
 };
 
-/* The monitor's task, so its own lines don't count as text on the screen
- * (amiga_wait_text would find them). Refreshed by every mon_say, the
- * statistics among them once a second. */
+/* The monitor's task, so waiting for a text skips its window (its log would
+ * match what amiga_wait_text looks for) and TEXT marks it. Refreshed by every
+ * mon_say, the statistics among them once a second. */
 static struct Task *volatile mon_task;
 static volatile ULONG mon_quiet_until;  /* now_ms(): the monitor gets nothing before, see QUIET */
 
@@ -5510,8 +5510,10 @@ static const UBYTE stub_code[60] = {
 #define STUB_ORIG 52
 #define STUB_SIZE 64
 
-enum { H_TEXT, H_RECTFILL, H_ERASE, H_SETRAST, H_SCROLL, H_SCROLLBF, H_DELLAYER, H_RAWPUT, HOOKS };
-#define HOOKS_NAME "amigent hooks 1"
+enum { H_TEXT, H_RECTFILL, H_ERASE, H_SETRAST, H_SCROLL, H_SCROLLBF, H_DELLAYER, H_RAWPUT,
+       H_CLIPBLIT, H_BLTRP, H_FREEBM, HOOKS };
+/* The number goes up with HOOKS: an older amigentd's set has fewer stubs. */
+#define HOOKS_NAME "amigent hooks 2"
 
 struct hookset {
     struct SignalSemaphore sem;  /* whoever holds it owns the hooks */
@@ -5531,7 +5533,7 @@ static struct Library *hook_lib(LONG i)
 
 static LONG hook_lvo(LONG i)
 {
-    static const WORD lvo[HOOKS] = {-60, -306, -810, -234, -396, -1002, -90, -516};
+    static const WORD lvo[HOOKS] = {-60, -306, -810, -234, -396, -1002, -90, -516, -552, -606, -924};
     return lvo[i];
 }
 
@@ -5540,7 +5542,7 @@ static void set_hook(LONG i, void (*fn)(ULONG *))
     struct Library *lib = hook_lib(i);
     UBYTE *s;
 
-    if (!lib || (i == H_SCROLLBF && lib->lib_Version < 39))
+    if (!lib || ((i == H_SCROLLBF || i == H_FREEBM) && lib->lib_Version < 39))
         return;
     if (!(s = hooks->stub[i])) {
         if (!(s = AllocMem(STUB_SIZE, MEMF_PUBLIC)))
@@ -5604,22 +5606,30 @@ static void unhook_all(void)
  * wipe it, ScrollRaster moves it, SetRast and DeleteLayer clear the layer.
  * Fixed width runs are kept to the character, so a Shell typing letter by
  * letter or deleting one comes out as one line. Only layers of windows count:
- * clocks and docks drawing into layers of their own would fill the store. */
+ * clocks and docks drawing into layers of their own would fill the store.
+ *
+ * Text drawn off-screen, into a rastport without a layer or with a layer of
+ * its own (alone in its Layer_Info), is kept per bitmap in bitmap coordinates
+ * (TXF_OFF, at most a quarter of the store). A ClipBlit or BltBitMapRastPort
+ * from there into a window copies it along, so programs that draw into a
+ * bitmap and copy it to their window against flicker can be read too. */
 #define TX_LEN 40
 #define TX_BUCKETS 64
+#define TXF_OFF 1  /* layer is a struct BitMap: drawn off-screen */
+#define TXF_NEW 2  /* just copied by a blit; tx_clear leaves it */
 #define TX_OLD 64
 
 struct tx {
     struct tx *next;
-    struct Layer *layer;
+    APTR layer;       /* a window's layer, or an off-screen bitmap (TXF_OFF) */
     WORD x, y, w, h;  /* box in the layer; y is the top, not the baseline */
     UWORD cw;         /* character width of a fixed width font, 0 otherwise */
-    UBYTE len, pad;
+    UBYTE len, flags;
     UBYTE s[TX_LEN];
 };
 
 static struct tx *tx_pool, *tx_free, *tx_head[TX_BUCKETS];
-static LONG tx_size;
+static LONG tx_size, tx_off;
 static ULONG tx_used, tx_evicted, tx_since, tx_gen;
 static struct Window *tx_old[TX_OLD];  /* open before recording started */
 
@@ -5633,6 +5643,8 @@ static void tx_drop(struct tx **at)
     e->next = tx_free;
     tx_free = e;
     tx_used--;
+    if (e->flags & TXF_OFF)
+        tx_off--;
 }
 
 static void tx_remove(struct tx *e)
@@ -5646,12 +5658,26 @@ static void tx_remove(struct tx *e)
 }
 
 /* A free entry at the end of the layer's bucket; full, the oldest goes if
- * evict is set (not while a caller walks a bucket). */
-static struct tx *tx_new(struct Layer *ly, BOOL evict)
+ * evict is set (not while a caller walks a bucket). Off-screen text has a
+ * quarter of the store: beyond, older off-screen text makes room. */
+static struct tx *tx_new(APTR ly, UBYTE flags, BOOL evict)
 {
     struct tx **at, *e;
     LONG b = TX_BUCKET(ly), k;
 
+    if ((flags & TXF_OFF) && tx_off >= tx_size / 4) {
+        if (!evict)
+            return NULL;
+        for (k = 0; k < TX_BUCKETS; k++) {
+            for (at = &tx_head[(b + k) & (TX_BUCKETS - 1)]; *at && !((*at)->flags & TXF_OFF);
+                 at = &(*at)->next)
+                ;
+            if (*at) {
+                tx_drop(at);
+                break;
+            }
+        }
+    }
     if (!tx_free) {
         if (!evict)
             return NULL;
@@ -5667,6 +5693,9 @@ static struct tx *tx_new(struct Layer *ly, BOOL evict)
     tx_used++;
     e->next = NULL;
     e->layer = ly;
+    e->flags = flags;
+    if (flags & TXF_OFF)
+        tx_off++;
     for (at = &tx_head[b]; *at; at = &(*at)->next)
         ;
     *at = e;
@@ -5693,7 +5722,7 @@ static void tx_cut(struct tx *e, LONG from, LONG to)
 
     for (i = to; i < e->len && e->s[i] == ' '; i++)
         ;
-    if (i < e->len && (r = tx_new(e->layer, FALSE))) {
+    if (i < e->len && (r = tx_new(e->layer, e->flags & TXF_OFF, FALSE))) {
         r->cw = e->cw;
         r->y = e->y;
         r->h = e->h;
@@ -5708,14 +5737,14 @@ static void tx_cut(struct tx *e, LONG from, LONG to)
 
 /* Text within x0..x1, y0..y1 (inclusive, layer coordinates) is gone. A box
  * that covers less than half of a run's height leaves it: an underline. */
-static void tx_clear(struct Layer *ly, LONG x0, LONG y0, LONG x1, LONG y1)
+static void tx_clear(APTR ly, LONG x0, LONG y0, LONG x1, LONG y1)
 {
     struct tx **at = &tx_head[TX_BUCKET(ly)], *e;
 
     while ((e = *at)) {
         LONG top, bottom;
 
-        if (e->layer != ly) {
+        if (e->layer != ly || (e->flags & TXF_NEW)) {
             at = &e->next;
             continue;
         }
@@ -5747,7 +5776,7 @@ static void tx_clear(struct Layer *ly, LONG x0, LONG y0, LONG x1, LONG y1)
 }
 
 /* Fixed width runs that straddle column x are split there. */
-static void tx_split(struct Layer *ly, LONG x)
+static void tx_split(APTR ly, LONG x)
 {
     struct tx *e;
     LONG k;
@@ -5760,7 +5789,7 @@ static void tx_split(struct Layer *ly, LONG x)
         }
 }
 
-static void tx_layer_gone(struct Layer *ly)
+static void tx_layer_gone(APTR ly)
 {
     struct tx **at = &tx_head[TX_BUCKET(ly)];
 
@@ -5771,20 +5800,44 @@ static void tx_layer_gone(struct Layer *ly)
             at = &(*at)->next;
 }
 
+/* Where text drawn into rp is kept: a window's layer (layer coordinates),
+ * or off-screen its bitmap (bitmap coordinates, *ox and *oy added to those of
+ * rp, flags TXF_OFF). NULL: not kept, like a clock's layer on a screen. */
+static APTR tx_where(struct RastPort *rp, LONG *ox, LONG *oy, UBYTE *flags)
+{
+    struct Layer *ly = rp->Layer;
+
+    *ox = *oy = 0;
+    *flags = 0;
+    if (ly && ly->Window)
+        return ly;
+    if (ly) {
+        if (ly->front || ly->back)
+            return NULL;  /* one of several: a screen's, not a drawing buffer */
+        *ox = ly->bounds.MinX - ly->Scroll_X;
+        *oy = ly->bounds.MinY - ly->Scroll_Y;
+    }
+    if (!rp->BitMap)
+        return NULL;
+    *flags = TXF_OFF;
+    return rp->BitMap;
+}
+
 /* regs: d0-d7 are r[0..7], a0-a6 r[8..14] */
 /* Text s[n] drawn in rp with its font, left edge x, top y. */
 static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG y)
 {
-    struct Layer *ly = rp->Layer;
     struct TextFont *f = rp->Font;
-    LONG cw, h, i, k, total = 0, piece;
+    LONG cw, h, i, k, total = 0, piece, ox, oy;
     WORD widths[(1024 + TX_LEN - 1) / TX_LEN];
     struct tx *e;
+    UBYTE off;
+    APTR ly;
 
-    if (!ly || !ly->Window || !f || n <= 0 || !tx_pool)
+    if (!f || n <= 0 || !tx_pool || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
-    if (mon_task && FindTask(NULL) == mon_task)
-        return;  /* amigent-monitor's log repeats what the agent looks for */
+    x += ox;
+    y += oy;
     if (n > 1024)
         n = 1024;
     /* Fixed width fonts may carry kerning tables too, all alike: the flag decides. */
@@ -5813,7 +5866,7 @@ static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG 
             if (e && e->len + piece > TX_LEN)
                 piece = TX_LEN - e->len;
         }
-        if (!e && (e = tx_new(ly, TRUE))) {
+        if (!e && (e = tx_new(ly, off, TRUE))) {
             e->x = x;
             e->y = y;
             e->h = h;
@@ -5850,12 +5903,15 @@ static void h_text(ULONG *r)
 static void h_fill(ULONG *r, BOOL erase)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
+    LONG ox, oy;
+    UBYTE off;
+    APTR ly;
 
-    if (!rp->Layer || !rp->Layer->Window || !tx_pool || (!erase && (rp->DrawMode & COMPLEMENT)))
+    if (!tx_pool || (!erase && (rp->DrawMode & COMPLEMENT)) || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
     Forbid();
     tx_gen++;
-    tx_clear(rp->Layer, (WORD)r[0], (WORD)r[1], (WORD)r[2], (WORD)r[3]);
+    tx_clear(ly, (WORD)r[0] + ox, (WORD)r[1] + oy, (WORD)r[2] + ox, (WORD)r[3] + oy);
     Permit();
 }
 
@@ -5872,11 +5928,14 @@ static void h_erase(ULONG *r)
 static void h_setrast(ULONG *r)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
+    LONG ox, oy;
+    UBYTE off;
+    APTR ly;
 
-    if (rp->Layer && tx_pool) {
+    if (tx_pool && (ly = tx_where(rp, &ox, &oy, &off))) {
         Forbid();
         tx_gen++;
-        tx_layer_gone(rp->Layer);
+        tx_layer_gone(ly);
         Permit();
     }
 }
@@ -5884,13 +5943,15 @@ static void h_setrast(ULONG *r)
 static void h_scroll(ULONG *r)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
-    struct Layer *ly = rp->Layer;
     LONG dx = (WORD)r[0], dy = (WORD)r[1], x0 = (WORD)r[2], y0 = (WORD)r[3];
-    LONG x1 = (WORD)r[4], y1 = (WORD)r[5];
+    LONG x1 = (WORD)r[4], y1 = (WORD)r[5], ox, oy;
     struct tx **at, *e;
+    UBYTE off;
+    APTR ly;
 
-    if (!ly || !ly->Window || !tx_pool)
+    if (!tx_pool || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
+    x0 += ox, x1 += ox, y0 += oy, y1 += oy;
     Forbid();
     tx_gen++;
     /* Cut runs where the area starts and ends, and where the part that
@@ -5931,10 +5992,132 @@ static void h_dellayer(ULONG *r)
     Forbid();
     tx_gen++;
     tx_layer_gone(ly);
+    if (!ly->Window && !ly->front && !ly->back && ly->rp && ly->rp->BitMap)
+        tx_layer_gone(ly->rp->BitMap);  /* a drawing buffer's layer: its text goes too */
     for (i = 0; i < TX_OLD; i++)
         if (ly->Window && tx_old[i] == (struct Window *)ly->Window)
             tx_old[i] = NULL;
     Permit();
+}
+
+/* A copy of the box sx,sy (w x h) of src to dx,dy in dst: the text there is
+ * gone and what src holds in the box comes along. Only from an off-screen
+ * source with text: blits of anything else (a font engine's glyphs, a picture,
+ * a window scrolling itself) leave the text alone, as before. */
+static void tx_blit(APTR src, LONG sx, LONG sy, APTR dst, UBYTE dflags, LONG dx, LONG dy,
+                    LONG w, LONG h)
+{
+    struct tx *e, *c, **at;
+    LONG n = 0, k, x1 = sx + w - 1, y1 = sy + h - 1, bs = TX_BUCKET(src), bd = TX_BUCKET(dst);
+    BOOL known = FALSE;
+
+    for (e = tx_head[bs]; e; e = e->next)
+        if (e->layer == src) {
+            known = TRUE;
+            if (e->x <= x1 && e->x + e->w > sx && e->y <= y1 && e->y + e->h > sy)
+                n++;
+        }
+    if (!known)
+        return;
+    tx_gen++;
+    /* Room first: making it while copying could drop runs being copied. */
+    while (tx_size - (LONG)tx_used < n) {
+        for (k = 0; k < TX_BUCKETS; k++)
+            if (k != bs && k != bd && tx_head[k])
+                break;
+        if (k == TX_BUCKETS)
+            break;
+        tx_drop(&tx_head[k]);
+        tx_evicted++;
+    }
+    for (e = tx_head[bs]; e; e = e->next) {
+        LONG a = 0, b = e->len - 1, top, bottom;
+
+        if (e->layer != src || (e->flags & TXF_NEW) || !e->len)
+            continue;
+        top = sy > e->y ? sy : e->y;
+        bottom = y1 < e->y + e->h - 1 ? y1 : e->y + e->h - 1;
+        if (x1 < e->x || sx >= e->x + e->w || (bottom - top + 1) * 2 < e->h)
+            continue;
+        if (e->cw) {  /* the characters whose middle lies inside, as tx_clear */
+            LONG half = e->cw / 2;
+            a = sx - e->x - half + e->cw - 1;
+            a = a < 0 ? 0 : a / e->cw;
+            b = x1 - e->x - half;
+            b = b < 0 ? -1 : b / e->cw;
+            if (b >= e->len)
+                b = e->len - 1;
+            if (a > b)
+                continue;
+        } else if (e->x + e->w / 2 < sx || e->x + e->w / 2 > x1)
+            continue;
+        if (!(c = tx_new(dst, dflags | TXF_NEW, FALSE)))
+            break;
+        c->cw = e->cw;
+        c->h = e->h;
+        c->x = e->x + a * e->cw - sx + dx;
+        c->y = e->y - sy + dy;
+        c->len = b - a + 1;
+        c->w = e->cw ? c->len * e->cw : e->w;
+        CopyMem(e->s + a, c->s, c->len);
+    }
+    tx_clear(dst, dx, dy, dx + w - 1, dy + h - 1);  /* leaves the new ones */
+    at = &tx_head[bd];
+    while ((e = *at)) {
+        if (e->layer == dst && (e->flags & TXF_NEW)) {
+            e->flags &= ~TXF_NEW;
+            if (tx_blank(e)) {
+                tx_drop(at);
+                continue;
+            }
+        }
+        at = &e->next;
+    }
+}
+
+/* ClipBlit (from a rastport) and BltBitMapRastPort (from a bitmap): a0 the
+ * source, d0/d1 where in it, a1 the rastport, d2/d3 where, d4/d5 the size,
+ * d6 the minterm. Only plain copies count. */
+static void h_blit(ULONG *r, BOOL from_rp)
+{
+    struct RastPort *drp = (struct RastPort *)r[9];
+    LONG w = (WORD)r[4], h = (WORD)r[5], sox = 0, soy = 0, dox, doy;
+    UBYTE sflags, dflags;
+    APTR src, dst;
+
+    if (!tx_pool || (r[6] & 0xff) != 0xc0 || w <= 0 || h <= 0 || !r[8] ||
+        !(dst = tx_where(drp, &dox, &doy, &dflags)))
+        return;
+    if (from_rp) {
+        if (!(src = tx_where((struct RastPort *)r[8], &sox, &soy, &sflags)) || !(sflags & TXF_OFF))
+            return;
+    } else
+        src = (APTR)r[8];
+    if (src == dst)
+        return;  /* a buffer scrolling itself, maybe for ScrollRaster: h_scroll did that */
+    Forbid();
+    tx_blit(src, (WORD)r[0] + sox, (WORD)r[1] + soy, dst, dflags, (WORD)r[2] + dox,
+            (WORD)r[3] + doy, w, h);
+    Permit();
+}
+
+static void h_clipblit(ULONG *r)
+{
+    h_blit(r, TRUE);
+}
+
+static void h_bltrp(ULONG *r)
+{
+    h_blit(r, FALSE);
+}
+
+static void h_freebm(ULONG *r)
+{
+    if (tx_pool && r[8]) {
+        Forbid();
+        tx_layer_gone((APTR)r[8]);
+        Permit();
+    }
 }
 
 /* ---- debug output: kprintf, Enforcer, MuForce ------------------------------ */
@@ -5992,6 +6175,9 @@ static void hooks_start(void)
             set_hook(H_SCROLL, h_scroll);
             set_hook(H_SCROLLBF, h_scroll);
             set_hook(H_DELLAYER, h_dellayer);
+            set_hook(H_CLIPBLIT, h_clipblit);
+            set_hook(H_BLTRP, h_bltrp);
+            set_hook(H_FREEBM, h_freebm);
             text_on = TRUE;
         }
     }
@@ -6244,10 +6430,15 @@ static BOOL screen_text(struct text *t, const UBYTE *match)
     for (l = s->LayerInfo.top_layer; l && !found; l = l->back) {
         struct Window *w;
         LONG box[4];
+        BOOL mon;
 
         for (w = s->FirstWindow; w && w != (struct Window *)l->Window; w = w->NextWindow)
             ;
         if (!w || l != w->WLayer)
+            continue;
+        /* amigent-monitor's log repeats what the agent looks for: no match there */
+        mon = mon_task && w->UserPort && w->UserPort->mp_SigTask == mon_task;
+        if (match && mon)
             continue;
         if (!match) {
             box[0] = w->LeftEdge, box[1] = w->TopEdge, box[2] = w->Width, box[3] = w->Height;
@@ -6259,6 +6450,7 @@ static BOOL screen_text(struct text *t, const UBYTE *match)
             if (w == IntuitionBase->ActiveWindow) t_chr(t, 'a');
             if (w->Flags & WFLG_BACKDROP) t_chr(t, 'b');
             if (tx_is_old(w)) t_chr(t, 'o');
+            if (mon) t_chr(t, 'm');
             t_tab(t);
             t_str(t, w->Title, FALSE);
             t_chr(t, '\n');

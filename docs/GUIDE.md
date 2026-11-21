@@ -270,6 +270,7 @@ starts the old one again.
 | `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has |
 | `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
 | `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
+| `amiga_pistorm` | the classic PiStorm emulator under Linux on the Pi, over SSH: its configuration (with undo), restart, log, the Pi's temperature and power; untested on real hardware |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
@@ -352,6 +353,23 @@ Amiga's entry in `amigas.json`, and WinUAE started with
 even when the Amiga hangs, and saves or restores the whole machine. Then
 `amiga_install_begin` also saves a state file, an undo of everything but the
 disk changes.
+
+Classic PiStorm: the original PiStorm software runs as the program `emulator`
+under Linux on the Raspberry Pi, with `.cfg` files such as `default.cfg`.
+`amigent-fleet --pi NAME pi@address` keeps the Pi's address with the Amiga's
+entry (`"pi"` in `amigas.json`). `amiga_pistorm` then logs in with the system's
+`ssh` and your own key: `BatchMode=yes`, your `known_hosts`, no passwords
+stored. Log in once yourself first (`ssh pi@address`) so the host key is
+known; a port or key file goes into `~/.ssh/config`. It tells whether the
+emulator runs from a systemd unit or was started by hand or a script, which
+`.cfg` it reads, and the Pi's temperature and under-voltage state
+(`vcgencmd`). It shows the `.cfg`, changes it after showing the difference
+(a copy stays next to it on the Pi, and `undo` puts it back), restarts the
+emulator the way it was started, and reads its log (the unit's journal, or
+the file its output goes to). Nothing changes without `confirm=True`;
+restarting and files owned by root need `sudo` without a password on the
+Pi. Not for Emu68, which has no Linux. This is untested on real hardware
+so far; reports and help with testing are welcome.
 
 Debugging a program: `amiga_create_project` writes `main.c` and a vbcc build
 script, `amiga_build` compiles it on the Amiga, `amiga_run` runs it with its
@@ -616,7 +634,8 @@ settings and menu entries; see
 | `AMIGENT_NO_UPDATE_CHECK` | | `1` stops looking for new releases (also `python -m amigent.update off`) |
 
 An Amiga's entry in `amigas.json` can also hold `"gdb"`, `"winuae"`,
-`"winuae_config"` (its `.uae` file, for `amiga_emulator("launch")`) and
+`"winuae_config"` (its `.uae` file, for `amiga_emulator("launch")`), `"pi"`
+(`[user@]address` of a classic PiStorm's Raspberry Pi, for `amiga_pistorm`) and
 `"devpack"` (the folder with vbcc and the NDK, for `amiga_build`).
 
 On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET`,

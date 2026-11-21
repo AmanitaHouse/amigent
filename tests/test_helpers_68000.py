@@ -78,3 +78,12 @@ def test_helpers_run_on_a_68000(name):
 def test_the_check_would_see_a_68020_build():
     code = struct.pack(">HH", 0x49C0, 0) + struct.pack(">HH", 0x4C00, 0x1000)
     assert sum(is_68020_only(*struct.unpack_from(">HH", code, a)) for a in range(0, 6, 2)) == 2
+
+
+def test_amigentd_has_one_version_string_only():
+    """Version reads the first $VER: in a file; a second one would hide the real one."""
+    from pathlib import Path
+    folder = Path(__file__).resolve().parents[1] / "src" / "amigent" / "amiga" / "bin"
+    for name in ("amigentd", "amigentd.000"):
+        binary = (folder / name).read_bytes()
+        assert binary.count(b"$VER: ") == 1, name

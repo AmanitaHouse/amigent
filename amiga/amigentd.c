@@ -8075,7 +8075,8 @@ static void t_prop(struct text *t, const char *out, const char *key, const char 
         len = 4096;
     while (len && !v[len - 1])
         len--;
-    if (len >= 6 && !strncmp((const char *)v, "$VER: ", 6)) {
+    /* not written as one literal: Version would take that for amigentd's own $VER */
+    if (len >= 6 && v[0] == '$' && !strncmp((const char *)v + 1, "VER: ", 5)) {
         v += 6;
         len -= 6;
     }

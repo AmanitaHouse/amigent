@@ -65,6 +65,8 @@ class FakeAmiga:
         # SCREENS beyond the one picture: dicts with handle, title, flags, picture.
         # None: one Workbench screen of the picture, without the 1.5.0 display bits.
         self.screen_list: list[dict] | None = None
+        self.volume_lines: list[str] | None = None  # VOLUMES: name, used, free, capacity, block size
+        self.corrupt: set[str] = set()  # paths whose writes land with one byte flipped
         self.hello_flags = 0  # 4 (TLSONLY): the hello, then the line is closed, as amigentd does
         self.received: list[bytes] = []  # every byte a client sent, per connection
         self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
@@ -172,6 +174,14 @@ class FakeAmiga:
             where = rd.read(y)
             if self.exec_delay:
                 time.sleep(self.exec_delay)
+            copy = re.fullmatch(r'Copy "([^"]+)" TO "([^"]+)" QUIET', path)
+            if copy and path not in self.answers:
+                src, dst = copy.groups()
+                if src not in self.files or not self._exists_dir(self.parent(dst)):
+                    return self.ok(struct.pack(">iI", 20, 0))
+                with self.lock:
+                    self.files[dst] = self.files[src]
+                return self.ok(struct.pack(">iI", 0, 0))
             rc, text = self.answers.get(path, (0, f"ran {path} in {where.decode() or '-'}"))
             out = text.encode("iso-8859-1")
             return self.ok(struct.pack(">iI", rc, len(out)) + out)
@@ -185,6 +195,8 @@ class FakeAmiga:
             if not self._exists_dir(self.parent(path)) or path in self.dirs:
                 return self.fail("Objekt nicht gefunden")
             with self.lock:
+                if path in self.corrupt and data:
+                    data = bytes([data[0] ^ 0xFF]) + data[1:]
                 self.files[path] = (self.files.get(path, b"") if arg else b"") + data
                 self.stamps[path] = time.strftime("%Y-%m-%d %H:%M:%S")
             return self.ok()
@@ -198,6 +210,8 @@ class FakeAmiga:
             new = rd.read(y).decode("iso-8859-1")
             if path not in self.files:
                 return self.fail("Objekt nicht gefunden")
+            if new in self.files or new in self.dirs:
+                return self.fail("Objekt existiert bereits")
             self.files[new] = self.files.pop(path)
             return self.ok()
         if cmd == 28:
@@ -219,7 +233,7 @@ class FakeAmiga:
         if cmd == 38 and self.protocol >= 6:
             return self.text("".join(line + "\n" for line in self.loaded))
         if cmd == 31:
-            return self.text("RAM Disk:\t10\t20\t30\t512\n")
+            return self.text("".join(v + "\n" for v in self.volume_lines or ["RAM Disk:\t10\t20\t30\t512"]))
         if cmd == 6:
             return b"\0"
         return self.fail("not on a command channel")

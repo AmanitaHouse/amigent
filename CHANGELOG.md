@@ -152,6 +152,33 @@ Versions follow [semver](https://semver.org). The number lives in
   warns. The check is a heuristic.
   ([#42](https://github.com/akustikrausch/amigent/issues/42))
 
+### Emu68 on the SD card
+
+- `amiga_emu68_card` reads Emu68's boot partition: the kernel with its Emu68
+  version and board variant, the Kickstart file (size, header, checksum), FPGA
+  files named in `config.txt` (shown, never written), every `cmdline.txt`
+  option explained, overlays, free space and problems such as a file
+  `config.txt` names that is missing; `check=True` reads every file once and
+  measures the speed. It says what `sd.unit0=rw` means.
+- `amiga_emu68_option` sets, changes or removes one option in `cmdline.txt`,
+  only an option Emu68 knows with a valid value (`force=True` for an unknown
+  one); `amiga_emu68_kickstart` boots another Kickstart after checking it, and
+  the old ROM stays on the card; `amiga_emu68_undo` takes a change back
+  ([#18](https://github.com/akustikrausch/amigent/issues/18)).
+- `amiga_emu68_update` updates Emu68 from a release zip on the PC: it checks
+  the version, the board variant and whether VideoCore.card fits (Emu68 1.1
+  needs 1.5), backs up the whole boot partition on the card, with a README on
+  how to go back, and on the PC, with checksums; it writes the new files next
+  to the old ones and swaps them in only once all are verified, and confirms
+  after the restart that the new Emu68 runs. If it does not start, the rescue
+  is the card in a PC: `python -m amigent.emu68card restore <backup> <card>`
+  on Windows, macOS or Linux
+  ([#19](https://github.com/akustikrausch/amigent/issues/19)).
+- Every writing call is a dry run until `confirm=True`, writes only on a card
+  where the user created `amigent-write-ok.txt`, refuses when the backup
+  fails, reads back what it wrote, and touches only the files its plan names.
+  Writing is untested on real hardware so far: try it on a second SD card.
+
 ### Building
 
 - A GitHub workflow builds amigentd, amigent-status and amigent-monitor with

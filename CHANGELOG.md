@@ -16,13 +16,35 @@ Versions follow [semver](https://semver.org). The number lives in
   and then `amigent-setup --update` for every saved Amiga, each in a process of
   its own, and says what to restart. A pip installation works the same way; a
   source checkout is told to `git pull`.
-- The remote desktop shows a card with the new version, a few lines of what is
-  new, *Update now*, *Later* and *Skip this version*. *Update now* closes it,
+- The remote desktop shows a slim banner with the new version, *Update now*,
+  *Later* and *Skip this version*; after *Later* the offer waits in the ⋯ menu
+  and in *About*, with a few lines of what is new. *Update now* closes it,
   updates the PC and the Amigas, renews the Start menu entry or the app on the
   Mac, and opens the remote desktop again, which then says how it went.
 - `python -m amigent.update check|on|off|apply`; `AMIGENT_NO_UPDATE_CHECK=1`
   switches the check off
   ([#15](https://github.com/akustikrausch/amigent/issues/15)).
+
+### Remote desktop
+
+- A new layout. The Amiga menu at the left of the toolbar shows the machine,
+  its state, OS and CPU, and switches between saved Amigas, the overview, a
+  one-off address and the manager; the overview has the same menu. The screen
+  list sits in the middle; rarer actions moved into a ⋯ menu.
+- The keyboard panel has tabs: Keys (now with cursor keys), Programs (menu
+  shortcuts with their keys, clipboard), Mouse & games and Shell. The modifier
+  keys also apply to the panel's own keys. In a narrow window the panel becomes
+  a sheet at the bottom.
+- *Game mode* captures the mouse and sends keys by position in one switch; a
+  note over the picture says so, and Esc leaves it.
+- *About* has tabs for Amigent, this Amiga, the connection (port, TLS,
+  protocol, link speed, ping, amigentd version) and the keyboard shortcuts. The
+  status bar is labelled and opens the connection details.
+- A dark appearance, following the system or chosen in the ⋯ menu.
+- Questions such as replacing a file or restarting from the overview are
+  dialogs in the page's style. *Get file* selects a file first, then gets it.
+- Every text in the pages is translatable; the machine manager and the
+  overview use the same language as the remote desktop.
 
 ### Repair
 

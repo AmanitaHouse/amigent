@@ -157,7 +157,7 @@ the original registry and credential files are retained for recovery.
 
 If a saved Amiga stops answering, Amigent searches the local /24 network and
 accepts a new address only when its certificate or key matches. To change an
-address yourself, use **Manage → Edit address**. Duplicate addresses are flagged
+address yourself, use **Manage Amigas… → Edit address**. Duplicate addresses are flagged
 and must be resolved before selecting either saved machine.
 
 Typing an IP address into **Connect** opens a one-off connection. It does not
@@ -197,7 +197,8 @@ message.
 From 1.5.0 Amigent notices a new release itself, at most once a day: the AI
 agent mentions it once (`amiga_status` lists it under `amigent_update`) and
 updates both halves with `amiga_update(apply=True)` once you agree; the remote
-desktop shows a card with *Update now*, *Later* and *Skip this version*. *Update
+desktop shows a slim banner with *Update now*, *Later* and *Skip this version*
+(the ✕); after *Later* the offer stays in the ⋯ menu and in *About*. *Update
 now* closes the remote desktop, updates the PC and every saved Amiga, renews the
 Start menu entry and opens the remote desktop again; what happened is in
 `update.log` next to `amigas.json`. Both work for pipx and pip installations; a
@@ -332,28 +333,35 @@ compares the screen with a saved picture, for tests of how a program looks.
   around the mouse pointer first. Chipset screens come in their own colours,
   graphics-card screens with 256. Your mouse and keys always go before the
   picture, so the Amiga reacts at once even while the screen is catching up.
-- **Screens.** A list in the toolbar shows all open screens and brings the one
-  you pick to the front.
+- **Screens.** With two or more open screens, a list in the middle of the toolbar
+  shows them and brings the one you pick to the front; it also has *Workbench to
+  front* and *Next screen*.
 - **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel.
-  *Mouse for games* captures the mouse and sends its movement instead of a
-  position; Esc releases it. In text mode, characters are typed through the
-  Amiga's keymap, so umlauts and AltGr characters arrive correctly. Direct mode
-  sends key positions and keeps keys pressed while you hold them, for games.
-- **Keyboard panel.** Esc, Tab, Del, Help, Return, F1 to F10 and both Amiga keys.
-  Amiga, Ctrl, Alt and Shift can be held for the next key (one click) or locked
-  (double click), plus buttons for common combinations.
+  Characters are typed through the Amiga's keymap, so umlauts and AltGr
+  characters arrive correctly. *Game mode* (tab *Mouse & games*) captures the
+  mouse and sends its movement instead of a position, and sends keys by position,
+  held as long as you hold them; Esc leaves it. *Advanced* has the two halves as
+  separate switches.
+- **Panel.** Four tabs: *Keys* (Esc, Tab, Del, Help, Return, F1 to F10, cursor
+  keys, and both Amiga keys, Ctrl, Alt and Shift for the next key with one click
+  or locked with a double click), *Programs* (menu shortcuts such as Open, Save
+  and Quit, and the clipboard), *Mouse & games* and *Shell* (Ctrl-C, Ctrl-D,
+  Ctrl-\). In a narrow window the panel becomes a sheet at the bottom.
+  *Keyboard shortcuts* in the ⋯ menu lists what the PC keyboard does.
 - **Files.** *Send file* in the toolbar, or drag files onto the screen. You
   choose the target folder on the Amiga; the transfer is checked with a checksum
   and asks before replacing a file. *Get file* lists the Amiga's folders with
-  their files, and a click saves one in the PC's downloads.
-- **Clipboard.** *Amiga → PC* copies the Amiga's clipboard to the PC, *PC →
+  their files; select one and *Get* saves it in the PC's downloads.
+- **Clipboard.** In the *Programs* tab and the ⋯ menu: *Amiga → PC* copies the Amiga's clipboard to the PC, *PC →
   Amiga* puts the PC's clipboard on the Amiga's, to paste there with Right
   Amiga+V. Text only.
 - **Text.** *Type text* sends a block of text; Ctrl+V sends the PC's clipboard.
 - **View.** Fit to window or 1:1, full screen (where the Windows or Cmd keys act
-  as the Amiga keys), screenshot as PNG, and a restart that writes pending data
-  to disk first.
-- **Pause the picture.** *Pause the picture* in the panel stops the Amiga
+  as the Amiga keys), screenshot as PNG, and *Restart Amiga…* in the ⋯ menu,
+  which writes pending data to disk first. Light and dark appearance follow the
+  system or are set in the ⋯ menu. The status bar shows screen size, link speed,
+  ping and free memory; a click opens *About → Connection*.
+- **Pause the picture.** *Pause the picture* in the ⋯ menu stops the Amiga
   reading its screen for 1, 5 or 15 minutes, so a test, a benchmark or a demo
   has the CPU and the chip bus to itself. The window keeps the last picture and
   shows the time left; mouse, keys and files keep working. *Resume* ends it
@@ -403,13 +411,14 @@ Run `amigent-viewer` to see **Your Amigas** when several machines are registered
 With one saved machine it opens that desktop directly. An explicit name, such
 as `amigent-viewer "Amiga 2"`, opens that machine.
 
-The selector remains available in every desktop and overview. It lists each
-machine's name, address and connection status. **Manage** provides **Rename**,
+The Amiga menu at the left of the toolbar is in every desktop and in the
+overview. It lists each machine with its state, opens **All Amigas at a glance**,
+connects to an address, and **Manage Amigas…** provides **Rename**,
 **Set default**, **Edit address** and **Remove**. Removing an entry keeps its
 credentials and history on disk. The default is used by tools that need one
 machine; the viewer still shows the overview when several are registered.
 
-Reachability refreshes every 20 seconds without taking over another viewer's
+Each Amiga is checked every 20 seconds without taking over another viewer's
 screen connection. The fleet overview also samples previews, OS, CPU and memory
 while the page is open. Each Amiga needs its own credentials from `amigent-setup`.
 

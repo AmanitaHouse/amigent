@@ -100,7 +100,8 @@ search it. There is no tracking.
 
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
-shows up in **Your Amigas** in `amigent-viewer`. Use **Manage** to rename it,
+shows up in the Amiga menu at the left of the `amigent-viewer` toolbar. Use
+**Manage Amigas…** there to rename it,
 choose the default, edit its address or remove it. A single MCP server can
 operate both: ask the agent to list your Amigas,
 then name the machine or machines in your request. Tools take an explicit
@@ -108,9 +109,9 @@ then name the machine or machines in your request. Tools take an explicit
 
 **The Amiga got a new address.**
 Nothing to do: Amigent searches the home network and takes the Amiga with your
-certificate or key. To change the saved address yourself, use **Manage →
-Edit address**. Typing an address into **Connect** opens a one-off connection
-and leaves the saved mapping unchanged.
+certificate or key. To change the saved address yourself, use **Manage Amigas… →
+Edit address**. **Connect to an address…** opens a one-off connection and leaves
+the saved mapping unchanged.
 
 **Directory Opus says it has waited long enough for a program.**
 Something in `SYS:WBStartup` never exits. Services go into `S:User-Startup`.

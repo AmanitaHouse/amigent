@@ -1,8 +1,8 @@
 # Stock Viewer Hear UI — safety review (offline)
 
-**Status:** Offline review — **stock Viewer still needs a separate safety correction before HW UI validation**  
-**Scope:** `src/amigent/viewer.py`, `src/amigent/web/viewer.js` on fork `main` (`79880b8`)  
-**Does not** modify the native diagnostic-dump fix PR.
+**Status:** Offline correction prepared on `contrib/viewer-hear-ui-safety` @ `e187e6e` — **stock Viewer HW UI still NOT TESTED**  
+**Scope:** `src/amigent/viewer.py`, `src/amigent/web/viewer.js`  
+**Does not** modify the native diagnostic-dump / packaging PRs.
 
 ## Findings (stock implementation)
 

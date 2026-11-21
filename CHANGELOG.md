@@ -122,6 +122,11 @@ Versions follow [semver](https://semver.org). The number lives in
 - When the remote desktop cannot reach the Amiga it gives one of a few fixed
   reasons in the page's language, including a TLS certificate that does not
   match; the full text goes to the terminal only. (#36)
+- `amiga_screen_text` reads `amigent-monitor` again, and other programs that
+  draw text into a bitmap of their own and copy it to their window against
+  flicker. The monitor's window is marked; `amiga_wait_text`,
+  `amiga_click_text` and a search with `find` leave it out unless it is named,
+  since its log repeats the agent's own calls. (#41)
 
 ### Tools and languages
 

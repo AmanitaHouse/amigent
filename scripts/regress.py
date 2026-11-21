@@ -471,6 +471,45 @@ class Run:
         clicked = self.s.amiga_click_text(f"{word}-out", window=TITLE)
         return f"{len(text.splitlines())} lines from our Shell; {clicked}"
 
+    def monitor_text(self):
+        """amigent-monitor draws off-screen and copies to its window (#41): its
+        window must still read as text, with figures that match amigentd's."""
+        import re
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        home = self.s.amiga_exec("GetEnv amigent-home")
+        if not home.startswith("rc=0"):
+            return "skip: no ENV:amigent-home, amigent-monitor not installed by amigent-setup"
+        title = "Amigent Monitor"
+        ours = not self.s.amiga_wait_window(title, timeout=1).startswith("window")
+        if ours:
+            self.s.amiga_start(f'"{home.splitlines()[1].strip()}/amigent-monitor"')
+            got = self.s.amiga_wait_window(title, timeout=20)
+            assert got.startswith("window"), got
+        try:
+            word = f"regress{random.randint(1000, 9999)}"
+            self.s.amiga_exec(f"Echo {word}-mon")  # the monitor logs the command
+            deadline = time.monotonic() + 15
+            while True:
+                text = self.s.amiga_screen_text(window=title, hidden=True)
+                chip = re.search(r"chip free\s+([\d.]+) (B|KB|MB|GB)", text)
+                if (f"{word}-mon" in text and chip) or time.monotonic() > deadline:
+                    break
+                time.sleep(1)
+            assert f"{word}-mon" in text and chip, text[-600:]
+            unit = {"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30}[chip.group(2)]
+            shown = float(chip.group(1)) * unit
+            real = int(self.session.ctl.sysinfo()["chip_free"])
+            assert abs(shown - real) <= max(64 << 10, real // 20), (chip.group(0), real)
+            # the log repeats the agent's own calls: waiting for a text skips it
+            waited = self.s.amiga_wait_text(f"{word}-mon", timeout=2)
+            assert waited.startswith("timeout"), waited
+        finally:
+            if ours:
+                self.s.amiga_task("amigent-monitor", signal="C")
+        return (f"{len(text.splitlines())} lines from the monitor; {chip.group(0).split()[-2]} "
+                f"{chip.group(2)} Chip free there, {real >> 10} KB by SYSINFO")
+
     def wait(self):
         if not self._new():
             return "skip: amigentd before protocol 5"
@@ -615,7 +654,7 @@ class Run:
 
 ORDER = ["status", "version", "exec", "missing_volume", "job", "live_output", "loaded", "memory",
          "journal", "tasks", "trace", "probes", "state", "gurus", "screen_diff", "emulator", "files", "screen", "open_shell",
-         "drag_measure", "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
+         "drag_measure", "typing", "ui", "hold", "arexx", "screen_text", "monitor_text", "wait", "steps", "packing", "tree",
          "install_undo", "debug", "clipboard", "notes", "aminet", "pause", "takeover", "pointer",
          "close_shell"]
 

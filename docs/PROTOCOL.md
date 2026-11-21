@@ -693,15 +693,21 @@ TEXT answers lines for the front screen:
 `I` tells for how long amigentd records (`-1`: not at all), how many older
 runs it dropped to make room, and its store. `W` lines come front to back as
 in UITREE, flags `a` active, `b` backdrop, `o` open before recording started
-(its text may be missing until it redraws). `L` lines are the rows of text
+(its text may be missing until it redraws), `m` amigent-monitor's window
+(from 1.5.0; its log repeats the agent's own calls, so WAIT for a text skips
+it). `L` lines are the rows of text
 of the window above them, in screen pixels, top to bottom: runs on one line
 close together are joined, ones further apart than twice the font height
 stay separate rows with boxes of their own. Rows of a window behind another
 are listed too; the client can tell from the `W` boxes which are covered.
 
 Only what goes through graphics.library's Text() is seen: not text drawn as
-pictures (many buttons, icons, games), not text a program renders into a
-bitmap of its own and copies over, and not windows on other screens.
+pictures (many buttons, icons, games) and not windows on other screens. From
+1.5.0 text a program draws into a bitmap of its own (a rastport without a
+layer, or with a layer alone in its Layer_Info) is kept for that bitmap and
+moves into the window with a plain ClipBlit or BltBitMapRastPort (minterm
+`0xC0`) from it, as programs that draw off-screen against flicker do; older
+amigentd miss such text.
 
 ### wait
 

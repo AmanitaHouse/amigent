@@ -459,6 +459,41 @@ def test_click_point_lies_on_the_word():
     assert 140 < x < 200 and y == 5
 
 
+MONITOR = [
+    "I\t30\t0\t5\t4096",
+    "W\t00000009\t0\t0\t300\t200\tm\tAmigent Monitor",
+    "L\t00000009\t10\t20\t200\t10\tC  click_text Ready",
+    "L\t00000009\t10\t40\t200\t10\tchip free          1.81 MB",
+    "W\t00000001\t320\t0\t300\t200\ta\tShell",
+    "L\t00000001\t330\t20\t80\t10\tReady",
+]
+
+
+def test_the_monitor_window_is_read_and_marked():
+    st = screentext.parse(MONITOR)
+    assert st.windows[0].monitor and not st.windows[1].monitor
+    text = screentext.render(st)
+    assert "chip free" in text and "amigent-monitor" in text
+    assert "chip free" in screentext.render(st, window="Amigent Monitor")
+
+
+def test_searches_and_clicks_skip_the_monitor_unless_named():
+    st = screentext.parse(MONITOR)
+    win, row = screentext.find_row(st, "Ready")
+    assert win.title == "Shell"
+    win, row = screentext.find_row(st, "click_text", window="Monitor")
+    assert win.monitor
+    assert screentext.find_row(st, "click_text") is None
+    found = screentext.render(st, find="ready")
+    assert "Shell" in found and "Monitor" not in found
+    assert "click_text" in screentext.render(st, window="monitor", find="click")
+
+
+def test_older_amigentd_without_the_flag_parse_as_before():
+    st = screentext.parse(LINES)
+    assert not any(w.monitor for w in st.windows)
+
+
 # ---- notes
 
 

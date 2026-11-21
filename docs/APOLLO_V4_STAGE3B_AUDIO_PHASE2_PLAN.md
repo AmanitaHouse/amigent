@@ -1,6 +1,6 @@
 # Apollo V4 Stage 3B Phase 2 — Nonempty capture & Hear preparation
 
-**Status:** Offline preparation only — **no V4 contact authorised**  
+**Status:** Phase 2A **executed** — nonempty capture results in `docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md`. Hear/stream remain **not authorised** by that session.  
 **Preserves Phase 1:** valid-empty `audio(0)` on U-DAE (`docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md`) — do **not** rewrite that as nonempty capture  
 **Parent tip:** `62fa1a5` · Fork `main`: `79880b8`
 

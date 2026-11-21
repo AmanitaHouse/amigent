@@ -31,7 +31,7 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 
 ## Explicitly **not** hardware-validated by this session
 
-- AUDIO opcode 48 one-shot: **PASSED ON HW (valid empty)** — `docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md`; Viewer Hear still NOT RUN  
+- Viewer Hear / streaming AUDIO / F-DAE AUDIO — still **NOT RUN ON HW**  
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  
@@ -43,6 +43,13 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 **F-DAE** protocol-6 smoke: `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md`.  
 **Stage 3A probes:** U-PRB + F-PRB executed on V4 while production stayed up — `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` (PASSED ON HW; does not validate install selection).
 
+**Stage 3B AUDIO (U-DAE exclusive):**
+
+| Phase | Result | Doc |
+|-------|--------|-----|
+| Phase 1 one-shot quiet | **PASSED ON HW (valid empty)** | `docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md` |
+| Phase 2A one-shot + AHI source | **PASSED ON HW (nonempty PCM + nonzero signal)** | `docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md` |
+
 Software unit tests and host harnesses are **not** substitutes for the untested rows above.
 
 ## Mapping to contributions (do not over-claim)
@@ -52,7 +59,8 @@ Software unit tests and host harnesses are **not** substitutes for the untested 
 | Upstream **#31** ApolloOS identify | Board/OS context; **U-PRB** HW stdout `ApolloOS` / rc 0 | Negative detection / 1.5.0 private detect not proven |
 | Fork review **#4** daemon foundation | U-DAE launches; protocol 6; SYSINFO OS/CPU/board | Not a substitute for #5–#8 feature tests |
 | Fork **#5** MMIO | `poke=0` observed only | No live PEEK/POKE refusal trial |
-| Fork **#6** / **#8** AUDIO | Capability `audio=1` only | No opcode 48 / Hear |
+| Fork **#6** AUDIO | Opcode 48 one-shot nonempty capture on U-DAE (Phase 2A) | Fidelity; stream; F-DAE AUDIO |
+| Fork **#8** Viewer Hear | Capability / daemon path only | Hear UI / `amiga_listen` still NOT RUN |
 | Fork **#7** packaging | Exact U-DAE hash exercised | Installer/update paths not run |
 | Fork **#10** probe AFF_FPGA | **F-PRB** HW: `ApolloOS`+`68080` / rc 0 (OS∧AFF_FPGA) | Installer consumption of exit code; `$DFF3FC` fallback |
 | Fork **F-DAE** | Proto-6 exclusive smoke PASSED ON HW | AUDIO/MMIO/probe/PIP still NOT RUN |

@@ -35,6 +35,7 @@ class Spec:
     family: str
     target: str
     label: str
+    system: str = ""  # an OS the build needs, such as ApolloOS; "" for any
 
     @property
     def verified(self) -> bool:
@@ -47,16 +48,21 @@ SPECS: tuple[Spec, ...] = (
     Spec("amigentd.000", CPU_68000, 0, SUPPORTED, "68000", "68000", "68000"),
     Spec("amigentd", CPU_68020, 1, SUPPORTED, "general", "68020", "general"),
     Spec("amigentd.080", CPU_68080, 0, EXPERIMENTAL, "68080", "68080", "68080 experimental"),
+    # optional, not in the package yet: picked only where ApolloOS is recognised
+    Spec("amigentd.apollo", CPU_68080, 2, SUPPORTED, "apollo", "68080", "ApolloOS", "ApolloOS"),
 )
 
 
 @dataclass(frozen=True)
 class Machine:
     cpu: int | None
+    apollo: bool = False  # ApolloOS runs here
 
 
 def fits(spec: Spec, machine: Machine) -> bool:
     """True when this build's instructions can run on the machine."""
+    if spec.system == "ApolloOS" and not machine.apollo:
+        return False
     if machine.cpu is None:
         return spec.min_cpu <= CPU_68000
     return machine.cpu >= spec.min_cpu

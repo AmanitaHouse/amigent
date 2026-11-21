@@ -99,6 +99,16 @@ Versions follow [semver](https://semver.org). The number lives in
 - ApolloOS is told from AmigaOS on the same Vampire (exec 51 and the 68080
   bit), for an Apollo build of amigentd once there is one; until then nothing
   changes there. ApolloOS and AROS are no longer called AmigaOS 4. (#31)
+- `amiga_install_begin` no longer copies the whole system by default. It
+  records the system folders (name, size, date) and copies the named
+  folders, S:Startup-Sequence, S:User-Startup, the files given in `touch`,
+  and what `amiga_aminet_install` or `amiga_put` overwrite while the
+  installation is open; `full=True` copies everything as before. First comes
+  an estimate (files, bytes, time) and a check of the free space, and above a
+  limit it asks for `confirm=True`. The copying runs as a job that
+  `amiga_break` can stop, and a backup without its completion marker is never
+  used. `amiga_install_end` and `amiga_install_undo` name the system files
+  that changed without a copy. Older records still undo. (#39)
 
 ### Security
 

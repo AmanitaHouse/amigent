@@ -302,6 +302,35 @@ once; `amiga_jobs` lists them with their return codes, `amiga_job_output`
 reads what one printed so far (with amigentd 1.4.0 also while it runs; the
 Shell passes output on in blocks of a few KB) and `amiga_break(job=n)` stops it.
 
+Installations that can be taken back: `amiga_install_begin(name, folders=...)`
+records the folders an installation may touch and copies aside, on the Amiga
+itself, what undo needs. The folders named in `folders` are copied whole. The
+system folders (C:, LIBS:, DEVS:, S:, L:, ENVARC:, SYS:WBStartup,
+SYS:Classes) are only recorded with name, size and date, which takes one
+listing instead of copying thousands of files. Of them, only these are
+copied: S:Startup-Sequence and S:User-Startup, the files named in `touch`
+(for example `touch="LIBS:foo.library"`), and files that
+`amiga_aminet_install` or `amiga_put` are about to overwrite while the
+installation is open. `full=True` copies the system folders whole, as
+before 1.5.0.
+
+A record shows that a file changed, but it can't bring back the old content.
+So `amiga_install_end` names every system file that changed or was deleted
+without a copy, and `amiga_install_undo` removes what came, restores what it
+has a copy of, and names the files it could not restore. When the installer
+is known to write system files, name them in `touch`.
+
+Before anything is copied, the answer gives an estimate: files, bytes, and
+time, which gets more accurate after each backup on that Amiga. It also checks
+the free space on the drive that holds the copies. Above 2000 files, 32 MB
+or 5 minutes, nothing is copied until the call is repeated with
+`confirm=True`; `estimate_only=True` only gives the estimate. The copying runs
+as a background job at low priority, which can be followed with
+`amiga_job_output` and stopped with `amiga_break(job=n)`. The job writes a
+marker as its last step, only when every copy went well; a backup without
+the marker is never used, and `amiga_install_end` refuses until it is there.
+Records and copies from earlier versions still work with undo.
+
 After a crash: amigentd reports exec's last alert, and Amigent puts it in
 words: `8100000C` is "exec.library: the memory list is insane; dead end". The
 PC keeps the agent's last calls for each Amiga, so `amiga_status` also says

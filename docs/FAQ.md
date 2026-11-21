@@ -180,8 +180,11 @@ installation.
 
 **Can an installation be taken back?**
 Ask the agent to make it undoable: `amiga_install_begin` records the system
-folders and copies them aside on the Amiga, `amiga_install_end` lists what
-came and changed, `amiga_install_undo` puts it all back.
+folders, copies the program's folders and the system files it is known to
+touch aside on the Amiga, `amiga_install_end` lists what came and changed,
+`amiga_install_undo` puts back what it has copies of and names the rest. With
+`full=True` the system folders are copied whole. See the
+[guide](GUIDE.md) for details.
 
 **Screenshots of a graphics-card screen look a bit rough.**
 They're 256 colours on purpose. It's plenty for reading a screen and keeps the

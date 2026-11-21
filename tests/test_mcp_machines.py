@@ -51,6 +51,10 @@ class MemoryCommands:
     def write_file(self, path, data):
         self.files[path] = data
 
+    def delete(self, path):
+        if self.files.pop(path, None) is None:
+            raise AmigaError('object not found', 205)
+
     def list_dir(self, path):
         return []
 
@@ -142,8 +146,12 @@ def test_listing_is_read_only_and_reports_conflicts(two, monkeypatch):
 
 def test_same_package_install_keeps_files_and_records_separate(two, monkeypatch):
     a, b, sa, sb = two
-    monkeypatch.setattr(install, 'expand', lambda ctl, paths: paths)
-    monkeypatch.setattr(install, 'snapshot', lambda ctl, path: {})
+    monkeypatch.setattr(install, 'expand_map', lambda ctl, paths: (paths, {}))
+    monkeypatch.setattr(install, 'snapshot', lambda ctl, path, crc=True: {})
+    # the backup job: started, ended, complete (tests/test_install_backup.py runs real ones)
+    monkeypatch.setattr(server, '_start_job', lambda script, title='': 1)
+    monkeypatch.setattr(server, '_wait_job', lambda number, wait: '')
+    monkeypatch.setattr(server, '_marker_ok', lambda record: True)
     monkeypatch.setattr(server.files, 'makedirs', lambda ctl, path: None)
     monkeypatch.setattr(server.aminet, 'tool_for', lambda name: None)
     archive = io.BytesIO()

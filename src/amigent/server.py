@@ -708,6 +708,17 @@ def amiga_job(command: str, wait: float = 600) -> str:
     amiga_jobs (all of them), amiga_job_output (what it printed so far) and
     amiga_break(job=n). A return code other than 0 is said at the end.
     """
+    number = _start_job(command)
+    said = _wait_job(number, wait)
+    if said is not None:
+        return said
+    return (f"job {number} still running; amiga_job_output({number}) shows what it printed, "
+            f"amiga_break(job={number}) stops it")
+
+
+def _start_job(command: str, title: str = "") -> int:
+    """Starts command (one or more lines) as a background job; its number.
+    title stands in amiga_jobs instead of the command."""
     number = _next_job()
     out, done, cli = (_job_file(number, k) for k in ("out", "done", "cli"))
     lines = [x for x in command.strip().splitlines() if x.strip()]
@@ -731,7 +742,7 @@ def amiga_job(command: str, wait: float = 600) -> str:
             f'Echo >{done} "$RC"\n'
         )
     answers = _with_ctl(lambda: perform(_session().ctl, extra + [
-        Request.write(_job_file(number, "cmd"), "; ".join(lines).encode("iso-8859-1", "replace")),
+        Request.write(_job_file(number, "cmd"), (title or "; ".join(lines)).encode("iso-8859-1", "replace")),
         Request.write(out, b""),
         Request.write(_job_file(number, "script"), script.encode("iso-8859-1")),
         Request.exec(f"Run >{cli} Execute {_job_file(number, 'script')}")]))
@@ -739,6 +750,12 @@ def amiga_job(command: str, wait: float = 600) -> str:
         if isinstance(answer, AmigaError):
             raise answer
     _session().last_started = command
+    return number
+
+
+def _wait_job(number: int, wait: float) -> str | None:
+    """The job's output with its return code once it ended within wait seconds, else None."""
+    out, done = _job_file(number, "out"), _job_file(number, "done")
     deadline = time.monotonic() + wait
     pause = 0.5  # short jobs are common: look soon, then back off to 5 s
     seen_rc = 0.0
@@ -758,8 +775,17 @@ def amiga_job(command: str, wait: float = 600) -> str:
             return _job_result(number, rc.decode("iso-8859-1"), output)
         time.sleep(min(pause, max(deadline - time.monotonic(), 0)))
         pause = min(pause * 2, 5)
-    return (f"job {number} still running; amiga_job_output({number}) shows what it printed, "
-            f"amiga_break(job={number}) stops it")
+    return None
+
+
+def _job_ended(number: int) -> str | None:
+    """The return code of a job that ended, None while it runs."""
+    done, rc = _with_ctl(lambda: perform(_session().ctl, [
+        Request.read_file(_job_file(number, "done")), Request.read_file(_job_file(number, "rc"))]))
+    for answer in (done, rc):
+        if not isinstance(answer, AmigaError):
+            return answer.decode("iso-8859-1").strip() or "?"
+    return None
 
 
 @mcp.tool()
@@ -1674,10 +1700,20 @@ def amiga_put(local_path: str, amiga_path: str) -> str:
 
     amiga_path is the full target name, e.g. 'Work:Games/Foo'. Files the Amiga
     already has with the same size and CRC are left alone, so putting a tree
-    again only sends what changed.
+    again only sends what changed. While an installation is open
+    (amiga_install_begin), recorded files it is about to overwrite are copied
+    aside first, so undo can bring them back.
     """
     src = Path(local_path).expanduser()
-    return _with_ctl(lambda: files.put(_session().ctl, src, amiga_path))
+    guarded = ""
+    if _installs_open():
+        if src.is_dir():
+            targets = [_join(amiga_path, p.relative_to(src).as_posix()) for p in src.rglob("*") if p.is_file()]
+        else:
+            targets = [amiga_path]
+        guarded = _install_guard(targets)
+    said = _with_ctl(lambda: files.put(_session().ctl, src, amiga_path))
+    return f"{said}; {guarded}" if guarded else said
 
 
 @mcp.tool()
@@ -3071,39 +3107,192 @@ def _home() -> str:
     return AMIGA_DIR
 
 
-@mcp.tool()
-def amiga_install_begin(name: str, folders: str = "", system: bool = True) -> str:
-    """Before installing something: take stock so it can be undone, and copy the system aside.
+def _volume_free(path: str) -> tuple[str, int, int] | None:
+    """(volume, free bytes, block size) of the drive path is on; None when that
+    can't be told (an assign is followed to its folder, a device name is not)."""
+    try:
+        vols = _with_ctl(lambda: _session().ctl.volumes())
+    except (AmigaError, AttributeError):
+        return None
+    by_name = {str(v["name"]).rstrip(":").lower(): v for v in vols}
+    name = path.split(":", 1)[0]
+    for _ in range(4):
+        v = by_name.get(name.lower())
+        if v:
+            return str(v["name"]), int(v["free"]), int(v.get("blocksize") or 512)
+        try:
+            found = _with_ctl(lambda: _session().ctl.exec(f"Assign {name}: EXISTS", timeout=15))
+        except AmigaError:
+            return None
+        dirs = install.parse_assign(found.output) if found.rc == 0 else []
+        if not dirs or ":" not in dirs[0] or dirs[0].split(":", 1)[0].lower() == name.lower():
+            return None
+        name = dirs[0].split(":", 1)[0]
+    return None
 
-    Records C:, LIBS:, DEVS:, S:, L:, ENVARC:, SYS:WBStartup and SYS:Classes,
-    plus folders (comma separated, e.g. the program's target folder), and copies
-    the existing ones aside on the Amiga. system=False watches only folders,
-    for a game that stays in its own drawer. Then install as usual and call
+
+def _marker_ok(record: install.Record) -> bool:
+    """The backup's marker is there and belongs to this record (not an older one of the name)."""
+    try:
+        data = _with_ctl(lambda: _session().ctl.read_file(record.marker))
+    except AmigaError:
+        return False
+    return data.decode("iso-8859-1").strip() == record.started
+
+
+def _backup_state(record: install.Record) -> str:
+    """complete, running or failed. A running backup is looked at on the Amiga:
+    the marker makes it complete, a job that ended (or is gone, after a
+    restart) without it failed."""
+    if record.backup in ("", "complete"):
+        return "complete"
+    if record.backup == "failed":
+        return "failed"
+    if _marker_ok(record):
+        state = "complete"
+    else:
+        try:
+            _with_ctl(lambda: _session().ctl.stat(_job_file(record.job, "cmd")))
+            gone = False
+        except AmigaError:
+            gone = True
+        if not gone and _job_ended(record.job) is None:
+            return "running"
+        state = "complete" if _marker_ok(record) else "failed"
+    record.backup = state
+    install.save(_amiga(), record)
+    return state
+
+
+def _install_ready(record: install.Record, path) -> str:
+    copied = install.estimate(record, record.copied or [])
+    lines = [f"ready: {record.estimate.get('entries', 0)} entries in {len(record.paths)} folders "
+             f"recorded, {copied['files']} files ({install.size_text(copied['bytes'])}) copied to "
+             f"{record.store}"]
+    if not record.full and record.nocrc:
+        lines.append("the system folders are recorded, not copied: undo removes what the "
+                     "installation adds there, but can restore only the system files that "
+                     "were copied (touch=..., full=True, and what amiga_aminet_install or "
+                     "amiga_put overwrite from now on); amiga_install_end names the others")
+    lines.append(f"install now, then amiga_install_end({record.name!r}). Record: {path}")
+    whole = _install_checkpoint(record.name)
+    return "\n".join(lines + ([whole] if whole else []))
+
+
+@mcp.tool()
+def amiga_install_begin(name: str, folders: str = "", system: bool = True, touch: str = "",
+                        full: bool = False, confirm: bool = False, estimate_only: bool = False,
+                        wait: float = 120) -> str:
+    """Before installing something: take stock so it can be undone, and copy aside what undo needs.
+
+    folders (comma separated, e.g. the program's target folder) are recorded
+    and copied aside whole. With system=True (the default) C:, LIBS:, DEVS:,
+    S:, L:, ENVARC:, SYS:WBStartup and SYS:Classes are recorded as well (name,
+    size, date), but not copied: of them only S:Startup-Sequence,
+    S:User-Startup and the files in touch (comma separated, e.g.
+    'LIBS:foo.library') are copied, plus what amiga_aminet_install and
+    amiga_put are about to overwrite while the installation is open.
+    full=True copies the system folders whole (slow on a full system).
+    system=False watches only folders, for a game that stays in its drawer.
+
+    A record can tell that a file changed but not bring its old content back:
+    amiga_install_end and amiga_install_undo name each system file that changed
+    or went without a copy. When the installer is known to write system files,
+    name them in touch.
+
+    First comes an estimate (files, bytes, time) and a check of the free
+    space; above 2000 files, 32 MB or 5 minutes nothing is copied until the
+    call is repeated with confirm=True (ask the user first). estimate_only=True
+    only tells. The copying runs as a background job: after wait seconds the
+    answer gives its number for amiga_job_output (progress) and
+    amiga_break(job=n); a backup stopped or failed is never used. Calling this
+    again says whether it is complete. Then install as usual and call
     amiga_install_end(name).
     """
     name = install.name_ok(name)
+    amiga = _amiga()
+    try:
+        old = install.load(amiga, name)
+    except AmigaError:
+        old = None
+    note = ""
+    if old and not old.done and old.backup == "running":
+        state = _backup_state(old)
+        if state == "running":
+            return (f"the backup for {name!r} still runs as job {old.job}: amiga_job_output({old.job}) "
+                    f"shows how far it got, amiga_break(job={old.job}) stops it. Do not install yet")
+        if state == "complete":
+            return _install_ready(old, install.folder_for(amiga) / f"{name}.json")
+        note = "the earlier backup did not complete (stopped or failed); starting over\n"
     extra = [f.strip() for f in folders.split(",") if f.strip()]
+    touched = [t.strip() for t in touch.split(",") if t.strip()]
     base = list(install.SYSTEM) if system else []
     if not base and not extra:
         raise AmigaError("with system=False, name the folders to watch")
-    paths = _with_ctl(lambda: install.expand(_session().ctl, base + [f for f in extra if f not in base]))
-    record = install.Record(name, _home(), paths, started=time.strftime("%Y-%m-%d %H:%M:%S"))
+    if full and not system:
+        raise AmigaError("full=True copies the system folders whole; it needs system=True")
+    paths, aliases = _with_ctl(lambda: install.expand_map(_session().ctl, base + [f for f in extra if f not in base]))
+    record = install.Record(name, _home(), paths, started=time.strftime("%Y-%m-%d %H:%M:%S"),
+                            aliases=aliases, full=full)
+    began = time.monotonic()
     for path in record.paths:
-        snap = _with_ctl(lambda: install.snapshot(_session().ctl, path))
+        snap = _with_ctl(lambda: install.snapshot(_session().ctl, path, crc=False))
         if snap is None:
             record.missing.append(path)
         record.before[path] = snap or {}
-    script = install.begin_script(record)
-    _with_ctl(lambda: _session().ctl.write_file("RAM:amigent-install.script", script.encode("iso-8859-1")))
-    result = _with_ctl(lambda: _session().ctl.exec("Execute RAM:amigent-install.script", timeout=3600))
-    if result.rc:
-        raise AmigaError(f"copying the system aside failed (rc={result.rc}): {result.output[-500:]}")
-    path = install.save(_amiga(), record)
-    files_count = sum(len(v) for v in record.before.values())
-    whole = _install_checkpoint(name)
-    return (f"ready: {files_count} entries in {len(record.paths)} folders recorded and copied to "
-            f"{record.store}; install now, then amiga_install_end({name!r}). Record: {path}"
-            + (f"\n{whole}" if whole else ""))
+    listed = time.monotonic() - began
+    copies = install.plan(record, extra, touched)
+    est = install.estimate(record, copies, install.factor(amiga), listed=listed)
+    lines = [install.describe(est)]
+    space = _volume_free(record.home)
+    if space:
+        volume, free, block = space
+        need = install.needed_space(est, block)
+        if need > free:
+            raise AmigaError(f"not enough room on {volume} for the backup in {record.store}: about "
+                             f"{install.size_text(need)} needed, {install.size_text(free)} free. "
+                             "Free some, or copy less (fewer folders, full=False); nothing was copied")
+        lines.append(f"{volume} has {install.size_text(free)} free, the copies need about "
+                     f"{install.size_text(need)}")
+    else:
+        lines.append(f"the free space for {record.store} could not be checked")
+    if estimate_only:
+        return "\n".join(["estimate only, nothing recorded or copied:"] + lines)
+    over = install.over_limit(est)
+    if over and not confirm:
+        return "\n".join([f"the backup would be large: {', '.join(over)}. Nothing was recorded or "
+                          "copied. Ask the user; to go on, amiga_install_begin(..., confirm=True). "
+                          "Less to copy: full=False, fewer folders, or only the system files the "
+                          "installation writes in touch"] + lines)
+    wanted = {e.lower() for e in extra} | {d.lower() for n, ds in aliases.items()
+                                           if n.lower() in {e.lower() for e in extra} for d in ds}
+    crc_paths = [p for p in copies if p in record.paths and p.lower() in wanted]
+    for path in crc_paths:  # what is copied whole and was named: compared by content at the end
+        record.before[path] = _with_ctl(lambda: install.snapshot(_session().ctl, path)) or {}
+    record.nocrc = [p for p in record.paths if p not in crc_paths]
+    record.copied, record.estimate, record.backup = copies, est, "running"
+    try:  # an old marker of this name must not make a new backup look complete
+        _with_ctl(lambda: _session().ctl.delete(record.marker))
+    except AmigaError:
+        pass
+    record.job = _start_job(install.begin_script(record), title=f"Amigent backup for installation {name}")
+    saved = install.save(amiga, record)
+    started = time.monotonic()
+    said = _wait_job(record.job, wait)
+    if said is None:
+        return note + "\n".join(lines + [
+            f"the backup runs as job {record.job}: amiga_job_output({record.job}) shows how far it "
+            f"got, amiga_break(job={record.job}) stops it (a stopped backup is not used). "
+            f"amiga_install_begin({name!r}) again says when it is complete; install only then"])
+    if _marker_ok(record):
+        install.learn(amiga, install.estimate(record, copies)["seconds"], time.monotonic() - started)
+        record.backup = "complete"
+        install.save(amiga, record)
+        return note + "\n".join(lines) + "\n" + _install_ready(record, saved)
+    record.backup = "failed"
+    install.save(amiga, record)
+    raise AmigaError(f"the backup did not complete and will not be used: {said[-600:]}\n"
+                     f"amiga_install_begin({name!r}) again starts over; nothing is installed yet")
 
 
 def _install_checkpoint(name: str) -> str:
@@ -3120,21 +3309,69 @@ def _install_checkpoint(name: str) -> str:
             f"file={str(target)!r}) puts everything back as it was, memory included")
 
 
+def _open_installs() -> list[install.Record]:
+    """Installations begun (1.5.0 records) and not yet ended."""
+    return [r for r in install.listing(_amiga())
+            if not r.done and r.copied is not None and r.backup in ("running", "complete")]
+
+
+def _installs_open() -> bool:
+    try:
+        return bool(_open_installs())
+    except AmigaError:
+        return False
+
+
+def _install_guard(fulls: list[str]) -> str:
+    """Before something overwrites files: the recorded files of an open
+    installation that have no copy yet are copied aside first."""
+    if not fulls:
+        return ""
+    said = []
+    for record in _open_installs():
+        todo = install.to_guard(record, fulls)
+        if not todo:
+            continue
+        script = install.guard_script(record, todo)
+        _with_ctl(lambda: _session().ctl.write_file("RAM:amigent-guard.script", script.encode("iso-8859-1")))
+        result = _with_ctl(lambda: _session().ctl.exec("Execute RAM:amigent-guard.script", timeout=600))
+        if result.rc:
+            raise AmigaError(f"could not copy {', '.join(todo[:6])} aside for the installation "
+                             f"{record.name!r} before overwriting (rc={result.rc}): "
+                             f"{result.output[-300:]}; nothing was written")
+        record.copied += todo
+        install.save(_amiga(), record)
+        said.append(f"copied {len(todo)} file(s) aside for the installation {record.name!r} "
+                    "before overwriting them")
+    return "; ".join(said)
+
+
 @mcp.tool()
 def amiga_install_end(name: str) -> str:
-    """After installing: what came, changed and went; keeps what undo needs, writes a repair module."""
+    """After installing: what came, changed and went; keeps what undo needs, writes a repair module.
+
+    Names the system files that changed or went without a copy from before:
+    undo can't restore those."""
     record = install.load(_amiga(), name)
     if record.done:
         return f"{name!r} was finished already; amiga_install_undo({name!r}) takes it back"
+    state = _backup_state(record)
+    if state == "running":
+        raise AmigaError(f"the backup for {name!r} still runs (job {record.job}); "
+                         f"amiga_install_begin({name!r}) says when it is complete")
+    if state == "failed":
+        raise AmigaError(f"the backup for {name!r} did not complete, so there is nothing to undo "
+                         f"from. If nothing is installed yet, amiga_install_begin({name!r}) again")
     kinds: dict[str, dict] = {}  # full path -> entry as it is after the installation
     for path in record.paths:
-        after = _with_ctl(lambda: install.snapshot(_session().ctl, path))
+        after = _with_ctl(lambda: install.snapshot(_session().ctl, path, crc=path not in record.nocrc))
         added, changed, removed = install.compare(record.before.get(path), after)
         for rel in added + changed:
             kinds[install.join(path, rel)] = (after or {})[rel]
         record.added += [install.join(path, r) for r in added]
         record.changed += [install.join(path, r) for r in changed]
         record.removed += [install.join(path, r) for r in removed]
+    record.unrestorable = [f for f in record.changed + record.removed if not record.has_copy(f)]
     keeps = record.added or record.changed
     for script, name_ in ((install.prune_script(record), "prune"),
                           (install.apps_script(record, kinds) if keeps else "", "apps")):
@@ -3161,13 +3398,18 @@ def amiga_install_end(name: str) -> str:
     for label, items in (("added", record.added), ("changed", record.changed), ("removed", record.removed)):
         if items:
             lines.append(f"{label}: {some(items)}")
+    if record.unrestorable:
+        lines.append(f"no copy from before, so undo can't restore them: {some(record.unrestorable)}")
     lines += notes_ + [f"amiga_install_undo({name!r}) takes it back. Record: {path}"]
     return "\n".join(lines)
 
 
 @mcp.tool()
 def amiga_install_undo(name: str) -> str:
-    """Take an installation back: remove what it added, restore what it changed or removed."""
+    """Take an installation back: remove what it added, restore what it changed or removed.
+
+    Only what the backup holds can be restored; system files that changed or
+    went without a copy are named, the rest is as before."""
     record = install.load(_amiga(), name)
     if not record.done:
         raise AmigaError(f"{name!r} was not finished: call amiga_install_end({name!r}) first")
@@ -3188,24 +3430,36 @@ def amiga_install_undo(name: str) -> str:
                         pass
                     if snap_type == "dir":
                         dirs.append(full)
+    lost = [f for f in record.changed + record.removed if not record.has_copy(f)]
     script = install.undo_script(record, dirs)
     _with_ctl(lambda: _session().ctl.write_file("RAM:amigent-undo.script", script.encode("iso-8859-1")))
     result = _with_ctl(lambda: _session().ctl.exec("Execute RAM:amigent-undo.script", timeout=3600))
     left = []
     for path in record.paths:
-        after = _with_ctl(lambda: install.snapshot(_session().ctl, path))
+        after = _with_ctl(lambda: install.snapshot(_session().ctl, path, crc=path not in record.nocrc))
         added, changed, removed = install.compare(record.before.get(path), after)
         left += [install.join(path, r) for r in added + changed + removed]
+    lost_now = [f for f in lost if f in left]
+    left = [f for f in left if f not in lost]
     module = install.join(install.join(record.home, "repair.d"), f"{record.name}.repair")
     try:
         _with_ctl(lambda: _session().ctl.delete(module))
     except AmigaError:
         pass
     record.undone = not left
+    record.unrestorable = lost_now
     install.save(_amiga(), record)
+    unsaid = ""
+    if lost_now:
+        unsaid = (f"\nnot restored, there was no copy from before the installation: "
+                  f"{', '.join(lost_now[:12])}" + (f" and {len(lost_now) - 12} more" if len(lost_now) > 12 else "")
+                  + "; they stay as the installation left them (a repair, the program's own "
+                  "uninstaller or a backup of the system brings them back)")
     if left:
         return (f"{name!r} taken back except {len(left)} entries (rc={result.rc}): "
-                + ", ".join(left[:12]))
+                + ", ".join(left[:12]) + unsaid)
+    if lost_now:
+        return f"{name!r} taken back as far as the backup goes: what came is gone" + unsaid
     return f"{name!r} taken back: the recorded folders are as before the installation"
 
 
@@ -3278,7 +3532,15 @@ def amiga_aminet_install(path: str, target: str) -> str:
     if tool:
         found = _with_ctl(lambda: _session().ctl.exec(f"Which {tool}", timeout=15))
         has_tool = found.rc == 0
+    guarded = ""
     if has_tool:
+        if _installs_open():  # copy aside what the archive will overwrite, before it does
+            inside = _archive_members(name, data)
+            if inside is None:
+                guarded = (f"; note: Amigent can't look into {name}, so files it overwrote in "
+                           "recorded system folders have no copy for undo")
+            else:
+                guarded = _install_guard([_join(target, "/".join(p)) for p in map(_member_parts, inside) if p])
         archive = _join("T:", name)
         _with_ctl(lambda: _session().ctl.write_file(archive, data))
         result = _with_ctl(lambda: _session().ctl.exec(aminet.unpack_line(tool, archive, target), timeout=900))
@@ -3312,11 +3574,33 @@ def amiga_aminet_install(path: str, target: str) -> str:
                 local = Path(tmp, *parts)
                 local.parent.mkdir(parents=True, exist_ok=True)
                 local.write_bytes(body)
+            if _installs_open():
+                guarded = _install_guard([_join(target, "/".join(p))
+                                          for p in map(_member_parts, members) if p])
             _with_ctl(lambda: files.put(_session().ctl, Path(tmp), target))
         how = f"unpacked on the PC ({len(members)} files) and sent"
     top = _with_ctl(lambda: _session().ctl.list_dir(target))
     return (f"{name} ({len(data) // 1024} KB) {how} into {target}. {target} now holds: "
-            + ", ".join(e["name"] + ("/" if e["type"] == "DIR" else "") for e in top[:30]))
+            + ", ".join(e["name"] + ("/" if e["type"] == "DIR" else "") for e in top[:30])
+            + (guarded if guarded.startswith(";") else f"; {guarded}" if guarded else ""))
+
+
+def _archive_members(name: str, data: bytes) -> list[str] | None:
+    """The file names in an .lha or .zip archive, read on the PC; None for others."""
+    import io
+    import struct
+    import zipfile
+    from . import lzh
+    lower = name.lower()
+    try:
+        if lower.endswith((".lha", ".lzh")):
+            return [n for n, method, _, _ in lzh.entries(data) if method != b"-lhd-" and not n.endswith("/")]
+        if lower.endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                return [i.filename for i in z.infolist() if not i.is_dir()]
+    except (ValueError, IndexError, KeyError, zipfile.BadZipFile, struct.error):
+        return None
+    return None
 
 
 @mcp.tool()

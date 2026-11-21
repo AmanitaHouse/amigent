@@ -266,3 +266,54 @@ def test_the_protected_daemon_is_unchanged():
     data = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
     assert len(data) == DAEMON[0]
     assert hashlib.sha256(data).hexdigest() == DAEMON[1]
+
+
+def test_fork_apollo_source_does_not_write_stream_diagnostics():
+    """Software check only — not hardware evidence. Packaged F-DAE bytes stay above."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    apollo = (root / "src/native/amiga/platform/apollo/apollo.c").read_text(encoding="utf-8")
+    assert 'Open("T:audio-mem"' not in apollo
+    assert 'Open("T:audio-ptrs"' not in apollo
+    assert "dump_mix" not in apollo
+    assert "MODE_NEWFILE" not in apollo
+    assert "apollo_audio_claim" in apollo and "apollo_audio_release" in apollo
+    assert "#define AUDIO_FIFO (256 * 1024)" in apollo
+
+
+def test_stream_chunk_bounds_and_oneshot_framing_on_fork_client():
+    channel = AmigaChannel.__new__(AmigaChannel)
+    channel.protocol = 6
+    channel._sock = type("Sock", (), {"settimeout": lambda self, t: None})()
+    channel.timeout = 30
+    channel._audio_opcode = 48
+    channel._info = {"audio": "1"}
+    channel.sysinfo = lambda: {"audio": "1"}
+
+    sent = []
+    channel._request = lambda cmd, **kw: sent.append((cmd, kw))
+    empty = iter([struct.pack(">II", 0, 0)])
+    channel._exact = lambda n: next(empty)
+    rate, pcm = channel.audio(0)
+    assert sent == [(48, {"y": 0})] and rate == 0 and pcm == b""
+
+    channel.audio_start()
+    assert sent[-1] == (48, {"arg": 1})
+    pcm = b"\x01\x00\x02\x00" * 8
+    blobs = iter([struct.pack(">II", 47931, len(pcm)), pcm])
+    channel._exact = lambda n: next(blobs)
+    got_rate, got = channel.audio_read()
+    assert got_rate == 47931 and got == pcm and len(got) % 4 == 0
+
+    channel._exact = lambda n: struct.pack(">II", 48000, 0)
+    assert channel.audio_read() == (48000, b"")
+    channel._exact = lambda n: struct.pack(">II", 48000, 0xFFFFFFFF)
+    assert channel.audio_read() is None
+    channel._exact = lambda n: struct.pack(">II", 48000, 256 * 1024 + 4)
+    with pytest.raises(AmigaError, match="too large"):
+        channel.audio_read()
+    headers = []
+    channel._header = lambda cmd, arg=0, **kw: headers.append((cmd, arg))
+    channel.audio_stop()
+    assert headers == [(48, 2)]

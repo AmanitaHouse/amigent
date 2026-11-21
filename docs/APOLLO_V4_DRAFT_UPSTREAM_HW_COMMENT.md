@@ -12,11 +12,13 @@ Reconciliation context: `docs/APOLLO_V4_UPSTREAM_SEVEN_PR_RECONCILIATION.md`.
 
 ---
 
-## A2 — Upstream #31 follow-up (READY TO REVIEW — do not post without authorisation)
+## A2 — Upstream #31 follow-up — **PUBLISHED** 2026-11-21
 
-**Why warranted:** our posted HW comment said probe / AUDIO / MMIO / install were not yet established. Probe HW and bounded later tests now exist for **our** builds. The private `feature/1.5.0` detect rewrite is still unverified. Do **not** duplicate the earlier daemon-smoke paragraph.
+**Permanent URL:** https://github.com/akustikrausch/amigent/pull/31#issuecomment-7060195194  
+**Evidence:** `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md`  
+**Do not re-post.**
 
-**Paste candidate:**
+**Exact text posted:**
 
 > **Hardware evidence follow-up (Apollo V4-SA / ApolloOS / Kickstart 51.51 / 68080)**
 >
@@ -33,9 +35,8 @@ Reconciliation context: `docs/APOLLO_V4_UPSTREAM_SEVEN_PR_RECONCILIATION.md`.
 >
 > - Your private `feature/1.5.0` detect changes (exec 51 + `AFB_68080` only; probe gated on a packaged `amigentd.apollo`; removal of `$DFF3FC` as an OS-detect fallback; catalogue fold-in with #38). We cannot independently review that branch while it is unpublished.
 > - Negative detection cases, AmigaOS-on-Vampire, AROS/AmigaOS 4 confusion cases, or installer/`--update` selection.
-> - Live POKE writes, TRACE activation, or MMIO windows beyond separate bounded PEEK-refuse tests on a different daemon identity.
 >
-> We remain happy to re-test a public 1.5.0 snapshot on this V4-SA once it is available, and to rebase the remaining Apollo contribution stack only after that review.
+> We remain happy to re-test a public 1.5.0 snapshot on this V4-SA once it is available. For the remaining Apollo contribution stack, would you prefer we continue opening small reviewable PRs against the current public baseline, or wait and reconcile once `feature/1.5.0` is public?
 
 ---
 

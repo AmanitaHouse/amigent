@@ -3,7 +3,7 @@
 **Date:** 2026-11-21  
 **Fork:** `AmanitaHouse/amigent` · tip `main` `fad6693…`  
 **Upstream:** `akustikrausch/amigent` · public `main` `f6aab1d…` · latest public tag `v1.4.0`  
-**Authorisation for this document:** inspection + drafting only — **no** hardware sessions, merges, releases, PR closes, or GitHub posts
+**Authorisation for this document:** inspection + drafting; **#31 hardware follow-up published 2026-11-21** (see §7). Still **no** hardware sessions, merges, releases, or PR closes from this work.
 
 ## 0. Open-count verification
 
@@ -133,15 +133,17 @@ Bit note: our `AFF_FPGA` is `#define AFF_FPGA (1L << 10)` — same bit index the
 
 ## 6. Actionable upstream sequence (authorisation-gated)
 
-### First — resolve #31 evidence loop
+### First — resolve #31 evidence loop — **DONE**
 
-Post **one** factual follow-up on upstream #31 (draft in `docs/APOLLO_V4_DRAFT_UPSTREAM_HW_COMMENT.md` section A2). Content:
+Published one factual follow-up on upstream #31 (2026-11-21):  
+https://github.com/akustikrausch/amigent/pull/31#issuecomment-7060195194
 
-- Update that Stage 3A probe HW now exists for `ab454b39…` and `96ca1b38…`.  
-- Confirm bit-10 core evidence on V4-SA without claiming private 1.5.0 detect.  
-- Reaffirm we still cannot verify unpublished `feature/1.5.0` adaptations.  
-- Do **not** re-post the earlier daemon smoke paragraph as if new.  
-- Do **not** broaden to POKE/TRACE/full MMIO/install.
+- Stage 3A probe HW for `ab454b39…` and `96ca1b38…` reported.  
+- Bit-10 core evidence on V4-SA stated without claiming private 1.5.0 detect.  
+- Unpublished `feature/1.5.0` adaptations, negative cases, and installer/`--update` left unclaimed.  
+- Did not re-post the earlier daemon smoke paragraph.  
+- Did not broaden into AUDIO / MMIO / POKE / TRACE validation.  
+- Asked whether further Apollo PRs should target the public baseline or wait for public 1.5.0.
 
 ### Second — fork PRs already represented upstream?
 
@@ -172,18 +174,31 @@ Layout restore, hooks, fork-hardened `63db83ff…` distribution policy, AMMX, PI
 - Safe rebase of protected Apollo stack onto maintainer tip  
 - Claiming behavioural equivalence to private 1.5.0 AUDIO/detect commentary  
 
-**Not** blocked by 1.5.0: posting the #31 HW follow-up; keeping fork review PRs open; preparing patch series offline against public `main` for later retarget.
+**Not** blocked by 1.5.0: the #31 HW follow-up is published; keeping fork review PRs open; preparing patch series offline against public `main` for later retarget (subject to maintainer preference on baseline vs wait).
 
 ---
 
-## 7. Ready-to-review #31 follow-up
+## 7. #31 hardware follow-up — **PUBLISHED**
 
-See **section A2** in `docs/APOLLO_V4_DRAFT_UPSTREAM_HW_COMMENT.md`. **Not posted.**
+| Field | Value |
+|---|---|
+| Permanent URL | https://github.com/akustikrausch/amigent/pull/31#issuecomment-7060195194 |
+| Posted | 2026-11-21T08:51:41Z by AmanitaHouse |
+| Evidence basis | `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` (U-PRB `ab454b39…`, F-PRB `96ca1b38…`) |
+| Draft source | `docs/APOLLO_V4_DRAFT_UPSTREAM_HW_COMMENT.md` section A2 (posted text trimmed: no AUDIO/MMIO/POKE/TRACE broadening; added public-baseline vs 1.5.0 question) |
+| PR #31 state after post | Still **OPEN** against public `main` |
+| Remaining dependency | Maintainer response (public-baseline vs wait for 1.5.0; any further detect guidance) |
+
+Exact posted body is preserved in the GitHub comment and mirrored under section A2 of the draft file as **PUBLISHED**.
+
+Fork review PRs **#4–#10** remain open and unchanged.
 
 ---
 
 ## 8. Confirmation
 
-- No hardware session was run for this reconciliation.  
-- No merge, release, upstream PR creation, PR close, or GitHub comment was published.  
-- Existing evidence and protected contribution tips are preserved.
+- No hardware session was run for this publication step.  
+- No merge, release, upstream PR creation, or PR close occurred.  
+- One authorised GitHub comment was published on upstream #31 (URL above).  
+- Existing evidence and protected contribution tips are preserved.  
+- Seven open fork PRs (#4–#10) are preserved.

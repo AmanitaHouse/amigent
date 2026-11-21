@@ -479,3 +479,11 @@ def test_on_the_amiga_the_update_checks_videocore_and_confirms(on, tmp_path):
     assert "Not confirmed" in server.amiga_emu68_update(after_restart=True)
     fake.loaded[1] = "D\tbrcm-sdhc.device\t1\t9\t1\t0a100000\t60\t60\t"
     assert "Confirmed" in server.amiga_emu68_update(after_restart=True)
+
+
+def test_a_comment_line_above_the_options_is_kept_and_not_read_as_options():
+    from amigent.emu68card import parse_cmdline, set_option
+    text = "# https://example.org/#emu68\nlogo=black vc4.mem=16 sd.unit0=rw\n"
+    assert parse_cmdline(text) == [("logo", "black"), ("vc4.mem", "16"), ("sd.unit0", "rw")]
+    new, _ = set_option(text, "sd.unit0", "ro")
+    assert new == "# https://example.org/#emu68\nlogo=black vc4.mem=16 sd.unit0=ro\n"

@@ -417,7 +417,7 @@ def read_boot(card, files: list[tuple[str, int]] | None = None, kernel_bytes: bo
         boot.cmdline = card.read("cmdline.txt").decode("latin-1")
     except CardError:
         boot.cmdline = ""
-    if len([x for x in boot.cmdline.splitlines() if x.strip()]) > 1:
+    if len(_option_lines(boot.cmdline)) > 1:
         boot.problems.append("cmdline.txt has more than one line; the Pi reads only the first")
     boot.marker = _has(card, MARKER)
     for rel, _ in files if files is not None else []:
@@ -538,9 +538,15 @@ def known(name: str) -> Option | None:
     return OPTIONS.get(name) or _LOWER.get(name.lower())
 
 
+def _option_lines(text: str) -> list[str]:
+    """The lines that carry options; a line starting with # is a comment (AmiKit's card has
+    one above the options, and Emu68 boots with the line below it)."""
+    return [x for x in text.splitlines() if x.strip() and not x.lstrip().startswith("#")]
+
+
 def parse_cmdline(text: str) -> list[tuple[str, str | None]]:
-    """The first line's words as (name, value); value None for a flag."""
-    first = next((x for x in text.splitlines() if x.strip()), "")
+    """The first option line's words as (name, value); value None for a flag."""
+    first = next(iter(_option_lines(text)), "")
     out = []
     for word in first.split():
         name, eq, value = word.partition("=")
@@ -549,8 +555,16 @@ def parse_cmdline(text: str) -> list[tuple[str, str | None]]:
 
 
 def render_cmdline(words: list[tuple[str, str | None]], old: str) -> str:
-    ending = "\r\n" if "\r\n" in old else ("\n" if old.endswith("\n") or not old else "")
-    return " ".join(n if v is None else f"{n}={v}" for n, v in words) + ending
+    """The new option line in place of the old one; comment lines above it stay as they were."""
+    newline = "\r\n" if "\r\n" in old else "\n"
+    ending = newline if old.endswith("\n") or not old else ""
+    line = " ".join(n if v is None else f"{n}={v}" for n, v in words)
+    comments = []
+    for x in old.splitlines():
+        if x.strip() and not x.lstrip().startswith("#"):
+            break
+        comments.append(x)
+    return "".join(c + newline for c in comments) + line + ending
 
 
 def check_option(name: str, value: str | None, force: bool = False) -> tuple[str, list[str]]:
@@ -596,7 +610,7 @@ def _values(option: Option) -> str:
 def set_option(text: str, name: str, value: str | None, remove: bool = False,
                force: bool = False) -> tuple[str, list[str]]:
     """cmdline.txt with one option set, changed or removed; every other word stays."""
-    if len([x for x in text.splitlines() if x.strip()]) > 1 and not force:
+    if len(_option_lines(text)) > 1 and not force:
         raise CardError("cmdline.txt has more than one line and the Pi reads only the first; "
                         "fix it by hand, or force=True to change the first line and drop the rest")
     words = parse_cmdline(text)

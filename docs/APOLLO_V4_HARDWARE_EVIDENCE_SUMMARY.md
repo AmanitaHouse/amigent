@@ -31,7 +31,7 @@ SYSINFO `self`: `…/amigentd` (extension omitted)
 
 ## Explicitly **not** hardware-validated by this session
 
-- Viewer Hear / streaming AUDIO / F-DAE AUDIO — still **NOT RUN ON HW**  
+- Viewer Hear / streaming AUDIO / F-DAE AUDIO — still **NOT RUN ON HW** (stream `T:audio-mem` dump removed offline; Hear candidate `983fd853…` awaiting authorisation — `docs/APOLLO_V4_STAGE3B_HEAR_STREAM_SAFETY.md`)  
 - Apollo monitor  
 - HRTmon  
 - Live MMIO / SAGA / ALLOWPOKE (even though SYSINFO reported `poke=0`)  
@@ -60,7 +60,7 @@ Software unit tests and host harnesses are **not** substitutes for the untested 
 | Fork review **#4** daemon foundation | U-DAE launches; protocol 6; SYSINFO OS/CPU/board | Not a substitute for #5–#8 feature tests |
 | Fork **#5** MMIO | `poke=0` observed only | No live PEEK/POKE refusal trial |
 | Fork **#6** AUDIO | Opcode 48 one-shot nonempty capture on U-DAE (Phase 2A) | Fidelity; stream; F-DAE AUDIO |
-| Fork **#8** Viewer Hear | Capability / daemon path only | Hear UI / `amiga_listen` still NOT RUN |
+| Fork **#8** Viewer Hear | Offline stream-safety candidate `983fd853…` ready | Hear HW still NOT RUN |
 | Fork **#7** packaging | Exact U-DAE hash exercised | Installer/update paths not run |
 | Fork **#10** probe AFF_FPGA | **F-PRB** HW: `ApolloOS`+`68080` / rc 0 (OS∧AFF_FPGA) | Installer consumption of exit code; `$DFF3FC` fallback |
 | Fork **F-DAE** | Proto-6 exclusive smoke PASSED ON HW | AUDIO/MMIO/probe/PIP still NOT RUN |

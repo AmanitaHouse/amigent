@@ -17,6 +17,12 @@
       "sha256": "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6",
       "lineage": "integrate/apollo-safe-upstream-stack@685309d"
     },
+    "U-HEAR": {
+      "name": "amigentd.apollo-stream-safe",
+      "size": 128496,
+      "sha256": "983fd8531ed7e8631a77daac09b9f660cd59137a106dcc8f93a58e760921dd2a",
+      "lineage": "contrib/apollo-audio-stream-safety@1aa7265 (not packaged; HW NOT RUN)"
+    },
     "F-PRB": {
       "name": "amigent-apollo-probe",
       "size": 3224,
@@ -297,9 +303,9 @@
     "note": "Software unit tests are not substitutes for these rows",
     "U-DAE_protocol6_smoke": "PASSED_ON_HARDWARE",
     "F-DAE_protocol6": "PASSED_ON_HARDWARE",
-    "U-DAE_AUDIO": "PASSED_ON_HARDWARE (Phase 1 one-shot valid empty) \u2014 docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
+    "U-DAE_AUDIO": "PASSED_ON_HARDWARE (Phase 1 empty + Phase 2A nonempty+signal) \u2014 docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
     "F-DAE_AUDIO": "NOT_RUN_ON_HARDWARE \u2014 Stage 3B prepared; see docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
-    "AUDIO_opcode_48": "PASSED_ON_HARDWARE (one-shot empty; not Hear/stream)",
+    "AUDIO_opcode_48": "PASSED_ON_HARDWARE (oneshot nonempty+signal; Hear/stream NOT RUN)",
     "native_apollo_probe_execution": "PASSED_ON_HARDWARE \u2014 see docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md",
     "U-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS / rc 0)",
     "F-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS+68080 / rc 0; OS\u2227AFF_FPGA path)",
@@ -319,19 +325,20 @@
       "evidence": "amigent-evidence/stage3a-probe/20261121T021031Z",
       "production_after": "protocol 5 TLS responsive"
     },
-    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 Phase 2 plan; stream residual T:audio-mem once",
+    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 stream-safe candidate ready; docs/APOLLO_V4_STAGE3B_HEAR_RUNBOOK.md",
     "stage3b": {
-      "status": "phase1_executed_valid_empty",
-      "session_evidence": "amigent-evidence/stage3b-audio-phase1/20261121T022512Z",
-      "results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
+      "status": "phase2a_executed_nonempty_signal",
+      "session_evidence": "amigent-evidence/stage3b-audio-phase2a/20261121T024102Z",
+      "results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
+      "phase1_results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
       "audit": "docs/APOLLO_V4_STAGE3B_AUDIO_SAFETY_AUDIT.md",
       "runbook": "docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
       "first_candidate": "U-DAE",
-      "audio_invocations": 1,
-      "payload_bytes": 0,
-      "rate": 0,
+      "phase2a_rate": 47931,
+      "phase2a_payload_bytes": 1920,
       "production_restored": true,
-      "phase2_hear": "NOT_AUTHORISED",
+      "phase2b_hear_offline": "docs/APOLLO_V4_STAGE3B_HEAR_STREAM_SAFETY.md",
+      "phase2_hear_hw": "NOT_AUTHORISED",
       "phase3_fdae_audio": "NOT_AUTHORISED"
     },
     "apollo_monitor": "NOT_RUN",
@@ -342,12 +349,16 @@
     "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
     "self_path_note": "docs/APOLLO_V4_SELF_PATH_NOTE.md",
     "stage3b_phase2": {
-      "status": "prepared_awaiting_authorisation",
+      "status": "phase2a_done_phase2b_offline_ready",
       "plan": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2_PLAN.md",
-      "phase1_preserved": "valid_empty",
-      "recommended_next": "nonempty_oneshot_with_AHI_source",
-      "viewer_hear": "prepared_separate_auth_accepts_T_audio_mem_residual",
-      "nonempty_capture": "NOT_RUN_ON_HARDWARE",
+      "phase2a_results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE2A_RESULTS.md",
+      "nonempty_capture": "PASSED_ON_HARDWARE",
+      "hear_stream_safety": "docs/APOLLO_V4_STAGE3B_HEAR_STREAM_SAFETY.md",
+      "hear_runbook": "docs/APOLLO_V4_STAGE3B_HEAR_RUNBOOK.md",
+      "hear_candidate_sha256": "983fd8531ed7e8631a77daac09b9f660cd59137a106dcc8f93a58e760921dd2a",
+      "hear_candidate_bytes": 128496,
+      "hear_source_commit": "1aa726578f3c762ec41a06299f82b21873e2113a",
+      "t_audio_mem_removed": true,
       "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE"
     }
   }

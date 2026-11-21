@@ -104,7 +104,20 @@ D2 post-test finding: offline GO incorrectly approved `$F80000` and `$00000004` 
 | Control peeks (ROM / vector) | **EXECUTED** — out-of-class vs original auth |
 | Remaining windows / POKE / TRACE / monitor / HRTmon | **NOT TESTED** |
 
-**Deferred (higher risk; separate approval):** D3 POKE-with-ALLOWPOKE refuse; D6 monitor launch; D7 HRTmon program start; TRACE on 68080.
+## Stage 4 coverage distinctions (D2–D7 / TRACE)
+
+| Item | Status |
+|------|--------|
+| D2 bounded MMIO PEEK refuse (3 addresses) | **PASSED ON HARDWARE** |
+| D3 POKE refusal | **PASSED OFFLINE ONLY** |
+| D3 positive write | **NOT TESTED / NO-GO** |
+| D6 monitor | **NOT TESTED ON HARDWARE** |
+| D7 HRTmon | **NOT TESTED ON HARDWARE** |
+| TRACE on 68080 | **NOT TESTED ON HARDWARE** |
+
+D3 resource harden (PEEK_MAX + early ALLOWPOKE before AllocVec): source-only; packaged binary unchanged — `docs/APOLLO_V4_STAGE4_D6_D7_MONITOR_SAFETY_REVIEW.md`.
+
+**Deferred (higher risk; separate approval):** D3 HW refuse/write; D6 monitor launch; D7 HRTmon program start; TRACE on 68080. All remain **NO-GO** without new explicit authorisation.
 
 ## Upstream 1.5.0 public status (audit date 2026-11-21)
 

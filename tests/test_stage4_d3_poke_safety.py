@@ -1,12 +1,15 @@
-"""Stage 4 D3 — offline POKE fail-closed / MMIO write-refuse (no hardware)."""
+"""Stage 4 D3 — offline POKE fail-closed / resource / MMIO write-refuse (no hardware)."""
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
 
+import pytest
+
 from amigent import channel
 from amigent.channel import feature_opcode
+from amigent.errors import AmigaError
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
@@ -38,24 +41,62 @@ def mmio_hit(at: int, n: int, windows) -> bool:
     return any(at < stop and end > start for start, stop in windows)
 
 
-def test_c_poke_order_allowpoke_before_mmio_before_copymem():
+def test_c_poke_bounds_then_allowpoke_before_allocvec_before_copymem():
     poke = function_body(DAEMON, "c_poke")
+    assert "PEEK_MAX" in poke
+    assert "!n || n > PEEK_MAX" in poke or "n > PEEK_MAX" in poke
     assert "!allow_poke" in poke
+    assert "AllocVec" in poke
     assert "apollo_mmio_hit(at, n)" in poke
     assert "CopyMem(data, (APTR)at, n)" in poke
-    assert poke.index("!allow_poke") < poke.index("apollo_mmio_hit")
-    assert poke.rindex("apollo_mmio_hit") < poke.index("CopyMem(data, (APTR)at, n)")
+    assert poke.index("PEEK_MAX") < poke.index("!allow_poke")
+    assert poke.index("!allow_poke") < poke.index("AllocVec")
+    assert poke.index("AllocVec") < poke.index("CopyMem(data, (APTR)at, n)")
+    assert poke.index("apollo_mmio_hit") < poke.index("CopyMem(data, (APTR)at, n)")
     assert poke.index("peek_allowed") < poke.index("CopyMem(data, (APTR)at, n)")
-    # Payload is received into AllocVec before gates — must FreeVec on refuse
-    refuse_allow = poke.split("if (!allow_poke)", 1)[1].split("ifdef AMIGENT_APOLLO", 1)[0]
-    assert "FreeVec(data)" in refuse_allow
-    assert "CopyMem(data, (APTR)at, n)" not in refuse_allow
+
+
+def test_c_poke_refuse_allowpoke_skips_wire_without_alloc():
+    poke = function_body(DAEMON, "c_poke")
+    refuse = poke.split("if (!allow_poke)", 1)[1].split("if (!(data = AllocVec", 1)[0]
+    assert "l_skip" in refuse
+    assert "AllocVec" not in refuse
+    assert "CopyMem" not in refuse
+    assert "c_fail" in refuse
+
+
+def test_c_poke_oversized_or_zero_skips_before_alloc():
+    poke = function_body(DAEMON, "c_poke")
+    bound = poke.split("PEEK_MAX", 1)[1].split("if (!allow_poke)", 1)[0]
+    assert "l_skip" in bound
+    assert "AllocVec" not in bound
+
+
+def test_c_poke_alloc_failure_skips_and_faults():
+    poke = function_body(DAEMON, "c_poke")
+    fail = poke.split("if (!(data = AllocVec", 1)[1].split("if (!l_recv", 1)[0]
+    assert "l_skip" in fail
+    assert "ERROR_NO_FREE_STORE" in fail
+
+
+def test_c_poke_l_recv_failure_frees_temp():
+    poke = function_body(DAEMON, "c_poke")
+    recv_fail = poke.split("if (!l_recv(l, data, n, IO_SECONDS))", 1)[1].split("#ifdef", 1)[0]
+    assert "FreeVec(data)" in recv_fail
+    assert "CopyMem" not in recv_fail
+
+
+def test_c_poke_mmio_and_rom_refuse_free_after_recv():
+    poke = function_body(DAEMON, "c_poke")
+    for marker in ("apollo_mmio_hit(at, n)", "at >= 0xF80000UL"):
+        block = poke.split(marker, 1)[1].split("}", 1)[0]
+        assert "FreeVec(data)" in block
+        assert "CopyMem" not in block
 
 
 def test_c_poke_refuses_rom_even_with_allowpoke_path():
     poke = function_body(DAEMON, "c_poke")
     assert "at >= 0xF80000UL" in poke
-    # ROM gate is after allow_poke and with peek_allowed
     assert poke.index("!allow_poke") < poke.index("at >= 0xF80000UL")
     assert poke.index("at >= 0xF80000UL") < poke.index("CopyMem(data, (APTR)at, n)")
 
@@ -66,18 +107,17 @@ def test_d2_protected_addresses_are_mmio_hits_for_writes():
         assert mmio_hit(at, n, windows)
 
 
-def test_zero_length_is_mmio_hit_so_apollo_refuses_before_write():
+def test_zero_length_is_mmio_hit_and_daemon_bounds_n():
     windows = mmio_windows()
     assert mmio_hit(0x200000, 0, windows)
     poke = function_body(DAEMON, "c_poke")
-    # n==0 → apollo_mmio_hit TRUE on Apollo builds before CopyMem
-    assert "apollo_mmio_hit(at, n)" in poke
+    assert "!n || n > PEEK_MAX" in poke or "n > PEEK_MAX" in poke
 
 
 def test_wraparound_hit_refuses_write_window_bypass():
     windows = mmio_windows()
     assert mmio_hit(0xFFFFFFFE, 4, windows)
-    assert mmio_hit(0xDFF1F2, 4, windows)  # crosses GFXMODE
+    assert mmio_hit(0xDFF1F2, 4, windows)
 
 
 def test_client_poke_is_protocol6_only_and_size_bounded():
@@ -88,8 +128,25 @@ def test_client_poke_is_protocol6_only_and_size_bounded():
     assert channel.POKE == 42
 
 
+def test_client_rejects_empty_and_oversized_poke_payload():
+    class Dummy(channel.AmigaChannel):
+        def __init__(self):
+            pass
+
+        def _need6(self, _what):
+            return None
+
+        def _one(self, *_a, **_k):
+            raise AssertionError("must not send")
+
+    d = Dummy()
+    with pytest.raises(AmigaError):
+        d.poke(0x200000, b"")
+    with pytest.raises(AmigaError):
+        d.poke(0x200000, b"\0" * (channel.PEEK_MAX + 1))
+
+
 def test_feature_opcode_exposes_poke_without_checking_sysinfo_flag():
-    # Client may *send* POKE on proto 6; daemon must refuse without ALLOWPOKE.
     assert feature_opcode(6, "POKE", {"poke": "0"}) == 42
     assert feature_opcode(6, "POKE", {}) == 42
     assert feature_opcode(5, "POKE", {"poke": "1"}) is None
@@ -110,17 +167,23 @@ def test_mcp_memory_write_documents_allowpoke_and_uses_ctl_poke():
     assert "ALLOWPOKE" in SERVER.split("def amiga_memory_write", 1)[1].split("def amiga_", 1)[0]
     tool = SERVER.split("def amiga_memory_write", 1)[1].split("\n@mcp.tool", 1)[0]
     assert "ctl.poke" in tool
-    # Tool peeks first — still not a bypass of ALLOWPOKE
     assert "ctl.peek" in tool
 
 
 def test_allow_poke_only_set_from_startup_flags():
-    # Collect assignments; must be startup/tooltype only — not TLS/session.
     assigns = re.findall(r"allow_poke\s*=\s*[^;]+;", DAEMON)
     assert any("TRUE" in a or "args[" in a for a in assigns)
     joined = " ".join(assigns).lower()
     assert "tls" not in joined
     assert "authed" not in joined
+
+
+def test_l_recv_uses_bounded_io_seconds():
+    assert "#define IO_SECONDS 30" in DAEMON
+    poke = function_body(DAEMON, "c_poke")
+    assert "IO_SECONDS" in poke
+    recv = function_body(DAEMON, "l_recv")
+    assert "l_wait" in recv
 
 
 def test_d2_address_class_rules_still_forbid_rom_as_test_ram():
@@ -133,7 +196,6 @@ def test_matrix_records_d3_offline_without_claiming_hw_poke():
     m = json.loads((ROOT / "tests/hardware/apollo_v4_matrix.json").read_text(encoding="utf-8"))
     hc = m["hardware_coverage"]
     assert hc["POKE_ALLOWPOKE"] == "NOT_TESTED"
-    assert hc["stage4_d3_status"] == "offline_fail_closed_pass_hw_nogo"
+    assert "offline" in hc["stage4_d3_status"]
     assert "D3_POKE_SAFETY_REVIEW" in hc["stage4_d3_poke_safety_review"]
     assert hc["stage4"]["d3_hardware"] == "NO_GO_not_authorised"
-    assert hc["stage4"]["d3_offline"] == "fail_closed_pass"

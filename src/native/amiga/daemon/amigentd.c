@@ -6877,6 +6877,10 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
+/* Length bound matches PEEK / the Python client. ALLOWPOKE and size are
+ * checked before AllocVec so a refuse does not allocate the payload; the
+ * wire bytes are still drained with l_skip so the next request stays aligned.
+ * A rebuilt Apollo binary does not inherit prior hardware validation. */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
@@ -6885,15 +6889,17 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 
     if (!c_address(l, len, &at, &alive))
         return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
-    if (!(data = AllocVec(n ? n : 1, MEMF_ANY)))
+    if (!n || n > PEEK_MAX)
+        return l_skip(l, n, IO_SECONDS) &&
+               c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (!allow_poke)
+        return l_skip(l, n, IO_SECONDS) &&
+               c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
+    if (!(data = AllocVec(n, MEMF_ANY)))
         return l_skip(l, n, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
     if (!l_recv(l, data, n, IO_SECONDS)) {
         FreeVec(data);
         return FALSE;
-    }
-    if (!allow_poke) {
-        FreeVec(data);
-        return c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
     }
 #ifdef AMIGENT_APOLLO
     /* APoke is not this command. The same RAM gate applies, and a window

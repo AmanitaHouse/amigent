@@ -417,8 +417,8 @@
       "closure_docs_tip": "78a68c54ab1905caf6dc166b1c97ac990cfcf4d0",
       "human_audible_final": "YES_BRIEF"
     },
-    "apollo_monitor": "NOT_RUN",
-    "HRTmon": "NOT_RUN",
+    "apollo_monitor": "NOT_TESTED_ON_HARDWARE",
+    "HRTmon": "NOT_TESTED_ON_HARDWARE",
     "live_MMIO": "BOUNDED_D2_ONLY — three protected-window PEEK refuses on HW ($DFF3FC/2, $DFF1F4/2, $DFF400/2); NOT full MMIO/POKE/monitor — docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
     "installer_update_fallback": "NOT_RUN",
     "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
@@ -474,7 +474,14 @@
       "d3_review": "docs/APOLLO_V4_STAGE4_D3_POKE_SAFETY_REVIEW.md",
       "d3_offline": "fail_closed_pass",
       "d3_hardware": "NO_GO_not_authorised",
-      "d3_note": "Offline fail-closed review PASS; POKE_ALLOWPOKE remains NOT_TESTED on hardware. No live POKE; no ALLOWPOKE on V4."
+      "d3_note": "Offline fail-closed review PASS; POKE_ALLOWPOKE remains NOT_TESTED on hardware. No live POKE; no ALLOWPOKE on V4.",
+      "d3_resource": "source_hardened_peek_max_early_allowpoke_packaged_bin_unchanged",
+      "d6_d7_review": "docs/APOLLO_V4_STAGE4_D6_D7_MONITOR_SAFETY_REVIEW.md",
+      "d6_hardware": "NO_GO_not_authorised",
+      "d7_hardware": "NO_GO_not_authorised",
+      "trace_68080_hardware": "NO_GO_not_authorised",
+      "d6_offline": "source_review_pass",
+      "d7_offline": "source_review_pass"
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
@@ -488,6 +495,7 @@
     "TRACE_68080": "NOT_TESTED",
     "stage4_d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
     "stage4_d3_poke_safety_review": "docs/APOLLO_V4_STAGE4_D3_POKE_SAFETY_REVIEW.md",
-    "stage4_d3_status": "offline_fail_closed_pass_hw_nogo"
+    "stage4_d3_status": "offline_fail_closed_pass_hw_nogo_resource_hardened_source",
+    "stage4_d6_d7_monitor_safety_review": "docs/APOLLO_V4_STAGE4_D6_D7_MONITOR_SAFETY_REVIEW.md"
   }
 }

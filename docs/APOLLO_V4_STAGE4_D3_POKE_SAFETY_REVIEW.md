@@ -19,17 +19,18 @@
 | Advertise | SYSINFO `t_pair(&t, "poke", allow_poke)` | Mirror of startup flag |
 | Enable | CLI `ALLOWPOKE/S` or WB tooltype `ALLOWPOKE` → `allow_poke = TRUE` | Startup only |
 
-### Native order inside `c_poke` (Apollo build)
+### Native order inside `c_poke` (Apollo build; post D3 resource harden)
 
 1. Parse hex address (`c_address`) — no target write.  
-2. `AllocVec` + `l_recv` payload into a **temporary** buffer (not the target).  
-3. **`if (!allow_poke)`** → `FreeVec` + `c_fail("writing memory is off; … ALLOWPOKE …")` — **return**.  
-4. **`apollo_mmio_hit(at, n)`** → `FreeVec` + same Apollo-registers refuse text as PEEK — **return**.  
-5. **`!peek_allowed(at, n) || at >= 0xF80000`** → refuse (“only RAM exec manages…”); ROM never written.  
-6. `mon_say("write memory")` (string only).  
-7. **`CopyMem(data, (APTR)at, n)`** — first and only write to the requested address.
+2. **`!n || n > PEEK_MAX`** → `l_skip` + refuse (no AllocVec).  
+3. **`if (!allow_poke)`** → `l_skip` + `c_fail("writing memory is off; … ALLOWPOKE …")` — **return** (no AllocVec).  
+4. `AllocVec` + `l_recv` payload into a **temporary** buffer (not the target).  
+5. **`apollo_mmio_hit(at, n)`** → `FreeVec` + same Apollo-registers refuse text as PEEK — **return**.  
+6. **`!peek_allowed(at, n) || at >= 0xF80000`** → refuse (“only RAM exec manages…”); ROM never written.  
+7. `mon_say("write memory")` (string only).  
+8. **`CopyMem(data, (APTR)at, n)`** — first and only write to the requested address.
 
-**Conclusion:** Prohibited/malformed paths that hit steps 3–5 never reach step 7. Receiving the payload into `AllocVec` is not a physical write to `at`.
+**Conclusion:** Prohibited/malformed paths that hit steps 2–3 never allocate; steps 5–6 never reach step 8. Packaged Apollo binary may still be pre-harden until a separately authorised rebuild. See D6/D7 review for resource closure detail.
 
 ## 2. ALLOWPOKE enforcement
 

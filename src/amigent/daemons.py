@@ -148,3 +148,42 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place.")
     return True, ""
+
+
+def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
+                       info: dict, directory: Path) -> dict:
+    """Identity of the connected session, separate from the computer it runs on.
+
+    Protocol and capabilities come from the live daemon. Family and CPU target
+    come only from the file SYSINFO named in ``self=``. That path is where the
+    process started; after an in-place update the bytes on disk may already be
+    the replacement, so the UI must not treat them as the guaranteed running
+    image. The machine's OS and CPU are never used for the family.
+    """
+    spec = identify(file_bytes, directory) if file_bytes else None
+    capabilities = []
+    if info.get("audio") == "1":
+        capabilities.append("AUDIO")
+    if info.get("loaded") == "1":
+        capabilities.append("loaded")
+    if info.get("probe") == "1":
+        capabilities.append("probe")
+    if info.get("poke") == "1":
+        capabilities.append("POKE")
+    reported = (version or "").strip()
+    if file_bytes is None:
+        identity = "Not reported"
+        family = "Not reported"
+        target = "Not reported"
+    else:
+        identity = "named file"
+        family = spec.label if spec else "Not reported"
+        target = spec.target if spec else "Not reported"
+    return {
+        "daemon_protocol": protocol if protocol else None,
+        "daemon_version": reported or "Not reported",
+        "daemon_family": family,
+        "daemon_target": target,
+        "daemon_identity": identity,
+        "daemon_capabilities": capabilities,
+    }

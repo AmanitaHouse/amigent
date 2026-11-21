@@ -33,6 +33,8 @@ from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
+from .daemons import describe_connected
+from .paths import AMIGA
 from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -134,6 +136,9 @@ class Viewer:
         self.amiga: dict = {}
         self.screen_list: list = []
         self._system: dict = {}
+        self._daemon_path = ""
+        self._daemon_bytes: bytes | None = None
+        self._daemon_version = ""
         self.alone_since = time.monotonic()
         self.screen.listeners.append(self._on_screen)
 
@@ -312,11 +317,31 @@ class Viewer:
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
         number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
+        protocol = getattr(getattr(self.ctl, "backend", None), "protocol", 0) or self.screen.protocol
+        daemon = self._connected_daemon(info, protocol)
         return {**self._system, "tcp": info.get("bsdsocket", ""),
+                **daemon,
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
                 "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
+
+    def _connected_daemon(self, info: dict, protocol: int) -> dict:
+        """Protocol from the handshake; family only from the file SYSINFO named."""
+        path = str(info.get("self") or "")
+        blob = None
+        version = ""
+        if path and path == self._daemon_path and self._daemon_bytes is not None:
+            blob, version = self._daemon_bytes, self._daemon_version
+        elif path:
+            try:
+                blob = self._ctl(lambda: self.ctl.read_file(path))
+                reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
+                version = reported.output.strip().split("\n", 1)[0]
+                self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version
+            except (AmigaError, OSError, AttributeError):
+                blob, version = None, ""
+        return describe_connected(protocol, version, blob, info, AMIGA / "bin")
 
     def _answers(self) -> bool:
         """Is the Amiga there? Asked on the command line, which leaves the screen alone."""

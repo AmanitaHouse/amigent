@@ -182,7 +182,7 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 2B (U-DAE + F-DAE done):** U-DAE `docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md`; F-DAE `docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md`. Maintainer summary: `docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md`.
 
-**Stage 3A (probe — prepared):** `docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md` — U-PRB/F-PRB concurrent with production; **not authorised for V4 execution yet**. Other Stage 3 items remain separate.
+**Stage 3A (probe — executed):** `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` — U-PRB/F-PRB PASSED ON HW concurrent with production. Other Stage 3 items remain separate.
 
 **Exclusive / separate authorisation:** Stage 2B interruption; Stage 3 AUDIO / monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 

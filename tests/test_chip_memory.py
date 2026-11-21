@@ -124,12 +124,13 @@ def test_fleet_total_keeps_a_zero_and_ignores_a_missing_chip_count(monkeypatch):
     from amigent.fleet import Fleet
 
     fleet = Fleet.__new__(Fleet)
+    fleet.saved = False
+    fleet.guard = threading.RLock()
     fleet.entries = [{
         "info": {"os": "ApolloOS", "cpu": "68080", "chip_free": None, "fast_free": 4096},
-        "name": "V4", "online": True, "seen": 1,
-        "viewer": type("V", (), {"clients": set()})(),
+        "id": 0, "name": "V4", "host": "V4", "online": True, "seen": 1, "error": "",
+        "preview": None, "viewer": type("V", (), {"clients": set()})(),
     }]
-    monkeypatch.setattr("amigent.fleet.machines.address", lambda host: host)
     assert fleet.status()[0]["free"] == 4096
     fleet.entries[0]["info"] = {"os": "AmigaOS", "cpu": "68030", "chip_free": 0, "fast_free": 4096}
     assert fleet.status()[0]["free"] == 4096

@@ -19,7 +19,7 @@ from amigent.paths import AMIGA
 from amigent.viewer import Viewer, pcm_message
 from amigent.webserver import WEB
 
-DAEMON = (131292, "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca")
+DAEMON = (129944, "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c")  # stream-safe HW-validated packaging
 
 
 def test_audio_capability_follows_the_advertisement_and_the_protocol():
@@ -262,7 +262,7 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     assert server.amiga_listen(1) == ["nothing is playing through AHI"]
 
 
-def test_the_protected_daemon_is_unchanged():
+def test_the_packaged_apollo_daemon_is_the_stream_safe_build():
     data = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
     assert len(data) == DAEMON[0]
     assert hashlib.sha256(data).hexdigest() == DAEMON[1]

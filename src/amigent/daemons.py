@@ -15,6 +15,7 @@ before protocol 3, fetched separately, and it does not change TLS.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,13 @@ CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080 = 68020, 68030, 68040, 680
 # 68080-class Vampire core; not the same as the OS calling itself ApolloOS.
 AFF_FPGA = 1 << 10
 APOLLO_MARK = b"arne.audio"  # present in the Apollo daemon, absent from the classic ones
+
+# Prior packaged Apollo builds that this package intentionally supersedes at the
+# same $VER. identify() no longer matches them once the packaged bytes change,
+# so without this list an --update would leave the old dump-bearing daemon in place.
+SUPERSEDED_APOLLO_SHA256 = frozenset({
+    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
+})
 
 SUPPORTED, EXPERIMENTAL = "supported", "experimental"
 
@@ -181,10 +189,13 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place.")
-    if specialised and candidate_spec.family == "apollo" and installed_spec is None and (
-            not installed_version or not candidate_version or installed_version == candidate_version):
-        return False, ("the installed Apollo build is not the one in this package, so it "
-                       "was left in place.")
+    if specialised and candidate_spec.family == "apollo" and installed_spec is None:
+        if hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256:
+            return True, ""
+        if (not installed_version or not candidate_version
+                or installed_version == candidate_version):
+            return False, ("the installed Apollo build is not the one in this package, so it "
+                           "was left in place.")
     return True, ""
 
 

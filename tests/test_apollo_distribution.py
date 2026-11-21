@@ -23,7 +23,7 @@ from amigent.serve import FILES
 ROOT = Path(__file__).resolve().parent.parent
 BIN = AMIGA / "bin"
 HUNK = b"\x00\x00\x03\xf3"
-DAEMON = (131292, "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca")
+DAEMON = (129944, "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c")  # stream-safe HW-validated packaging
 PROBE = (3224, "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265")
 MONITOR = (22816, "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e")
 CLASSIC = {
@@ -43,7 +43,7 @@ def _packaged(name: str) -> bytes:
     return (BIN / name).read_bytes()
 
 
-def test_the_packaged_daemon_is_the_rebuilt_protocol6_executable():
+def test_the_packaged_daemon_is_the_stream_safe_protocol6_executable():
     size, digest = DAEMON
     data = _packaged("amigentd.apollo")
     assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)
@@ -51,10 +51,8 @@ def test_the_packaged_daemon_is_the_rebuilt_protocol6_executable():
     assert len(probe) == PROBE[0] and _sha(probe) == PROBE[1] and probe.startswith(HUNK)
     monitor = _packaged("amigent-monitor.apollo")
     assert len(monitor) == MONITOR[0] and _sha(monitor) == MONITOR[1] and monitor.startswith(HUNK)
-    staged = ROOT / "build" / "apollo-fork"
-    if (staged / "amigentd.apollo").is_file():
-        assert (staged / "amigentd.apollo").read_bytes() == data
-        assert (staged / "amigent-apollo-probe").read_bytes() == probe
+    # Optional local build/apollo outputs are not the packaging source of truth.
+    # Packaging reads src/amigent/amiga/bin/; do not require a staged rebuild here.
     source = (ROOT / "src" / "native" / "amiga" / "daemon" / "amigentd.c").read_text(encoding="utf-8")
     assert 't_pair(&t, "audio", 1)' in source
     assert 't_pair(&t, "pip", 0)' in source
@@ -282,3 +280,46 @@ def test_wheel_and_sdist_carry_this_daemon(tmp_path):
         folded = "\n".join(names)
         for banned in EXCLUDED:
             assert banned not in folded
+
+
+def test_packaged_apollo_matches_hardware_stream_safe_candidate_and_lacks_dumps():
+    """Wheel path must ship the HW-validated stream-safe bytes, not F-DAE."""
+    data = _packaged("amigentd.apollo")
+    assert len(data) == DAEMON[0]
+    assert _sha(data) == DAEMON[1]
+    assert b"audio-mem" not in data and b"audio-ptrs" not in data
+    assert b"arne.audio" in data
+    apollo = (ROOT / "src/native/amiga/platform/apollo/apollo.c").read_text(encoding="utf-8")
+    assert 'Open("T:audio-mem"' not in apollo
+    assert "dump_mix" not in apollo
+    # Fail if the release path silently ships superseded F-DAE again
+    assert _sha(data) != "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca"
+
+
+def test_update_replaces_known_superseded_fdae_apollo(tmp_path, monkeypatch):
+    """Previous packaged F-DAE (same $VER) must not block the stream-safe update."""
+    from amigent.daemons import SUPERSEDED_APOLLO_SHA256, consider_replacement
+
+    assert "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca" in SUPERSEDED_APOLLO_SHA256
+    fdae = subprocess.check_output(
+        ["git", "show", "065c112:src/amigent/amiga/bin/amigentd.apollo"],
+        cwd=ROOT,
+    )
+    assert _sha(fdae) == "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca"
+    candidate = _packaged("amigentd.apollo")
+    assert _sha(candidate) == DAEMON[1]
+    ok, why = consider_replacement(fdae, candidate, "amigentd.apollo", BIN)
+    assert ok and why == ""
+
+    package = tmp_path / "amiga"
+    shutil.copytree(AMIGA, package)
+    monkeypatch.setattr(setup, "AMIGA", package)
+    monkeypatch.setattr(setup.time, "sleep", lambda _s: None)
+    channel = UpdateChannel(
+        "192.0.2.1",
+        info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"},
+    )
+    channel.files["C:amigentd"] = fdae
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    assert setup.update("192.0.2.1", None) == 0
+    assert channel.files["C:amigentd"] == candidate

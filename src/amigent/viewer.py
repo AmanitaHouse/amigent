@@ -34,8 +34,7 @@ from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import (LOADED_PROTOCOL, PLAIN_CLOSED_TEXT, Commands,
                       audio_uses_tls, pc_outdated)
-from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
-                     native_ppc, ppc_software)
+from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401
 from . import tls
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -462,8 +461,8 @@ class Viewer:
                 pass
             self.event("audio", on=False)
 
-    def _play_audio(self, link: Commands) -> None:
-        """Stream the ARNE mix while the page keeps asking.
+    def _play_audio(self, link: Commands, between=None) -> None:
+        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block.
 
         A daemon end-marker, PCM budget, or Hear OFF always releases the stream and
         clears ``hear`` so ``_media`` cannot silently call ``audio_start`` again.
@@ -491,6 +490,8 @@ class Viewer:
                     if pcm:
                         self.broadcast(pcm_message(rate or 48000, pcm))
                         pcm_sent += len(pcm)
+                if between:
+                    between()
         finally:
             # Never return to _media with hear still True after a stream attempt.
             self.hear = False
@@ -711,23 +712,14 @@ class Viewer:
     def _restart(self) -> None:
         self.event("toast", key="restarting")
         try:
-            # Workbench 3.0 added C:Reboot. Exec 36, 37 and 38 still reset
-            # from the keyboard chord. Exec below 36 is not sent the chord:
-            # the three key-downs have no key-up, and ColdReboot() is absent,
-            # so the modifiers would stay down on a machine that does not reset.
-            # The daemon still requires the three keys inside five seconds.
-            if self._reboot_missing():
-                version = self._exec_version()
-                if exec_before_os3(version):
-                    if not exec_coldreboot(version):
-                        raise AmigaError(
-                            f"unsupported operation: exec {version} cannot ColdReboot() "
-                            "and has no C:Reboot")
-                    if not self.online:
-                        raise AmigaError("the Amiga is not connected")
-                    self._ctl(lambda: self.ctl.flush(self.flush_volumes))
-                    self._submit_reset_chord()
-                    return
+            # Workbench 3.0 added C:Reboot. An older system still resets from
+            # the keyboard chord, which is what the viewer sends instead.
+            if self._reboot_missing() and exec_before_os3(self._exec_version()):
+                if not self.online:
+                    raise AmigaError("the Amiga is not connected")
+                self._ctl(lambda: self.ctl.flush(self.flush_volumes))
+                self._submit_reset_chord()
+                return
             if self.restart:
                 self.restart()
             else:

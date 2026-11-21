@@ -73,7 +73,8 @@ def test_peek_and_poke_consult_the_guard_before_touching_memory():
     assert allowed.index("apollo_mmio_hit") < allowed.index("SysBase->MemList")
     assert allowed.index("#ifdef AMIGENT_APOLLO") < allowed.index("apollo_mmio_hit")
     assert peek.index("peek_allowed") < peek.index("t_add")
-    assert poke.index("l_recv") < poke.index("peek_allowed") < poke.index("CopyMem")
+    # Hardened POKE: allow/region checks before the wall-clock receive.
+    assert poke.index("peek_allowed") < poke.index("l_recv") < poke.index("CopyMem")
     assert "CMD_PEEK" in source and "CMD_POKE" in source
     makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_mmio.o" in makefile and "-DAMIGENT_APOLLO" in makefile

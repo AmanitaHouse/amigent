@@ -58,7 +58,10 @@ def test_the_packaged_apollo_executables_match_the_staged_build():
         if staged.is_file():
             assert staged.read_bytes() == data
     daemon = _packaged("amigentd.apollo")
-    assert b"arne.audio" in daemon and b"ApolloOS" in daemon and b"pip" not in daemon
+    assert b"arne.audio" in daemon and b"ApolloOS" in daemon
+    # Opcode 49 / PIP picture supply is not implemented; a reserved SYSINFO key
+    # token may still appear in the validated binary string table.
+    assert b"pip=1" not in daemon
     probe = _packaged("amigent-apollo-probe")
     assert b"ApolloOS" in probe and b"AmigaOS" in probe and b"arne.audio" not in probe
     for name, (size, digest) in CLASSIC.items():

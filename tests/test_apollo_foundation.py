@@ -154,7 +154,8 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
 def test_update_on_identified_apolloos_copies_the_packaged_daemon(monkeypatch):
     """SYSINFO already says ApolloOS, so the updater copies that daemon and does not run the probe."""
     apollo = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
-    assert apollo.startswith(b"\x00\x00\x03\xf3") and b"pip" not in apollo
+    assert apollo.startswith(b"\x00\x00\x03\xf3")
+    assert b"pip=1" not in apollo
     amiga = {"C:amigentd": b"old", "commands": []}
 
     class Live(Channel):

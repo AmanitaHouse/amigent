@@ -109,12 +109,5 @@ Production backup hash **differs** from U-DAE (`456fce26…`, 129844) and F-DAE 
 
 ## Next step
 
-Await **Stage 2B** authorisation for an exclusive U-DAE (or F-DAE) interruption. Do not begin Stage 2B from this report alone.
-
-Recommended future exclusive U-DAE sequence (unchanged from plan; still requires approval):
-
-1. Re-verify PC backup hash `b00fef0e…` and startup `TLSONLY`.  
-2. Exclusive window → `ADDRESS AMIGENT 'QUIT'` → confirm port free.  
-3. Stage U-DAE to a **non-`C:amigentd`** path; launch with `TLSONLY` (and default KEY behaviour).  
-4. Protocol-6 handshake / SYSINFO / read-only only.  
-5. `QUIT` candidate → `RUN >NIL: C:amigentd TLSONLY` → verify protocol **5** + TLS.
+Stage 2B runbook: **`docs/APOLLO_V4_STAGE2B_RUNBOOK.md`**.  
+Await Stage 2B authorisation (includes physical Shell confirmation). Stage candidate **before** production `QUIT`. First session is **U-DAE only**.

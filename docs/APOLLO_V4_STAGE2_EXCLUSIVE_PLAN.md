@@ -76,39 +76,42 @@ Use existing TLS production connection (`V4SA`). Prefer AmiGent `Commands` / `ex
 
 ## Stage 2B — Exclusive protocol-6 candidate tests
 
-**Requires approval for temporary production interruption and candidate execution.**
+**Requires approval for temporary production interruption and candidate execution.**  
+**Authoritative runbook:** `docs/APOLLO_V4_STAGE2B_RUNBOOK.md` (corrected sequence: **stage + hash before QUIT**).
 
-### Binaries (test separately)
+### First exclusive session
+
+**U-DAE only** (do not substitute F-DAE in the same session).
 
 | ID | Role | Size | SHA-256 |
 |----|------|-----:|---------|
 | U-DAE | Protected contribution | 129844 | `456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6` |
-| F-DAE | Fork package | 131292 | `1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca` |
+| F-DAE | Fork package (later session) | 131292 | `1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca` |
 
-Offline PC copies for U-DAE may already exist under `/tmp/amigent-candidate-offline/` from preflight; re-verify hashes before upload.
+### Sequence summary (see runbook for full detail)
 
-### Sequence (per binary, after 2A backup verified)
+1. Confirm **physical AmigaOS Shell** (independent control).  
+2. Confirm production protocol 5 + TLS.  
+3. Re-verify PC production backup.  
+4. Record `TLSONLY` startup.  
+5. Check staging free space.  
+6. **Transfer U-DAE** to non-`C:` path while production still up.  
+7. **Read-back hash** must match U-DAE.  
+8. Recovery command ready at console.  
+9. Final execution authorisation.  
+10. ARexx `QUIT` production; confirm ARexx/`PORT`/`PORT+1` released.  
+11. Launch staged candidate with `TLSONLY` (default PORT 6801; TLS on **6802**).  
+12. Protocol-6 + read-only SYSINFO/volumes.  
+13. `QUIT` candidate; restore `Run <NIL: >NIL: C:amigentd TLSONLY`.  
+14. Verify protocol **5** + TLS.
 
-1. Confirm PC backup hash of production `C:amigentd` and recorded startup args.  
-2. Confirm restore command rehearsed on paper: `Run <NIL: >NIL: C:amigentd` + args.  
-3. Exclusive window: no other agents driving mouse/keyboard.  
-4. `ADDRESS AMIGENT 'QUIT'`; wait until ARexx port `AMIGENT` gone (poll via Amiga Shell/`show` or lost TCP).  
-5. Confirm production TCP 6801 no longer answers AmiGent hello.  
-6. Upload **one** candidate to a non-production path; `Protect … +e`; launch with `KEY S:amigent.key` and production-equivalent TLSONLY/PORT.  
-7. From PC: connect, record protocol (expect **6**), SYSINFO, volumes, Version; **read-only** only.  
-8. `QUIT` candidate; confirm port free.  
-9. Restore: launch `C:amigentd` with original args.  
-10. Verify PC: protocol **5**, TLS, SYSINFO spot-check vs Stage 1.  
+### TLS note
 
-Repeat steps 4–10 for the other binary in a **separate** session or clearly separated report rows. Never conflate U-DAE and F-DAE results.
+PC clients with a pinned cert dial **PORT+1** (`tls.py`). With production `PORT` default 6801, TLS is **6802**. Do not assume TLS listens on 6801.
 
-### In scope for 2B (once approved)
+### In scope / out of scope
 
-Handshake, SYSINFO, basic read-only commands/files as already used in Stage 1, TLS behaviour observation.
-
-### Out of scope for 2B (Stage 3)
-
-AUDIO / Hear, monitor start, HRTmon, update/fallback, ALLOWPOKE, MMIO writes, PIP experiments, `amigent-setup --update`.
+See runbook. No AUDIO, monitor, HRTmon, Update, MMIO, PIP, PEEK/POKE, F-DAE in the first session.
 
 ---
 

@@ -84,8 +84,13 @@
     "2A_production_sha256": "b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3",
     "2A_startup_redacted": "RUN >NIL: C:amigentd TLSONLY",
     "2A_evidence": "amigent-evidence/stage2a-production-backup/20261121T010816Z",
-    "2B": "exclusive QUIT; candidate from non-C path; restore C:amigentd — NOT RUN",
+    "2B": "NOT RUN — see docs/APOLLO_V4_STAGE2B_RUNBOOK.md",
+    "2B_first_binary": "U-DAE",
+    "2B_sequence": "stage+hash before QUIT; physical Shell required; TLS on PORT+1",
+    "2B_staging_path_proposed": "Programs:AmiGent-Stage2B/amigentd.udae",
     "stop_arexx": "ADDRESS AMIGENT QUIT",
+    "tls_listener": "PORT+1 (6802 when PORT=6801)",
+    "plain_listener": "PORT (6801 default)",
     "avoid": "amigent-setup --update / Amigent-Update for candidate loads"
   },
   "concurrent_daemon": {

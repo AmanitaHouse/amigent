@@ -184,7 +184,7 @@ Save PC-side logs, redacted SYSINFO dict dumps, and hashes of any files **copied
 
 **Stage 3A (probe — executed):** `docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md` — U-PRB/F-PRB PASSED ON HW.
 
-**Stage 3B (AUDIO — prepared):** `docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md` + safety audit — exclusive one-shot first; Hear separate; **not authorised for V4 execution yet**.
+**Stage 3B Phase 1 (AUDIO one-shot — executed):** `docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md` — valid empty; production restored. Phase 2 Hear still separate.
 
 **Exclusive / separate authorisation:** Stage 2B interruption; Stage 3 AUDIO / monitor / HRTmon; update/fallback; ALLOWPOKE; live SAGA writes. Do not load candidates via Amigent-Update / `amigent-setup --update`.
 

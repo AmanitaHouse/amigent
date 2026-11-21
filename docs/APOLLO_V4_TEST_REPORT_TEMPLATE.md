@@ -73,7 +73,8 @@ Copy rows from the plan as needed.
 | C1 launch/quit | HW | | | | | | NOT RUN |
 | C5 identity About | HW | | | | | | NOT RUN |
 | D2 MMIO peek refuse | HW | | | | | | NOT RUN |
-| D4 AUDIO Hear | HW | | | | Stage 3B | | NOT RUN ON HW |
+| D4 AUDIO one-shot | HW | U-DAE | 456fce26… | empty n=0 / rate 0 | Stage 3B P1 | 20261121T022512Z | PASSED (valid empty) |
+| D4 AUDIO Hear | HW | | | | Stage 3B P2 | | NOT RUN ON HW |
 | D5 PIP advertising | HW | | | | | | NOT RUN |
 | D7 HRTmon | HW | | | | | | NOT RUN — approval |
 | E4 rollback | HW | | | | | | NOT RUN — approval |

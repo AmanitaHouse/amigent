@@ -37,33 +37,209 @@
     }
   },
   "tests": [
-    {"id": "A1", "area": "identification", "risk": "L1", "approval": "inventory-contact", "v4": true, "notes": "read-only; no full doctor"},
-    {"id": "A2", "area": "identification", "risk": "L1", "approval": "stage2-or-shell", "v4": true, "binaries": ["F-PRB", "U-PRB"]},
-    {"id": "A3", "area": "identification", "risk": "L2", "approval": "stage2-port", "v4": true, "notes": "candidate may lack hooks"},
-    {"id": "A4", "area": "identification", "risk": "L3", "approval": true, "v4": true},
-    {"id": "A5", "area": "identification", "risk": "L3", "approval": true, "v4": true},
-    {"id": "B1", "area": "protocol", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "B2", "area": "protocol", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "B3", "area": "protocol", "risk": "L3", "approval": true, "v4": true},
-    {"id": "B4", "area": "protocol", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "B5", "area": "protocol", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "C1", "area": "daemon", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "C2", "area": "daemon", "risk": "L3", "approval": true, "v4": true},
-    {"id": "C3", "area": "daemon", "risk": "L2", "approval": "stage2-port", "v4": true, "notes": "text hooks may be absent on twin"},
-    {"id": "C4", "area": "daemon", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "C5", "area": "daemon", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "D1", "area": "apollo", "risk": "L0", "approval": false, "v4": false, "software_only": true},
-    {"id": "D2", "area": "apollo", "risk": "L2", "approval": "explicit", "v4": true},
-    {"id": "D3", "area": "apollo", "risk": "L4", "approval": true, "v4": true},
-    {"id": "D4", "area": "apollo", "risk": "L3", "approval": true, "v4": true, "binaries": ["F-DAE", "U-DAE"], "notes": "exclusive; concurrent AUDIO not established safe"},
-    {"id": "D5", "area": "apollo", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "D6", "area": "apollo", "risk": "L3", "approval": true, "v4": true, "notes": "shared Amigent.monitor port"},
-    {"id": "D7", "area": "apollo", "risk": "L4", "approval": true, "v4": true},
-    {"id": "D8", "area": "apollo", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "E1", "area": "recovery", "risk": "L3", "approval": true, "v4": true},
-    {"id": "E2", "area": "recovery", "risk": "L3", "approval": true, "v4": true},
-    {"id": "E3", "area": "recovery", "risk": "L2", "approval": "stage2-port", "v4": true},
-    {"id": "E4", "area": "recovery", "risk": "L3", "approval": true, "v4": true}
+    {
+      "id": "A1",
+      "area": "identification",
+      "risk": "L1",
+      "approval": "inventory-contact",
+      "v4": true,
+      "notes": "read-only; no full doctor"
+    },
+    {
+      "id": "A2",
+      "area": "identification",
+      "risk": "L1",
+      "approval": "stage2-or-shell",
+      "v4": true,
+      "binaries": [
+        "F-PRB",
+        "U-PRB"
+      ]
+    },
+    {
+      "id": "A3",
+      "area": "identification",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true,
+      "notes": "candidate may lack hooks"
+    },
+    {
+      "id": "A4",
+      "area": "identification",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "A5",
+      "area": "identification",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "B1",
+      "area": "protocol",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "B2",
+      "area": "protocol",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "B3",
+      "area": "protocol",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "B4",
+      "area": "protocol",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "B5",
+      "area": "protocol",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "C1",
+      "area": "daemon",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "C2",
+      "area": "daemon",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "C3",
+      "area": "daemon",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true,
+      "notes": "text hooks may be absent on twin"
+    },
+    {
+      "id": "C4",
+      "area": "daemon",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "C5",
+      "area": "daemon",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "D1",
+      "area": "apollo",
+      "risk": "L0",
+      "approval": false,
+      "v4": false,
+      "software_only": true
+    },
+    {
+      "id": "D2",
+      "area": "apollo",
+      "risk": "L2",
+      "approval": "explicit",
+      "v4": true
+    },
+    {
+      "id": "D3",
+      "area": "apollo",
+      "risk": "L4",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "D4",
+      "area": "apollo",
+      "risk": "L3",
+      "approval": true,
+      "v4": true,
+      "binaries": [
+        "F-DAE",
+        "U-DAE"
+      ],
+      "notes": "exclusive; concurrent AUDIO not established safe"
+    },
+    {
+      "id": "D5",
+      "area": "apollo",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "D6",
+      "area": "apollo",
+      "risk": "L3",
+      "approval": true,
+      "v4": true,
+      "notes": "shared Amigent.monitor port"
+    },
+    {
+      "id": "D7",
+      "area": "apollo",
+      "risk": "L4",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "D8",
+      "area": "apollo",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "E1",
+      "area": "recovery",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "E2",
+      "area": "recovery",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    },
+    {
+      "id": "E3",
+      "area": "recovery",
+      "risk": "L2",
+      "approval": "stage2-port",
+      "v4": true
+    },
+    {
+      "id": "E4",
+      "area": "recovery",
+      "risk": "L3",
+      "approval": true,
+      "v4": true
+    }
   ],
   "stage1_observed": {
     "machine": "V4SA",
@@ -76,7 +252,7 @@
   },
   "stage2": {
     "plan_doc": "docs/APOLLO_V4_STAGE2_EXCLUSIVE_PLAN.md",
-    "2A": "complete — see docs/APOLLO_V4_STAGE2A_RESULTS.md",
+    "2A": "complete \u2014 see docs/APOLLO_V4_STAGE2A_RESULTS.md",
     "2A_session": "20261121T010816Z",
     "2A_production_path": "C:amigentd",
     "2A_production_version": "amigentd 1.3",
@@ -84,7 +260,7 @@
     "2A_production_sha256": "b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3",
     "2A_startup_redacted": "RUN >NIL: C:amigentd TLSONLY",
     "2A_evidence": "amigent-evidence/stage2a-production-backup/20261121T010816Z",
-    "2B": "U-DAE complete — see docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md",
+    "2B": "U-DAE complete \u2014 see docs/APOLLO_V4_STAGE2B_UDAE_RESULTS.md",
     "2B_session": "20261121T011756Z",
     "2B_first_binary": "U-DAE",
     "2B_udae_protocol": 6,
@@ -92,7 +268,7 @@
     "2B_sequence": "stage+hash before QUIT; physical Shell required; TLS on PORT+1",
     "2B_staging_path": "Programs:AmiGent-Stage2B/amigentd.udae",
     "2B_evidence": "amigent-evidence/stage2b-udae-exclusive/20261121T011756Z",
-    "2B_F-DAE": "complete — see docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md",
+    "2B_F-DAE": "complete \u2014 see docs/APOLLO_V4_STAGE2B_FDAE_RESULTS.md",
     "2B_fdae_session": "20261121T014548Z",
     "2B_fdae_protocol": 6,
     "2B_fdae_staging_path": "Programs:AmiGent-Stage2B/amigentd.fdae",
@@ -104,9 +280,9 @@
   },
   "concurrent_daemon": {
     "tcp_second_port": "supported with caveats",
-    "shared_hooks_semaphore": "amigent hooks 1 — single owner",
+    "shared_hooks_semaphore": "amigent hooks 1 \u2014 single owner",
     "audio_concurrent": "not established safe",
-    "monitor_port": "Amigent.monitor — single consumer",
+    "monitor_port": "Amigent.monitor \u2014 single consumer",
     "verdict": "Stage 2B exclusive by default; Stage 3 for AUDIO/monitor"
   },
   "ports_from_docs": {
@@ -121,12 +297,12 @@
     "note": "Software unit tests are not substitutes for these rows",
     "U-DAE_protocol6_smoke": "PASSED_ON_HARDWARE",
     "F-DAE_protocol6": "PASSED_ON_HARDWARE",
-    "U-DAE_AUDIO": "NOT_RUN_ON_HARDWARE — Stage 3B prepared; see docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
-    "F-DAE_AUDIO": "NOT_RUN_ON_HARDWARE — Stage 3B prepared; see docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
-    "AUDIO_opcode_48": "NOT_RUN_ON_HARDWARE",
-    "native_apollo_probe_execution": "PASSED_ON_HARDWARE — see docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md",
+    "U-DAE_AUDIO": "PASSED_ON_HARDWARE (Phase 1 one-shot valid empty) \u2014 docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
+    "F-DAE_AUDIO": "NOT_RUN_ON_HARDWARE \u2014 Stage 3B prepared; see docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
+    "AUDIO_opcode_48": "PASSED_ON_HARDWARE (one-shot empty; not Hear/stream)",
+    "native_apollo_probe_execution": "PASSED_ON_HARDWARE \u2014 see docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md",
     "U-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS / rc 0)",
-    "F-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS+68080 / rc 0; OS∧AFF_FPGA path)",
+    "F-PRB_stdout_exit": "PASSED_ON_HARDWARE (ApolloOS+68080 / rc 0; OS\u2227AFF_FPGA path)",
     "U-PRB_native_detection": "PASSED_ON_HARDWARE",
     "F-PRB_native_detection": "PASSED_ON_HARDWARE",
     "stage3a": {
@@ -135,7 +311,7 @@
       "runbook": "docs/APOLLO_V4_STAGE3A_PROBE_RUNBOOK.md",
       "results": "docs/APOLLO_V4_STAGE3A_PROBE_RESULTS.md",
       "concurrent_with_production": true,
-      "mmio_gate": "PASS — ApolloOS IdString + AFF_FPGA bypass $DFF3FC",
+      "mmio_gate": "PASS \u2014 ApolloOS IdString + AFF_FPGA bypass $DFF3FC",
       "U-PRB_sha256": "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4",
       "F-PRB_sha256": "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265",
       "staging_uprb": "Programs:AmiGent-Stage3A/amigent-apollo-probe.uprb",
@@ -143,18 +319,20 @@
       "evidence": "amigent-evidence/stage3a-probe/20261121T021031Z",
       "production_after": "protocol 5 TLS responsive"
     },
-    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE — Stage 3B Phase 2; requires separate authorisation after Phase 1",
+    "viewer_Hear_playback": "NOT_RUN_ON_HARDWARE \u2014 Stage 3B Phase 2; requires separate authorisation after Phase 1",
     "stage3b": {
-      "status": "prepared_awaiting_authorisation",
+      "status": "phase1_executed_valid_empty",
+      "session_evidence": "amigent-evidence/stage3b-audio-phase1/20261121T022512Z",
+      "results": "docs/APOLLO_V4_STAGE3B_AUDIO_PHASE1_RESULTS.md",
       "audit": "docs/APOLLO_V4_STAGE3B_AUDIO_SAFETY_AUDIT.md",
       "runbook": "docs/APOLLO_V4_STAGE3B_AUDIO_RUNBOOK.md",
       "first_candidate": "U-DAE",
-      "phase1": "exclusive one-shot audio(0)",
-      "phase2": "Viewer Hear — separate auth",
-      "phase3": "F-DAE AUDIO — separate auth",
-      "concurrent_with_production": false,
-      "hw_writes_on_audio_path": false,
-      "stream_residual": "T:audio-mem diagnostic possible on Hear stream"
+      "audio_invocations": 1,
+      "payload_bytes": 0,
+      "rate": 0,
+      "production_restored": true,
+      "phase2_hear": "NOT_AUTHORISED",
+      "phase3_fdae_audio": "NOT_AUTHORISED"
     },
     "apollo_monitor": "NOT_RUN",
     "HRTmon": "NOT_RUN",

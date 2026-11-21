@@ -419,7 +419,7 @@
     },
     "apollo_monitor": "NOT_RUN",
     "HRTmon": "NOT_RUN",
-    "live_MMIO": "NOT_RUN — Stage 4 Phase 1 proposed (D2 PEEK refuse)",
+    "live_MMIO": "PASSED_ON_HARDWARE Stage 4 D2 — 3 protected PEEK refuses + 2 safe controls on F-FORKSAFE 00443719… — docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "installer_update_fallback": "NOT_RUN",
     "maintainer_summary": "docs/APOLLO_V4_HARDWARE_EVIDENCE_SUMMARY.md",
     "fdae_runbook": "docs/APOLLO_V4_STAGE2B_FDAE_RUNBOOK.md",
@@ -447,14 +447,30 @@
     "stage3b_final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
     "stage3b_status": "CLOSED",
     "stage4_safety_assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
-    "stage4_status": "offline_assessment_complete_no_hw",
+    "stage4_status": "d2_executed_pass",
     "upstream_1_5_0_public": "NOT_PUBLISHED — no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
     "stage4": {
-      "status": "offline_assessment_complete",
+      "status": "d2_mmio_peek_refuse_passed",
       "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
-      "proposed_next": "D2 live PEEK refuse into one protected SAGA window",
-      "authorised_hw": false,
-      "upstream_1_5_0": "still_private"
-    }
+      "d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
+      "d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
+      "d2_evidence": "amigent-evidence/stage4-d2-mmio/20261121T060119Z",
+      "d2_sha256": "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+      "d2_protected_peeks": 3,
+      "d2_control_peeks": 2,
+      "d2_production_restored": true,
+      "authorised_next": false,
+      "remaining": [
+        "POKE/ALLOWPOKE D3",
+        "monitor D6",
+        "HRTmon D7",
+        "TRACE on 68080"
+      ]
+    },
+    "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
+    "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
+    "stage4_d2_evidence": "amigent-evidence/stage4-d2-mmio/20261121T060119Z",
+    "stage4_d2_protected_peeks": 3,
+    "stage4_d2_control_peeks": 2
   }
 }

@@ -470,7 +470,11 @@
       "d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
       "d2_control_class": "out_of_authorised_scope_rom_and_vector",
       "d2_protected_claim": "three_addresses_only",
-      "go_gate": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md#formal-go--no-go-gate-mandatory-for-any-stage-4-hardware-session"
+      "go_gate": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md#formal-go--no-go-gate-mandatory-for-any-stage-4-hardware-session",
+      "d3_review": "docs/APOLLO_V4_STAGE4_D3_POKE_SAFETY_REVIEW.md",
+      "d3_offline": "fail_closed_pass",
+      "d3_hardware": "NO_GO_not_authorised",
+      "d3_note": "Offline fail-closed review PASS; POKE_ALLOWPOKE remains NOT_TESTED on hardware. No live POKE; no ALLOWPOKE on V4."
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
@@ -482,6 +486,8 @@
     "d2_system_rom_control_reads": "EXECUTED — D2-C1 $F80000/4 ROM and D2-C2 $00000004/4 vector/ExecBase slot; successful reads but OUTSIDE original authorised control class (test-owned allocated RAM) — docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
     "POKE_ALLOWPOKE": "NOT_TESTED",
     "TRACE_68080": "NOT_TESTED",
-    "stage4_d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md"
+    "stage4_d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
+    "stage4_d3_poke_safety_review": "docs/APOLLO_V4_STAGE4_D3_POKE_SAFETY_REVIEW.md",
+    "stage4_d3_status": "offline_fail_closed_pass_hw_nogo"
   }
 }

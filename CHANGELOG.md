@@ -80,6 +80,28 @@ Versions follow [semver](https://semver.org). The number lives in
   is mended at the Amiga; Amigent says which of the two it is and how to
   recover. (#27)
 
+### FPU
+
+- Amigent tells the FPU from exec's AttnFlags instead of the text of `C:CPU`:
+  68881, 68882, the FPU of a 68040, 68060 or 68080, or none (such as a
+  68EC020 or 68LC040). On a 68040/060 it also checks that
+  `68040.library` or `68060.library` is loaded. Emu68 on a PiStorm, known by
+  its `devicetree.resource`, runs every FPU instruction itself and needs no
+  such library; started with `nofpu` it has no FPU. `amiga_status`, the inventory
+  and the remote desktop's About show it, such as "68040 with FPU
+  (68040.library loaded)" or "68LC040, no FPU".
+- A line-F guru or Software Failure says whether the Amiga has no FPU (the
+  program needs one) or has one without its support library. The FPU
+  exceptions of the 68040/060 have names too.
+- `amiga_build(fpu="auto")` builds FPU code for the FPU the Amiga has (vbcc
+  `-fpu=68881` with `m881.lib`, or `-fpu=68040` with `m040.lib`) and is
+  refused on an Amiga without one. The default stays without FPU code.
+- `amiga_run` looks for FPU instructions in a program's code before starting
+  it on an Amiga without an FPU, and does not start one that has them
+  (`check_fpu=False` runs it anyway); on a 68040/060 without its library it
+  warns. The check is a heuristic.
+  ([#42](https://github.com/akustikrausch/amigent/issues/42))
+
 ### Building
 
 - A GitHub workflow builds amigentd, amigent-status and amigent-monitor with

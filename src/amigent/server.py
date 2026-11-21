@@ -339,7 +339,7 @@ def _amiga_name() -> str:
 
 @mcp.tool()
 def amiga_status() -> str:
-    """Show memory, OS and TCP stack versions, and mounted volumes with free space.
+    """Show memory, OS and TCP stack versions, CPU and FPU, and mounted volumes with free space.
 
     Also tells whether the Amiga started again since the last look, and the
     guru code it kept from before the last reset, so after a lost connection
@@ -413,8 +413,43 @@ def _system_facts() -> dict:
             ppc = system.ppc_software(run)
             if ppc:
                 facts["ppc"] = ppc
+            fpu = _read_fpu(facts)
+            facts.update(fpu=fpu.short(), processor=fpu.line())
+            _session().fpu = fpu
         _session().system_seen.update({k: v for k, v in facts.items() if v})
     return dict(_session().system_seen)
+
+
+def _read_fpu(facts: dict) -> "system.Fpu":
+    """The FPU from exec's AttnFlags (SYSINFO), and on a 68040/060 whether its library is loaded."""
+    try:
+        flags = system.attn_flags(_with_ctl(_session().ctl.sysinfo))
+    except (AmigaError, AttributeError):
+        flags = None
+    fpu = system.describe_fpu(flags, facts.get("cpu", ""), facts.get("fpu", ""))
+    if system.wants_loaded(fpu):
+        try:
+            system.apply_loaded(fpu, _loaded().libraries)
+        except (AmigaError, AttributeError):
+            pass  # amigentd before 1.4.0, or amigactld: the flags alone tell
+    return fpu
+
+
+def _fpu() -> "system.Fpu | None":
+    """This Amiga's FPU, asked once per session; None on PowerPC systems or when it cannot be told."""
+    try:
+        _system_facts()
+    except AmigaError:
+        return None
+    return _session().fpu
+
+
+def _fpu_hint(code) -> str:
+    """For a line-F guru or an FPU support trap: what this Amiga's FPU says about it."""
+    from . import alerts
+    if alerts.cpu_exception(code) not in (alerts.LINE_F, *alerts.SUPPORT_TRAPS):
+        return ""
+    return alerts.fpu_hint(code, _fpu())
 
 
 def _clear_hold() -> str:
@@ -1147,14 +1182,71 @@ def amiga_create_project(name: str, folder: str = "", kind: str = "shell", cpu: 
             f"amiga_run({_join(target, name)!r}) runs it")
 
 
+FPU_BUILDS = {"68881": "68881", "68882": "68881", "68040": "68040", "68060": "68040"}
+
+
+def _build_fpu(fpu: str, cpu: str) -> tuple[str, str, str]:
+    """(FPU argument for the build script, CPU, a note) for amiga_build's fpu option.
+
+    auto takes what this Amiga has: m881.lib for a 68881/68882, m040.lib for a
+    68040/060 FPU. A machine without an FPU is refused; an unknown one is warned of.
+    """
+    want = fpu.strip().lower()
+    have = _fpu()
+    if want in ("auto", "yes", "true", "on", "1"):
+        if have is None or have.present is None:
+            raise AmigaError("fpu=auto: this Amiga's FPU is not known (amigentd does not report "
+                             "AttnFlags); give fpu='68881' or fpu='68040' to build for one anyway")
+        want = "68040" if have.kind == "internal" and have.library else "68881"
+    if want not in FPU_BUILDS:
+        raise AmigaError("fpu: '' (no FPU code, runs everywhere), auto, 68881 or 68040")
+    want = FPU_BUILDS[want]
+    if have is not None and have.present is False:
+        raise AmigaError(f"not building FPU code: {have.line()}, so the program would crash with "
+                         "a line-F guru here. Build without fpu, or give an Amiga with an FPU as machine")
+    if cpu and cpu.strip().upper().lstrip("MC") in ("68000", "68010"):
+        raise AmigaError(f"FPU code needs a 68020 or better, not cpu {cpu}")
+    cpu = cpu or ("68040" if want == "68040" else "68020")
+    lib = "m040.lib" if want == "68040" else "m881.lib"
+    note = (f"FPU code (-fpu={want}, {lib}): it runs only on an Amiga with an FPU"
+            + (" (a 68040 or 68060 one)" if want == "68040" else ""))
+    if have is None or have.present is None:
+        note += "; this Amiga's FPU is not known, so it was not checked"
+    elif want == "68040" and have.kind != "internal":
+        note += f"; this Amiga has a {have.kind}, which m040.lib is not for: fpu='68881' fits it"
+    elif have.support_missing:
+        note += (f"; {have.library} is not loaded here, so instructions the chip lacks will crash"
+                 + ("" if want == "68040" else ": fpu='68040' avoids most of them"))
+    return want, cpu, note
+
+
 @mcp.tool()
-def amiga_build(folder: str, cpu: str = "", devpack: str = "") -> str:
+def amiga_build(folder: str, cpu: str = "", devpack: str = "", fpu: str = "") -> str:
     """Compile a project on the Amiga by running its build script (as a job), and
-    report the compiler's messages and whether it worked."""
-    args = (f" CPU {cpu}" if cpu else "") + (f' DEVPACK "{devpack}"' if devpack else "")
+    report the compiler's messages and whether it worked.
+
+    fpu: '' (default) builds without FPU instructions, so the program runs on
+    every Amiga. 'auto' builds FPU code for the FPU this Amiga has, '68881'
+    (m881.lib, 68881/68882 or a 68040/060 with its library) or '68040'
+    (m040.lib, a 68040/060 FPU). Refused on an Amiga without an FPU. Projects
+    made before Amigent 1.5.0 need a new build script for it (amiga_create_project).
+    """
+    note = ""
+    if fpu:
+        try:
+            script = _with_ctl(lambda: _session().ctl.read_file(_join(folder, "build"))).decode("iso-8859-1")
+        except AmigaError as e:
+            raise AmigaError(f"no build script in {folder}: {e}") from None
+        if "FPU/K" not in script.split("\n", 1)[0]:
+            raise AmigaError(f"{_join(folder, 'build')} has no FPU option yet; a project from "
+                             "amiga_create_project of Amigent 1.5.0 or newer has it (copy its "
+                             "build script over, keeping main.c)")
+        fpu, cpu, note = _build_fpu(fpu, cpu)
+    args = ((f" CPU {cpu}" if cpu else "") + (f' DEVPACK "{devpack}"' if devpack else "")
+            + (f" FPU {fpu}" if fpu else ""))
     out = amiga_job(f'CD "{folder}"\nExecute build{args}', wait=900)
     ok = "built " in out and "build failed" not in out
-    return ("built\n" if ok else "build failed\n") + out
+    return ("built" if ok else "build failed") + (f" with {note}" if note else "") + "\n" + out
 
 
 @mcp.tool()
@@ -1186,7 +1278,8 @@ def amiga_gurus(code: str = "") -> str:
     from . import alerts
     if code:
         c, _, where = code.strip().lstrip("#").partition(".")
-        return f"{code}: {alerts.describe(c, where or None)}"
+        hint = _fpu_hint(c)
+        return f"{code}: {alerts.describe(c, where or None)}" + (f"\n{hint}" if hint else "")
     extra = {}
     try:
         extra = alerts.gurudat(_with_ctl(lambda: _session().ctl.read_file("S:MCP.gurudat")).decode("iso-8859-1"))
@@ -1198,8 +1291,10 @@ def amiga_gurus(code: str = "") -> str:
         c, w = info["last_alert"], info.get("last_alert_where", "")
         out.append(f"last alert exec kept: {c.upper()}{'.' + w.upper() if w else ''} -> "
                    f"{alerts.describe(c, w or None)}")
+        hints = [c]
     else:
         out.append("exec kept no alert from before the last reset")
+        hints = []
     for path in GURU_LOGS:
         try:
             text = _with_ctl(lambda: _session().ctl.read_file(path)).decode("iso-8859-1")
@@ -1208,6 +1303,13 @@ def amiga_gurus(code: str = "") -> str:
         found = alerts.history(text, extra)
         out.append(f"{path}: " + (f"{len(found)} guru(s)" if found else "no gurus logged"))
         out += [f"  {x}" for x in found[-20:]]
+        hints += alerts.codes(text)[-20:]
+    said = set()
+    for c in hints:  # each kind of FPU guru explained once
+        hint = _fpu_hint(c)
+        if hint and hint not in said:
+            said.add(hint)
+            out.append(f"FPU: {hint}")
     return "\n".join(out)
 
 
@@ -1498,6 +1600,12 @@ def amiga_inventory(max_wait: float = 1800) -> str:
     target.write_text(json.dumps(items, indent=1, ensure_ascii=False), encoding="utf-8")
     summary = {"file": str(target), "files": len(items),
                "with_version": sum(1 for i in items.values() if i["version"])}
+    try:
+        processor = _system_facts().get("processor")
+    except AmigaError:
+        processor = ""
+    if processor:
+        summary["processor"] = processor
     if previous is not None:
         summary["diff"] = inventory.diff(previous, items)
     return json.dumps(summary, indent=1, ensure_ascii=False)
@@ -1787,6 +1895,9 @@ def amiga_software_failure(action: str = "show") -> str:
     m = re.search(r"\b([0-9A-Fa-f]{8})\b(?:[ .]+\(?(?:task[: ]*)?\$?([0-9A-Fa-f]{8}))?", text)
     if m:
         out.append("guru: " + alerts.describe(m.group(1), m.group(2)))
+        hint = _fpu_hint(m.group(1))
+        if hint:
+            out.append("FPU: " + hint)
         if m.group(2):
             try:
                 out.append(f"at {m.group(2)}: " + (_namer().name(int(m.group(2), 16)) or "no program amigentd knows"))
@@ -2532,8 +2643,54 @@ CRASH_TITLES = ("software failure", "softwarefehler", "program failed", "program
                 "guru", "systemanforderung", "system request")
 
 
+FPU_CHECK_MAX = 1 << 20  # bytes read from the Amiga for the FPU check; plipbox does ~17 KB/s
+
+
+def _fpu_check(program: str, local: Path, check_fpu: bool) -> tuple[str, bool]:
+    """(note, stop) before running: does the program use FPU instructions this Amiga cannot run?
+
+    Only asked when this Amiga has no FPU, or a 68040/060 FPU without its
+    library; the program is read from the Amiga only then and up to 1 MB.
+    stop is True when FPU code was found and the Amiga has no FPU at all.
+    """
+    from . import hunks
+    if not check_fpu:
+        return "", False
+    fpu = _fpu()
+    if fpu is None or not (fpu.present is False or fpu.support_missing):
+        return "", False
+    if local.is_file():
+        data = local.read_bytes()
+    else:
+        path = program.strip().strip('"')
+        if ":" not in path and "/" not in path:
+            return "", False  # a command found through the path; not looked for
+        try:
+            size = _with_ctl(lambda: _session().ctl.stat(path)).get("size", 0)
+            if not 0 < int(size) <= FPU_CHECK_MAX:
+                return "", False
+            data = _with_ctl(lambda: _session().ctl.read_file(path))
+        except (AmigaError, TypeError, ValueError):
+            return "", False
+    try:
+        use = hunks.fpu_use(data)
+    except hunks.NotAProgram:
+        return "", False
+    if not use.uses_fpu:
+        return "", False
+    if fpu.present is False:
+        return (f"not run: {Path(program).name} {use.describe()}, and this Amiga has none "
+                f"({fpu.line()}), so it would most likely crash with a line-F guru. "
+                "amiga_run(..., check_fpu=False) runs it anyway"), True
+    if use.emulated:
+        return (f"FPU check: {Path(program).name} {use.describe()}; {fpu.line()}, so those "
+                "may crash"), False
+    return "", False
+
+
 @mcp.tool()
-def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "") -> str:
+def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "",
+              check_fpu: bool = True) -> str:
     """Develop and test: copy a program over if it is local, run it, and report everything.
 
     program is a path on this PC (uploaded to RAM:amigent-run first, only when
@@ -2541,8 +2698,16 @@ def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "") -
     output it produced (kprintf, Enforcer hits), requesters that came up
     meanwhile (such as Software Failure) and, if the Amiga dropped off, what
     amiga_status finds after it came back: a restart or a guru code.
+
+    check_fpu: on an Amiga without an FPU, a program whose code holds FPU
+    instructions is not started (it would crash with a line-F guru); on a
+    68040/060 without its support library it is started with a warning. The
+    check is a heuristic over the code hunks; check_fpu=False skips it.
     """
     local = Path(program).expanduser()
+    fpu_note, stop = _fpu_check(program, local, check_fpu)
+    if stop:
+        return fpu_note
     if local.is_file():
         _with_ctl(lambda: files.makedirs(_session().ctl, RUN_DIR))
         target = _join(RUN_DIR, local.name)
@@ -2556,7 +2721,7 @@ def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "") -
     except (AttributeError, AmigaError):
         seen_before = None
     windows_before = _window_titles()
-    report = []
+    report = [fpu_note] if fpu_note else []
     try:
         result = _with_ctl(lambda: _session().ctl.exec(command, cd or None, timeout))
         report.append(f"rc={result.rc}")

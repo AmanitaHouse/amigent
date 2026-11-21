@@ -70,10 +70,14 @@ int main(void)
 }}
 '''
 
-BUILD = r'''.KEY CPU/K,DEVPACK/K
+BUILD = r'''.KEY CPU/K,DEVPACK/K,FPU/K
 .DEF CPU {cpu}
 .DEF DEVPACK {devpack}
+.DEF FPU NONE
 ; Builds {name} with vbcc. DEVPACK is the folder with vbcc/ and SDK/NDK 3.9/.
+; FPU 68881 makes FPU code with m881.lib (68020 or better with a 68881/68882 or a
+; 68040/060 with its library), FPU 68040 with m040.lib (68040/060 FPU only).
+; Without FPU no FPU instruction is made and the program runs on every Amiga.
 FailAt 21
 Stack 65536
 If NOT EXISTS VBCC:
@@ -83,10 +87,26 @@ Assign vincludeos3: VBCC:targets/m68k-amigaos/include
 Assign vincludeos3: "<DEVPACK>/SDK/NDK 3.9/Include/include_h" ADD
 Assign vlibos3: VBCC:targets/m68k-amigaos/lib
 Path VBCC:bin ADD
-VBCC:bin/vc +VBCC:config/aos68k -c99 -O1 -g -cpu=<CPU> -o {name} main.c -lamiga
-If WARN
-  Echo "build failed"
-  Quit 10
+If "<FPU>" EQ "NONE"
+  VBCC:bin/vc +VBCC:config/aos68k -c99 -O1 -g -cpu=<CPU> -o {name} main.c -lamiga
+  If WARN
+    Echo "build failed"
+    Quit 10
+  EndIf
+Else
+  If "<FPU>" EQ "68040"
+    VBCC:bin/vc +VBCC:config/aos68k -c99 -O1 -g -cpu=<CPU> -fpu=68040 -o {name} main.c -lm040 -lamiga
+    If WARN
+      Echo "build failed"
+      Quit 10
+    EndIf
+  Else
+    VBCC:bin/vc +VBCC:config/aos68k -c99 -O1 -g -cpu=<CPU> -fpu=68881 -o {name} main.c -lm881 -lamiga
+    If WARN
+      Echo "build failed"
+      Quit 10
+    EndIf
+  EndIf
 EndIf
 Echo "built {name}"
 '''
@@ -94,7 +114,7 @@ Echo "built {name}"
 README = '''{name}
 
 main.c   the program
-build    Execute build [CPU 68000] [DEVPACK path]: compiles with vbcc
+build    Execute build [CPU 68000] [DEVPACK path] [FPU 68881|68040]: compiles with vbcc
 '''
 
 

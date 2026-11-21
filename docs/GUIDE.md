@@ -249,7 +249,7 @@ starts the old one again.
 | `amiga_mouse_relative` | mouse movement for games that ignore the pointer position |
 | `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
 | `amiga_break` | Ctrl-C (or D, E, F) for a running command or a job by its number |
-| `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions; after a crash the guru in words and what happened before |
+| `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions, the CPU and FPU ("68040 with FPU (68040.library loaded)"); after a crash the guru in words and what happened before |
 | `amiga_update` | is a newer Amigent out, and what is new; with `apply=True` (after the user agrees) updates this PC and every saved Amiga |
 | `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
 | `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` and the vectors below $400 (ExecBase at 4) work too |
@@ -258,20 +258,20 @@ starts the old one again.
 | `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
-| `amiga_software_failure` | a Software Failure requester: its text, the guru in words, and Suspend (never Reboot) |
+| `amiga_software_failure` | a Software Failure requester: its text, the guru in words (for a line-F guru whether the FPU or its library is missing), and Suspend (never Reboot) |
 | `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
 | `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
 | `amiga_hrtmon` | load HRTmon (Aminet dev/debug/HRTmon) for the user at the Amiga; entering it halts the system, so the agent never does |
-| `amiga_gurus` | guru codes in words, the last one and those MCP logged |
+| `amiga_gurus` | guru codes in words, the last one and those MCP logged; a line-F guru against this Amiga's FPU |
 | `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
 | `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |
-| `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga |
+| `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has |
 | `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
 | `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
-| `amiga_run`, `amiga_debug_log` | run a program under test, with its kprintf and Enforcer output |
+| `amiga_run`, `amiga_debug_log` | run a program under test, with its kprintf and Enforcer output; FPU code is not started on an Amiga without an FPU |
 | `amiga_follow` | copy a growing log or the debug output to the PC while it grows, so it survives a hang |
 | `amiga_clipboard` | read or set the Amiga's clipboard |
 | `amiga_notes`, `amiga_note` | what the agent learned about programs on this Amiga, for next time |
@@ -332,6 +332,24 @@ it left: memory, open libraries, tasks, ports. `amiga_tasks` shows how much
 stack each task uses, with a warning near the end. `amiga_screen_diff`
 compares the screen with a saved picture, for tests of how a program looks.
 `amiga_everywhere` runs one command on all known Amigas and compares.
+
+The FPU: Amigent reads it from exec's AttnFlags, which amigentd reports, and
+on a 68040 or 68060 also whether `68040.library` or `68060.library` is loaded;
+the chip's FPU lacks some instructions (FSIN, FETOX and others) that the
+library emulates. Emu68 on a PiStorm (told by its `devicetree.resource`) runs
+all of them itself, so there it says "68040 with FPU (Emu68)", and with Emu68's
+`nofpu` option no FPU. Without AttnFlags (an older amigentd) it falls back to what
+`C:CPU` prints. A line-F guru is then explained: no FPU means the program needs
+one; an FPU without its library means the library is missing. `amiga_build`
+builds without FPU code by default, so the program runs on every Amiga;
+`fpu="auto"` uses vbcc's `-fpu=68881` with `m881.lib` for a 68881/68882 and
+`-fpu=68040` with `m040.lib` for a 68040/060, and is refused on an Amiga
+without an FPU. Projects created before 1.5.0 need a new build script for it.
+Before `amiga_run` starts a program on an Amiga without an FPU, or on a
+68040/060 without its library, it looks through the program's code hunks for
+FPU instructions; on an Amiga without an FPU it does not start one that has
+them (`check_fpu=False` runs it anyway). This is a heuristic: a program may
+test for an FPU before using it.
 
 ## Remote desktop
 

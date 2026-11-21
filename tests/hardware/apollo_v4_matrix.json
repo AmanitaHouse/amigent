@@ -1,0 +1,76 @@
+{
+  "schema": "amigent.apollo_v4_matrix/v1",
+  "audit_date": "2026-11-21",
+  "audit_commit": "79880b8f018ae735715de4f1d0e943acf4462dcd",
+  "plan_doc": "docs/APOLLO_V4_HARDWARE_TEST_PLAN.md",
+  "ci_executable": false,
+  "binaries": {
+    "F-DAE": {
+      "name": "amigentd.apollo",
+      "size": 131292,
+      "sha256": "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",
+      "lineage": "fork-main"
+    },
+    "U-DAE": {
+      "name": "amigentd.apollo",
+      "size": 129844,
+      "sha256": "456fce26329612163d7012fa1526da9cb141f525ff5d8c3a5a6f817e016858b6",
+      "lineage": "integrate/apollo-safe-upstream-stack@685309d"
+    },
+    "F-PRB": {
+      "name": "amigent-apollo-probe",
+      "size": 3224,
+      "sha256": "96ca1b389980b5a94ce0fc94c67c8eeafa7dd2455df497f52532e15409ba0265",
+      "lineage": "fork-main / review/apollo-probe-core-evidence"
+    },
+    "U-PRB": {
+      "name": "amigent-apollo-probe",
+      "size": 3112,
+      "sha256": "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4",
+      "lineage": "integrate/apollo-safe-upstream-stack@685309d"
+    },
+    "MON": {
+      "name": "amigent-monitor.apollo",
+      "size": 22816,
+      "sha256": "e06222ce73f62a1ec6cab7a370e3e6154f1c396160a4813d29ad7fd7cdb9626e",
+      "lineage": "shared"
+    }
+  },
+  "tests": [
+    {"id": "A1", "area": "identification", "risk": "L1-L3", "approval": "if-connect", "v4": true},
+    {"id": "A2", "area": "identification", "risk": "L1", "approval": false, "v4": true, "binaries": ["F-PRB", "U-PRB"]},
+    {"id": "A3", "area": "identification", "risk": "L2", "approval": "staging", "v4": true},
+    {"id": "A4", "area": "identification", "risk": "L3", "approval": true, "v4": true},
+    {"id": "A5", "area": "identification", "risk": "L3", "approval": true, "v4": true},
+    {"id": "B1", "area": "protocol", "risk": "L2", "approval": "staging", "v4": true},
+    {"id": "B2", "area": "protocol", "risk": "L2", "approval": false, "v4": true},
+    {"id": "B3", "area": "protocol", "risk": "L3", "approval": true, "v4": true},
+    {"id": "B4", "area": "protocol", "risk": "L2", "approval": "staging", "v4": true},
+    {"id": "B5", "area": "protocol", "risk": "L2", "approval": false, "v4": true},
+    {"id": "C1", "area": "daemon", "risk": "L2", "approval": "staging", "v4": true},
+    {"id": "C2", "area": "daemon", "risk": "L2-L3", "approval": "if-SETUP", "v4": true},
+    {"id": "C3", "area": "daemon", "risk": "L2", "approval": "staging", "v4": true},
+    {"id": "C4", "area": "daemon", "risk": "L2", "approval": false, "v4": true},
+    {"id": "C5", "area": "daemon", "risk": "L2", "approval": false, "v4": true},
+    {"id": "D1", "area": "apollo", "risk": "L0", "approval": false, "v4": false, "software_only": true},
+    {"id": "D2", "area": "apollo", "risk": "L2", "approval": "explicit", "v4": true},
+    {"id": "D3", "area": "apollo", "risk": "L4", "approval": true, "v4": true},
+    {"id": "D4", "area": "apollo", "risk": "L2", "approval": "staging", "v4": true, "binaries": ["F-DAE", "U-DAE"]},
+    {"id": "D5", "area": "apollo", "risk": "L2", "approval": false, "v4": true},
+    {"id": "D6", "area": "apollo", "risk": "L2-L3", "approval": "if-replace", "v4": true},
+    {"id": "D7", "area": "apollo", "risk": "L4", "approval": true, "v4": true},
+    {"id": "D8", "area": "apollo", "risk": "L2", "approval": false, "v4": true},
+    {"id": "E1", "area": "recovery", "risk": "L3", "approval": true, "v4": true},
+    {"id": "E2", "area": "recovery", "risk": "L3", "approval": true, "v4": true},
+    {"id": "E3", "area": "recovery", "risk": "L2", "approval": false, "v4": true},
+    {"id": "E4", "area": "recovery", "risk": "L3", "approval": true, "v4": true}
+  ],
+  "ports_from_docs": {
+    "default_daemon_port": 6801,
+    "tls_port": "PORT+1",
+    "second_instance": "amigentd PORT <n> documented in docs/PROTOCOL.md",
+    "viewer_http_default": 6810,
+    "ctl_env": "AMIGENT_CTL_PORT",
+    "screen_env": "AMIGENT_SCREEN_PORT"
+  }
+}

@@ -90,3 +90,14 @@ Instrumentation observed `audio_start`/`read`/`stop` and forced OFF only via `su
 ## Basic AUDIO regression closure note
 
 For the hardened `63db83ff…` identity, basic AUDIO regression coverage can be considered **closed** for: oneshot nonempty capture + bounded stock Viewer continuous Hear with audible (choppy) PC playback. Remaining AUDIO work is soak/fidelity/device matrix and unrelated Stage 4 features (POKE/TRACE/etc.).
+
+## Basic AUDIO regression closure (post-D5B)
+
+**CLOSED** for hardened executable `63db83ff…` (D4 + D5 oneshot + D5B Viewer Hear).
+
+Choppy PC playback and the operator-reported Viewer connection loss after Hear remain
+**documented findings** from this session. They are **not** treated as release blockers
+or as grounds for another AUDIO quality campaign unless a future authorised session
+establishes a reproducible regression.
+
+See `docs/APOLLO_V4_RELEASE_READINESS_AND_UPSTREAM_150.md`.

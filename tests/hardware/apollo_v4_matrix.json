@@ -453,10 +453,10 @@
     "stage3b_final_summary": "docs/APOLLO_V4_STAGE3B_FINAL_SUMMARY.md",
     "stage3b_status": "CLOSED",
     "stage4_safety_assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
-    "stage4_status": "d5b_hardened_viewer_hear_pass",
-    "upstream_1_5_0_public": "NOT_PUBLISHED \u2014 no feature/1.5.0 branch; tags stop at v1.4.0 (audit 2026-11-21)",
+    "stage4_status": "basic_audio_closed_release_readiness",
+    "upstream_1_5_0_public": "NOT_PUBLISHED \u2014 no feature/1.5.0 branch; tags stop at v1.4.0 (reconfirmed 2026-11-21); fork release engineering not blocked on 1.5.0",
     "stage4": {
-      "status": "d5b_hardened_viewer_hear_pass",
+      "status": "basic_audio_closed_release_readiness",
       "assessment": "docs/APOLLO_V4_STAGE4_SAFETY_ASSESSMENT.md",
       "d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
       "d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
@@ -467,13 +467,14 @@
       "d2_production_restored": true,
       "authorised_next": false,
       "remaining": [
-        "other MMIO windows",
+        "other MMIO windows (and 63db83ff-specific MMIO claims)",
         "POKE/ALLOWPOKE D3 hardware",
         "monitor D6",
         "HRTmon D7",
         "TRACE set/list/clear on 68080 hardware",
-        "AUDIO/Hear on 63db83ff identity",
-        "30s POKE deadline on hardware"
+        "30s POKE deadline on hardware",
+        "live amigent-setup --update on production (approval-gated)",
+        "fork release notes / docs promotion (authorisation-gated)"
       ],
       "d2_reconciliation": "docs/APOLLO_V4_STAGE4_D2_EVIDENCE_RECONCILIATION.md",
       "d2_control_class": "out_of_authorised_scope_rom_and_vector",
@@ -527,7 +528,10 @@
       "d5b_rate": 47931,
       "d5b_human_audible": "YES_CHOPPY",
       "d5b_production_restored": true,
-      "d5b_note": "Stock Viewer Hear once under 7s/10s/2MiB; choppy but audible; Viewer connection-loss reported after Hear; D5 empty+remake preserved separately."
+      "d5b_note": "Stock Viewer Hear once under 7s/10s/2MiB; choppy but audible; Viewer connection-loss reported after Hear; D5 empty+remake preserved separately.",
+      "basic_audio_regression_63db83ff": "CLOSED",
+      "basic_audio_closure_doc": "docs/APOLLO_V4_RELEASE_READINESS_AND_UPSTREAM_150.md",
+      "d5b_findings_not_blockers": "choppy_playback_and_viewer_connection_loss_documented_only"
     },
     "stage4_d2_results": "docs/APOLLO_V4_STAGE4_D2_RESULTS.md",
     "stage4_d2_safety_review": "docs/APOLLO_V4_STAGE4_D2_ADDRESS_SAFETY_REVIEW.md",
@@ -549,6 +553,8 @@
     "stage4_d5_results": "docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
     "NEW_DAEMON_63db83ff_AUDIO_ONESHOT": "PASSED_ON_HARDWARE \u2014 nonempty one-shot PCM with signal on remake; stream/Hear NOT TESTED \u2014 docs/APOLLO_V4_STAGE4_D5_AUDIO_RESULTS.md",
     "stage4_d5b_results": "docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md",
-    "NEW_DAEMON_63db83ff_VIEWER_HEAR": "PASSED_ON_HARDWARE \u2014 bounded stock Viewer stream; human-audible YES (choppy); docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md"
+    "NEW_DAEMON_63db83ff_VIEWER_HEAR": "PASSED_ON_HARDWARE \u2014 bounded stock Viewer stream; human-audible YES (choppy); docs/APOLLO_V4_STAGE4_D5B_VIEWER_HEAR_RESULTS.md",
+    "BASIC_AUDIO_REGRESSION_63db83ff": "CLOSED \u2014 D4+D5+D5B; choppy/connection-loss documented findings only \u2014 docs/APOLLO_V4_RELEASE_READINESS_AND_UPSTREAM_150.md",
+    "release_readiness_doc": "docs/APOLLO_V4_RELEASE_READINESS_AND_UPSTREAM_150.md"
   }
 }

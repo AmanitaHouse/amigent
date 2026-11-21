@@ -186,12 +186,16 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
                        "replace with a classic daemon.")
     if installed_version and candidate_version and installed_version > candidate_version:
         return False, "the installed amigentd reports a newer version, so it was left in place."
+    # Known prior packaged Apollo digests may be replaced at the same $VER once the
+    # package bytes change (identify no longer matches). Checked before the generic
+    # unknown-same-version guard.
+    if (specialised and candidate_spec.family == "apollo" and installed_spec is None
+            and hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256):
+        return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place.")
     if specialised and candidate_spec.family == "apollo" and installed_spec is None:
-        if hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256:
-            return True, ""
         if (not installed_version or not candidate_version
                 or installed_version == candidate_version):
             return False, ("the installed Apollo build is not the one in this package, so it "

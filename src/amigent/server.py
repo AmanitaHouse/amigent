@@ -853,11 +853,16 @@ def amiga_where(address: str) -> str:
 
 
 @mcp.tool()
-def amiga_memory(address: str, size: int = 256, show: str = "hex", a6: str = "") -> str:
+def amiga_memory(address: str = "", size: int = 256, show: str = "hex", a6: str = "",
+                 task: str = "", hunk: int | None = None, offset: str = "") -> str:
     """Read the Amiga's memory, without changing anything.
 
-    address: hex ($0A12B4C0, 0x...), a library ('dos.library' for its base) or a
-    function ('dos.library/Write' for its code). show: hex (dump with text),
+    address: hex ($0A12B4C0, 0x...), a library ('dos.library' for its base), a
+    function ('dos.library/Write' for its code), or a running program's hunk
+    ('ProTracker:hunk1+$120', 'ProTracker hunk 1 +$120', offset in hex). Or
+    task (name, program or address from amiga_tasks), hunk (from 0) and offset
+    ($120, 0x120 or decimal) instead of address. A hunk read stays inside the
+    hunk: an offset past its end is refused, a size past it cut short. show: hex (dump with text),
     code (68k disassembly with library function names; a6 names the library a6
     holds, e.g. 'dos'), or text (the bytes as text up to a zero byte). Only RAM
     that exec manages and the Kickstart ROM, at most 64 KB; custom chips, CIAs
@@ -865,13 +870,36 @@ def amiga_memory(address: str, size: int = 256, show: str = "hex", a6: str = "")
     Needs amigentd 1.4.0.
     """
     namer = _namer()
+    cut = ""
     try:
-        at = memory.resolve(address, namer)
+        if task or hunk is not None:
+            if address:
+                raise ValueError("give address, or task with hunk and offset; not both")
+            if not task or hunk is None:
+                raise ValueError("task= and hunk= go together, offset= is optional")
+            h, off = _task_hunk(namer, task, hunk), memory.parse_offset(offset)
+        elif offset:
+            raise ValueError("offset= counts from a hunk: give task= and hunk= as well")
+        elif not address:
+            raise ValueError("address, or task with hunk and offset")
+        elif parts := memory.split_hunk(address):
+            h, off = _task_hunk(namer, parts[0], parts[1]), parts[2]
+        else:
+            h = None
+            at = memory.resolve(address, namer)
+        if h is not None:
+            if not 0 <= off < h.size:
+                raise ValueError(f"hunk {h.number} of {h.command or h.task} is ${h.size:X} bytes; "
+                                 f"offset ${off:X} is outside it")
+            at = h.start + off
+            if off + size > h.size:
+                size = h.size - off
+                cut = f"; {size} bytes, up to the end of hunk {h.number}"
     except ValueError as e:
         raise AmigaError(str(e)) from None
     data = _with_ctl(lambda: _session().ctl.peek(at, size))
     head = f"${at:08X}" + (f" ({namer.name(at, search_functions=False)})"
-                           if namer.name(at, search_functions=False) else "")
+                           if namer.name(at, search_functions=False) else "") + cut
     if show == "code":
         cpu = str(_system_facts().get("cpu", "68040"))
         cpu = cpu if cpu in ("68000", "68010", "68020", "68030", "68040", "68060") else "68040"
@@ -879,6 +907,14 @@ def amiga_memory(address: str, size: int = 256, show: str = "hex", a6: str = "")
     if show == "text":
         return head + "\n" + data.split(b"\0", 1)[0].decode("iso-8859-1")
     return head + "\n" + memory.hexdump(data, at)
+
+
+def _task_hunk(namer: "memory.Namer", who: str, number: int) -> "memory.Hunk":
+    """A running program's hunk; who by task address goes through the task list."""
+    w = who.strip()
+    if w.startswith(("$", "0x", "0X")) or re.fullmatch(r"[0-9a-fA-F]{8}", w):
+        return memory.find_hunk(namer.loaded, w, number, task=memory.find_task(_tasks(), w))
+    return memory.find_hunk(namer.loaded, w, number)
 
 
 def _tasks() -> list:
@@ -1613,7 +1649,7 @@ def amiga_inventory(max_wait: float = 1800) -> str:
 
 @mcp.tool()
 def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
-                     changed: bool = False, text: bool = False) -> list:
+                     changed: bool = False, text: bool = False, screen: str = "") -> list:
     """Capture the Amiga screen, or a region of it to read small text.
 
     Transfers only what changed since the last call, so repeated shots are
@@ -1624,12 +1660,21 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
     only the part that changed since your last look (after a click, say), with
     its place on the screen. text=True adds the recorded text of the region,
     see amiga_screen_text; for information alone that one is far cheaper.
+    The picture is the frontmost Intuition screen, graphics card or chipset;
+    screen= takes a handle or part of a title from amiga_screens to picture
+    one behind it. The reply says when the display shows something else.
     """
     if changed:
         out = changed_shot()
         return out + ([amiga_screen_text()] if text else [])
     if paused := _paused_note():
         return [paused]
+    found = None
+    if screen:
+        found = _with_screen(_session().screen.screens)
+        target = _pick_screen(found, screen)
+        if not target["front"]:
+            return _shot_behind(target, found, (x, y, width, height), text)
     region = (x, y, width, height)
     image = _with_screen(lambda: _session().screen.capture(x, y, width or None, height or None))
     seen, _session().last_look = _session().last_look, time.monotonic()  # after the fetch: what it brought is what was seen
@@ -1644,6 +1689,10 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
         f"screen_x = {x} + image_x * {scale:.3f}, "
         f"screen_y = {y} + image_y * {scale:.3f}"
     )
+    if found is None:
+        found = _screens_or_none()  # after the picture: the link is up, the protocol known
+    if shown := display_note(found or []):
+        note += "\n" + shown
     out = [note, McpImage(data=pictures.png(image), format="png")]
     if text:
         try:
@@ -1651,6 +1700,101 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
         except AmigaError as e:
             out.append(f"no text: {e}")
     return out
+
+
+def _screens_or_none() -> list | None:
+    """The screens as SCREENS lists them, or None where amigentd can't say."""
+    screen = _session().screen
+    if not hasattr(screen, "screens"):
+        return None
+    try:
+        return _with_screen(screen.screens)
+    except (AmigaError, OSError, AmigentdError):
+        return None
+
+
+def _pick_screen(found: list, screen_id: str) -> dict:
+    """A screen by handle or part of its title, as _find_screen, from a list in hand."""
+    try:
+        handle = int(screen_id, 0)
+        return next(s for s in found if s["handle"] == handle)
+    except (ValueError, StopIteration):
+        matches = [s for s in found if screen_id.lower() in s["title"].lower()]
+        if len(matches) != 1:
+            raise AmigaError(f"{len(matches)} screens match {screen_id!r}; use the handle "
+                             "from amiga_screens") from None
+        return matches[0]
+
+
+def _shot_behind(target: dict, found: list | None, region: tuple, text: bool) -> list:
+    """A screen that is not in front, read straight from its bitmap; nothing moves."""
+    x, y, width, height = region
+    try:
+        image = _with_screen(lambda: _session().screen.capture_screen(target))
+    except AmigentdError as e:
+        raise AmigaError(str(e)) from None
+    w, h = width or target["width"] - x, height or target["height"] - y
+    if region != (0, 0, 0, 0):
+        image = image.crop((x, y, x + w, y + h))
+    size = image.size
+    image, scale = pictures.fit(image)
+    note = (f"screen {target['title']!r} {target['width']}x{target['height']}, behind the front "
+            f"one, read from its bitmap; region {size[0]}x{size[1]} at ({x},{y}); "
+            f"screen_x = {x} + image_x * {scale:.3f}, screen_y = {y} + image_y * {scale:.3f}. "
+            "Clicks and keys go to the front screen; amiga_screen_front brings this one forward")
+    if shown := display_note(found or []):
+        note += "\n" + shown
+    out = [note, McpImage(data=pictures.png(image), format="png")]
+    if text:
+        out.append("no text: amiga_screen_text reads the front screen only")
+    return out
+
+
+def _screen_name(s: dict) -> str:
+    kind = "graphics card" if s["rtg"] else "chipset"
+    return f"{s['title']!r} ({s['width']}x{s['height']}, {kind}, {s['handle']:#010x})"
+
+
+def display_note(found: list) -> str:
+    """What the display shows besides the front Intuition screen; "" when nothing.
+
+    found: SCREENS of an amigentd from 1.5.0 (older ones don't tell, and get "").
+    The chipset output shows GfxBase->ActiView: Intuition's view with the
+    frontmost chipset screen in it, or a program's own after LoadView. A graphics
+    card shows its own frontmost screen; with a second monitor on the chipset
+    output (or on the card's) both are visible at once."""
+    if not found or not found[0].get("display"):
+        return ""
+    front = next((s for s in found if s["front"]), found[0])
+    chip = next((s for s in found if s.get("chip_shown")), None)
+    foreign = bool(found[0].get("foreign_view"))
+    lines = []
+    if front["rtg"]:
+        if foreign:
+            lines.append("the chipset output shows a display that is no Intuition screen: a program "
+                         "loaded a view of its own (LoadView); this picture is the graphics card's "
+                         "front screen, not that")
+        elif chip:
+            lines.append(f"the chipset output shows {_screen_name(chip)}, not in this picture; "
+                         f"amiga_screenshot(screen='{chip['handle']:#010x}') shows it")
+    else:
+        if foreign:
+            lines.append(f"the display shows something that is no Intuition screen: a program loaded "
+                         f"a view of its own (LoadView); this picture is the front Intuition screen "
+                         f"{_screen_name(front)}, which is not what the monitor shows")
+        elif chip is not front:
+            if chip:
+                lines.append(f"the front screen is not in the chipset's view; the chipset output "
+                             f"shows {_screen_name(chip)}")
+            else:
+                lines.append("the front screen is not in the chipset's view; the chipset output "
+                             "shows no Intuition screen")
+        card = next((s for s in found if s["rtg"]), None)
+        if card:
+            lines.append(f"the graphics card, if it has its own monitor, still shows "
+                         f"{_screen_name(card)}; amiga_screenshot(screen='{card['handle']:#010x}') "
+                         "shows it")
+    return "\n".join(lines)
 
 
 def _same_shot(region: tuple, seen: float) -> str:
@@ -1735,25 +1879,24 @@ def _paused_note() -> str:
 
 @mcp.tool()
 def amiga_screens() -> str:
-    """List all Intuition screens, front to back, with their handles."""
+    """List all Intuition screens, front to back, with their handles.
+
+    rtg: on the graphics card; chipset-output: what the chipset puts out. A
+    last line says when the display shows something other than the front screen."""
     found = _with_screen(_session().screen.screens)
-    return "\n".join(
+    lines = [
         f"{s['handle']:#010x} {s['width']}x{s['height']}x{s['depth']}"
         f"{' front' if s['front'] else ''}{' workbench' if s['workbench'] else ''}"
-        f"{' ham' if s['ham'] else ''} {s['title']!r}" for s in found)
+        f"{' rtg' if s.get('rtg') else ''}{' ham' if s['ham'] else ''}"
+        f"{' chipset-output' if s.get('chip_shown') else ''} {s['title']!r}" for s in found]
+    if shown := display_note(found):
+        lines.append(shown)
+    return "\n".join(lines)
 
 
 def _find_screen(screen_id: str) -> dict:
     """A screen by handle from amiga_screens or by part of its title."""
-    found = _with_screen(_session().screen.screens)
-    try:
-        handle = int(screen_id, 0)
-        return next(s for s in found if s["handle"] == handle)
-    except (ValueError, StopIteration):
-        matches = [s for s in found if screen_id.lower() in s["title"].lower()]
-        if len(matches) != 1:
-            raise AmigaError(f"{len(matches)} screens match {screen_id!r}; use the handle") from None
-        return matches[0]
+    return _pick_screen(_with_screen(_session().screen.screens), screen_id)
 
 
 def _screen_handle(screen_id: str) -> int:

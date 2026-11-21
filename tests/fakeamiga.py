@@ -62,6 +62,9 @@ class FakeAmiga:
         self.info: dict[str, str] = {}  # more SYSINFO lines, such as attn_flags
         self.answers: dict[str, tuple[int, str]] = {}  # EXEC: command -> (rc, output)
         self.loaded: list[str] = []  # LOADED lines, answered from protocol 6 on
+        # SCREENS beyond the one picture: dicts with handle, title, flags, picture.
+        # None: one Workbench screen of the picture, without the 1.5.0 display bits.
+        self.screen_list: list[dict] | None = None
         self.hello_flags = 0  # 4 (TLSONLY): the hello, then the line is closed, as amigentd does
         self.received: list[bytes] = []  # every byte a client sent, per connection
         self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
@@ -272,9 +275,35 @@ class FakeAmiga:
         if cmd == 2:
             self.owner = me["client"]
             return self._frame(bool(arg & 1), x, y, w or width, h or height)
+        if cmd == 11:
+            return self._screens()
+        if cmd == 12 and arg & 1 and self.screen_list is not None:  # aim, from 1.5.0
+            handle = x << 16 | y
+            me["aim"] = handle if any(s["handle"] == handle for s in self.screen_list) else 0
+            return b"\0" if me["aim"] or not handle else b"\1"
         if cmd == 13:
-            return self._rgb(arg, x, y, w or width - x, h or height - y)
+            picture = self._aimed(me.get("aim", 0))
+            width, height = picture.size
+            return self._rgb(arg, x, y, w or width - x, h or height - y, picture)
         return b"\0"
+
+    def _aimed(self, handle: int) -> Image.Image:
+        for s in self.screen_list or ():
+            if s["handle"] == handle and s.get("picture") is not None:
+                return s["picture"]
+        return self.picture
+
+    def _screens(self) -> bytes:
+        found = self.screen_list
+        if found is None:
+            w, h = self.picture.size
+            found = [{"handle": 0x1000, "title": "Workbench Screen", "flags": 1 | 2, "picture": self.picture}]
+        out = struct.pack(">H", len(found))
+        for s in found:
+            w, h = (s.get("picture") or self.picture).size
+            title = s["title"].encode("iso-8859-1")
+            out += struct.pack(">IHHHHH", s["handle"], w, h, s.get("depth", 8), s["flags"], len(title)) + title
+        return out
 
     def _frame(self, everything: bool, x, y, w, h) -> bytes:
         width, height = self.picture.size
@@ -294,12 +323,13 @@ class FakeAmiga:
                 tiles.append(struct.pack(">HHHHI", tx, ty, tw, th, len(packed)) + packed)
         return struct.pack(">I", len(tiles)) + b"".join(tiles)
 
-    def _rgb(self, arg, x, y, w, h) -> bytes:
-        width, height = self.picture.size
+    def _rgb(self, arg, x, y, w, h, picture: Image.Image | None = None) -> bytes:
+        picture = picture or self.picture
+        width, height = picture.size
         w, h = max(0, min(w, width - x)), max(0, min(h, height - y))
         if w * h > 512 * 512:
             return struct.pack(">HH", 0, 0) + (struct.pack(">I", 0) if arg else b"")
-        raw = self.picture.convert("RGB").crop((x, y, x + w, y + h)).tobytes()
+        raw = picture.convert("RGB").crop((x, y, x + w, y + h)).tobytes()
         if not arg:
             return struct.pack(">HH", w, h) + raw
         packed = pack_runs(raw, 3)

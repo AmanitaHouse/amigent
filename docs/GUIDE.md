@@ -241,7 +241,7 @@ starts the old one again.
 | `amiga_wait_window`, `amiga_wait_text` | wait on the Amiga until a window or a text appears or goes |
 | `amiga_do` | several clicks, keys, waits and commands in one call, then one look |
 | `amiga_pause_screen` | stop all screen reading for a while, so a test or benchmark has the CPU |
-| `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
+| `amiga_screens`, `amiga_screen_front` | list all screens and which one the chipset output shows, bring one to the front; `amiga_screenshot(screen=...)` pictures one behind without moving it |
 | `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label or number |
 | `amiga_menus`, `amiga_menu_select` | menus as text, pick an item by name |
 | `amiga_click`, `amiga_drag`, `amiga_mouse_move`, `amiga_button` | mouse, including menus and icons |
@@ -252,7 +252,7 @@ starts the old one again.
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions, the CPU and FPU ("68040 with FPU (68040.library loaded)"); after a crash the guru in words and what happened before |
 | `amiga_update` | is a newer Amigent out, and what is new; with `apply=True` (after the user agrees) updates this PC and every saved Amiga |
 | `amiga_loaded` | libraries, devices, resources, running programs and resident modules in memory, with versions |
-| `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` and the vectors below $400 (ExecBase at 4) work too |
+| `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` (or `task=`, `hunk=`, `offset=`, kept inside the hunk) and the vectors below $400 (ExecBase at 4) work too |
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
 | `amiga_cpu` | CPU load per task, sampled on the Amiga itself |

@@ -164,6 +164,15 @@ Versions follow [semver](https://semver.org). The number lives in
 
 - `amiga_hrtmon` loads the HRTmon debugger from Aminet for the user at the
   Amiga. The agent never enters it: that halts the system. (#37)
+- `amiga_screenshot` says when the display shows something other than the
+  front Intuition screen: a chipset screen on the chipset output next to a
+  graphics card Workbench, the card's screen next to a chipset one, or a view
+  a program loaded itself. `screen=` takes a screen from `amiga_screens` and
+  reads it from its bitmap, in front or not, without moving it. Needs the new
+  amigentd; older ones picture the front screen as before. (#44)
+- `amiga_memory` reads a running program's memory by hunk:
+  `ProTracker:hunk1+$120`, or `task=`, `hunk=` and `offset=`. The read stays
+  inside the hunk. (#44)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

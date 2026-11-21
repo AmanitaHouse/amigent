@@ -87,9 +87,9 @@ Earlier coverage docs labelled the layout “fork-only”; that was an integrati
 
 ### Verdict B
 
-**NOT PROMOTED**
+**PROPOSED UPSTREAM** — draft https://github.com/akustikrausch/amigent/pull/46 (`342905a`, 2026-11-21). See `docs/APOLLO_V4_UPSTREAM_NATIVE_LAYOUT_PR46.md`.
 
-#### Ready-to-review upstream proposal (do **not** publish yet)
+#### Earlier ready-to-review draft (superseded by published #46)
 
 **Title:** `Move Amiga daemon sources under src/native and tests/native`
 

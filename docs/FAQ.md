@@ -52,7 +52,10 @@ Workbench, or restart by hand.
 **What about PowerPC: AmigaOS 4, MorphOS, or a PPC board?**
 A PowerPC board (WarpOS or PowerUP) on a classic Amiga is fine: amigentd runs on
 the 68k side as usual, and Amigent names the PowerPC software it finds, so the
-agent can pick the matching version of a program. AmigaOS 4 and MorphOS run
+agent can pick the matching version of a program. `amiga_ppc` tells the card,
+the kernel, the flash ROM and known conflicts, and the agent can build and
+watch WarpOS programs (see the guide). None of that has been tried on a real
+board yet. AmigaOS 4 and MorphOS run
 amigentd only through their 68k emulation. Commands, files, mouse and keys
 should work there, the screen text probably not; it is untested, and Amigent
 says so when it meets one of them.

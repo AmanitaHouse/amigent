@@ -118,7 +118,7 @@ enum {
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET  /* protocol 6, "probe" in SYSINFO */
 };
 
-const char version[] = "$VER: amigentd 1.4.0 (18.11.2026)";
+const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
 

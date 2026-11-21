@@ -222,3 +222,22 @@ Fork review PRs **#4–#10** remain open and unchanged.
 | Fork `main` / protected tips / V4 production | **Unchanged** by this publication |
 
 Authorisation: draft upstream PR creation was in scope for the AUDIO+Hear contribution mission. Merge remains unauthorised.
+
+---
+
+## 10. Upstream draft PR #48 — Viewer daemon identity (**PUBLISHED**)
+
+| Field | Value |
+|---|---|
+| URL | https://github.com/akustikrausch/amigent/pull/48 |
+| State | **Draft OPEN** against `akustikrausch/amigent:main` |
+| Head | `AmanitaHouse:contrib/upstream-viewer-daemon-identity` @ `81382c9…` |
+| Upstream base | `f6aab1d…` |
+| Source | Fork PR #9 (`739aa4c…`) + identity-only adaptation |
+| Independence from #38 | Identity catalogue + Viewer About only; **no** #38 installer/selection/`consider_replacement` |
+| Locales | All 12 locales on public `main`; Russian keys documented for open #35 |
+| Offline suite | Focused identity+Viewer 29 passed; full applicable 281 passed / 16 skipped |
+| Binaries | Unchanged vs upstream `main` |
+| Fork `main` / #9 / #38 / #46 / #47 / protected tips / V4 production | **Unchanged** |
+
+Merge remains unauthorised.

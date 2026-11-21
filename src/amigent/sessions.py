@@ -33,6 +33,7 @@ class MachineSession:
         self.viewer = None
         self.last_look = 0.0
         self.debug_seen = 0
+        self.serial_seen = 0
         self.followers = {}
         self.job_numbers = []
         self.self_path = {}
@@ -73,6 +74,7 @@ class MachineSession:
         self.last_shot = None
         self.last_look = 0.0
         self.debug_seen = 0
+        self.serial_seen = 0
         self.windows_at_start = (0.0, [])
         self.last_started = ''
         self.lookout.baseline = 0.0

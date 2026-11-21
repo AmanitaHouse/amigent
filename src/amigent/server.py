@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP, Image as McpImage
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
 from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
+from . import emu68net, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
 from .errors import AmigaError
@@ -346,7 +347,14 @@ def amiga_status() -> str:
     you can tell a crash from a network fault. Call it first when the Amiga
     answers again after being away.
     """
-    info = _with_ctl(_session().ctl.sysinfo)
+    try:
+        info = _with_ctl(_session().ctl.sysinfo)
+    except AmigaError as e:
+        last = _serial_tail()
+        if not last:
+            raise
+        raise AmigaError(f"{e}\nthe Pi's serial line (recorded on this PC) said last:\n"
+                         + "\n".join(last)) from e
     ports, tasks = info.pop("ports", None), info.pop("tasks", None)
     report = {"amiga": machines.name_of(_session().host), "address": machines.address(_session().host)}
     found = others.scan(_Exec(), machines.address(_session().host) or _session().host,
@@ -374,6 +382,9 @@ def amiga_status() -> str:
     newer = _update_note()
     if newer:
         report["amigent_update"] = newer
+    serial = _serial_state()
+    if serial:
+        report["serial_log"] = serial
     if "text" in info:
         report["recording"] = {"screen_text": info.get("text") == "1",
                                "debug_output": info.get("debug") == "1"}
@@ -395,11 +406,33 @@ def _postmortem(before: dict, info: dict, tasks: str | None) -> dict:
     gone = sorted(then - now)
     if gone:
         out["running_then_not_now"] = gone
+    serial = _serial_tail(before=started) if started else []
+    if serial:
+        out["serial_before_restart"] = serial
     if not out:
         out["note"] = "nothing recorded from before; the journal starts with this version"
     return out
 
 
+
+
+def _serial_tail(lines: int = 20, before: float | None = None) -> list[str]:
+    """The last lines the Pi's serial line gave (amigent-serial or amiga_serial_log), if recorded."""
+    try:
+        return serial_log.tail(_session().host, lines, before=before)
+    except (OSError, ValueError):
+        return []
+
+
+def _serial_state() -> dict:
+    """For amiga_status: whether the serial line is recorded, only when it ever was."""
+    try:
+        if not serial_log.exists(_session().host):
+            return {}
+        state = serial_log.status(_session().host)
+    except (OSError, ValueError):
+        return {}
+    return {k: state[k] for k in ("recording", "port", "last_data", "file") if k in state}
 
 
 def _system_facts() -> dict:
@@ -2908,12 +2941,21 @@ def amiga_debug_log(everything: bool = False) -> str:
 
     amigentd catches what goes through exec's RawPutChar (as Sashimi does);
     the serial port still gets it as well. everything=True shows the whole
-    ring (64 KB) instead of what is new.
+    ring (64 KB) instead of what is new. When the Pi's serial line of an
+    Emu68 Amiga is recorded on this PC (amiga_serial_log), what came there is
+    added, also while the Amiga does not answer.
     """
+    serial = _serial_news(everything)
     try:
         total, data = _with_ctl(lambda: _session().ctl.debug_log(0 if everything else _session().debug_seen))
     except AttributeError:
+        if serial:
+            return serial
         raise AmigaError("debug output needs amigentd 1.3.0; run amigent-setup --update") from None
+    except AmigaError as e:
+        if serial:  # a frozen Amiga: what the Pi's serial line said is all there is
+            return f"(the Amiga does not answer: {e})\n{serial}"
+        raise
     _session().debug_seen = total
     text = data.decode("iso-8859-1").replace("\r\n", "\n").replace("\r", "\n")
     if text and memory._HIT.search(text):
@@ -2921,7 +2963,28 @@ def amiga_debug_log(everything: bool = False) -> str:
             text = memory.annotate(text, _namer())
         except AmigaError:
             pass
+    if serial:
+        return (text.rstrip("\n") + "\n" if text else "") + serial
     return text if text else "no new debug output"
+
+
+SERIAL_SHOWN = 64 * 1024  # of the serial record at most this much per call, the newest
+
+
+def _serial_news(everything: bool = False) -> str:
+    """What the Pi's serial line gave since the last call, under its own heading; "" without a record."""
+    try:
+        if not serial_log.exists(_session().host):
+            return ""
+        size, text = serial_log.read_since(_session().host, 0 if everything else _session().serial_seen)
+    except OSError:
+        return ""
+    _session().serial_seen = size
+    if not text.strip():
+        return ""
+    if len(text) > SERIAL_SHOWN:
+        text = "[...]\n" + text[-SERIAL_SHOWN:].split("\n", 1)[-1]
+    return "--- the Pi's serial line (Emu68), recorded on this PC ---\n" + text.rstrip("\n")
 
 
 @mcp.tool()
@@ -2968,6 +3031,284 @@ def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False
     _session().followers[source] = follow.Follower(source, target, fetch, max(0.2, every), start).start()
     return (f"following {source} into {target}, from now on (what is already there: "
             f"amiga_get or amiga_debug_log)")
+
+
+# ---- Emu68: the Pi's network (#20) and its serial line (#21)
+
+
+def _is_emu68() -> bool | None:
+    """devicetree.resource in LOADED; None when this amigentd can't tell (before 1.4.0)."""
+    try:
+        return any(lib.kind == "R" and lib.name.lower() == system.EMU68_RESOURCE
+                   for lib in _loaded().libraries)
+    except (AmigaError, AttributeError):
+        return None
+
+
+def _pinet_log(record: "emu68net.Record") -> str:
+    try:
+        return _with_ctl(lambda: _session().ctl.read_file(record.log)).decode("iso-8859-1").strip()
+    except AmigaError:
+        return ""
+
+
+def _pinet_channel(address: str):
+    """A command channel to this Amiga at address, proven by its key or pinned certificate."""
+    from .channel import AmigaChannel
+    chan = AmigaChannel(_session().host, SCREEN_PORT, timeout=15, address=address)
+    chan.connect()
+    return chan
+
+
+def _pinet_keep(record: "emu68net.Record") -> str:
+    """Through the new address: confirm, measure, keep the interface, move Amigent's entry."""
+    said = _pinet_log(record)
+    if said.startswith("restored"):
+        record.state = "restored"
+        emu68net.save(_amiga(), record)
+        return (f"too late: {said}. Nothing is kept; amiga_pi_network('setup', ..., confirm=True) "
+                "tries again (a longer probation helps a slow DHCP)")
+    try:
+        chan = _pinet_channel(record.new_address)
+    except AmigaError as e:
+        return (f"the Amiga does not answer at {record.new_address} yet ({e}); "
+                f"amiga_pi_network('confirm') again before the probation of {record.probation} s ends, "
+                "or let it run out and the old configuration stays alone")
+    try:
+        chan.write_file(emu68net.CONFIRM_FLAG, b"1\n")
+        try:
+            record.speed_after = emu68net.speed(chan)
+        except AmigaError:
+            pass
+        chan.write_file(record.target, chan.read_file(record.staged))
+        repair = emu68net.join(record.home, "repair.d")
+        files.makedirs(chan, repair)
+        chan.write_file(emu68net.join(repair, "pi-network.repair"),
+                        emu68net.repair_module(record).encode("iso-8859-1"))
+    finally:
+        chan.close()
+    old = machines.address(_session().host)
+    machines.move(_session().host, record.new_address)
+    _session().refresh_address()
+    record.state = "kept"
+    emu68net.save(_amiga(), record)
+    faster = (f"; reading ran at {record.speed_before} KB/s before, {record.speed_after} KB/s now"
+              if record.speed_before and record.speed_after else "")
+    return (f"kept: {record.interface} answers at {record.new_address}; it is in "
+            f"{record.target} now and comes up at every start. Amigent reaches this Amiga there "
+            f"from now on (it was {old}){faster}. The old interface stays as it was; "
+            "amiga_pi_network('undo') takes the new one back")
+
+
+def _pinet_undo(record: "emu68net.Record") -> str:
+    script = emu68net.undo_script(record)
+    _with_ctl(lambda: _session().ctl.write_file("RAM:amigent-pinet-undo.script", script.encode("iso-8859-1")))
+    result = _with_ctl(lambda: _session().ctl.exec("Execute RAM:amigent-pinet-undo.script", timeout=60))
+    try:
+        _with_ctl(lambda: _session().ctl.delete(
+            emu68net.join(emu68net.join(record.home, "repair.d"), "pi-network.repair")))
+    except AmigaError:
+        pass
+    moved = ""
+    if record.old_address and machines.address(_session().host) == record.new_address:
+        machines.move(_session().host, record.old_address)
+        _session().refresh_address()
+        moved = f"; Amigent reaches this Amiga at {record.old_address} again"
+    record.state = "undone"
+    emu68net.save(_amiga(), record)
+    return (f"{record.interface} is down and {record.target} removed (rc={result.rc}); the other "
+            f"interfaces were not touched{moved}")
+
+
+def _pinet_setup(k: "emu68net.Kind", confirm: bool, probation: int) -> str:
+    amiga, ctl = _amiga(), _session().ctl
+    if not _is_emu68():
+        raise AmigaError("this Amiga does not run Emu68 as far as amigentd tells (no devicetree.resource "
+                         "in amiga_loaded): the Pi's network is only for PiStorm Amigas with Emu68")
+    stack = _with_ctl(lambda: emu68net.stack(ctl))
+    if not stack["can_set_up"]:
+        raise AmigaError(f"the TCP/IP stack is {stack['name']}: {stack.get('note', '')}")
+    if not _with_ctl(lambda: emu68net.exists(ctl, emu68net.join(emu68net.NETWORKS, k.device))):
+        raise AmigaError(f"{k.device} is not in {emu68net.NETWORKS}: it comes from {k.source}. "
+                         "Install it first (amiga_install_begin, then amiga_install_end)")
+    target = emu68net.join(emu68net.NETINTERFACES, k.interface)
+    if _with_ctl(lambda: emu68net.exists(ctl, target)):
+        raise AmigaError(f"{target} exists already and is not Amigent's; nothing was changed. "
+                         "Look at it with amiga_read_text")
+    probation = max(30, min(int(probation), 900))
+    record = emu68net.Record(kind=k.key, interface=k.interface, home=_home(),
+                             old_address=machines.address(_session().host),
+                             started=time.strftime("%Y-%m-%d %H:%M:%S"), probation=probation)
+    if not confirm:
+        wifi = (" For Wi-Fi the user first enters the network name and password on the Amiga, "
+                "where wifipi.device expects them." if k.key == "wifi" else "")
+        return (f"nothing changed. This would add {k.device} ({k.what}) as Roadshow interface "
+                f"{k.interface} with DHCP, next to the existing interfaces, on probation for "
+                f"{probation} s: the file goes to {record.staged} first, {record.script} takes the "
+                f"interface down again unless the PC confirms through the new address, and only "
+                f"then is it copied to {target}. Ask the user; to go on, "
+                f"amiga_pi_network('setup', {k.key!r}, confirm=True).{wifi}")
+    record.before = [e["name"] for e in _with_ctl(lambda: emu68net.names(ctl, emu68net.NETINTERFACES))]
+    status = _with_ctl(lambda: ctl.exec("ShowNetStatus"))
+    record.before_addresses = emu68net.addresses(status.output)
+    try:
+        record.speed_before = _with_ctl(lambda: emu68net.speed(ctl))
+    except AmigaError:
+        pass
+    for path in (record.log, emu68net.CONFIRM_FLAG):
+        try:
+            _with_ctl(lambda: ctl.delete(path))
+        except AmigaError:
+            pass
+    _with_ctl(lambda: files.makedirs(ctl, record.folder))
+    _with_ctl(lambda: ctl.write_file(record.staged, emu68net.interface_file(k).encode("iso-8859-1")))
+    _with_ctl(lambda: ctl.write_file(record.script, emu68net.probation_script(record).encode("iso-8859-1")))
+    _with_ctl(lambda: ctl.write_file(emu68net.join(record.folder, "record.json"),
+                                     record.to_json().encode("utf-8")))
+    emu68net.save(amiga, record)
+    _with_ctl(lambda: ctl.exec(f'Run >NIL: Execute "{record.script}"'))
+    added = _with_ctl(lambda: ctl.exec(f'AddNetInterface "{record.staged}"', timeout=60))
+    if added.rc:
+        record.state = "restored"
+        emu68net.save(amiga, record)
+        return (f"AddNetInterface failed (rc={added.rc}): {added.output.strip()[-400:]}\n"
+                f"nothing in {emu68net.NETINTERFACES} changed; the probation script ends by itself")
+    deadline = time.monotonic() + max(5, min(45, probation - 20))
+    while True:
+        now = _with_ctl(lambda: ctl.exec("ShowNetStatus"))
+        record.new_address = emu68net.new_address(record.before_addresses, emu68net.addresses(now.output),
+                                                  record.old_address, machines.local_networks())
+        if record.new_address or time.monotonic() >= deadline:
+            break
+        time.sleep(3)
+    emu68net.save(amiga, record)
+    if not record.new_address:
+        return (f"{k.interface} is up but has no address yet (DHCP); amiga_pi_network('confirm') "
+                f"within {probation} s keeps it, otherwise it goes down again by itself")
+    return _pinet_keep(record)
+
+
+@mcp.tool()
+def amiga_pi_network(action: str = "report", interface: str = "ethernet", confirm: bool = False,
+                     probation: int = emu68net.PROBATION) -> str:
+    """The Raspberry Pi's Ethernet or Wi-Fi for an Amiga with Emu68, instead of a slow adapter.
+
+    action "report" (the default, reads only): Emu68 or not, the drivers in
+    DEVS:Networks (genet.device for the Pi 4's Ethernet, wifipi.device for
+    Wi-Fi; a missing one is named with where it comes from), the TCP/IP stack,
+    Roadshow's interfaces and addresses, and what the link runs at now.
+
+    "setup" with interface "ethernet" or "wifi" adds the Pi's network as a
+    second Roadshow interface next to the existing one, which stays as it is.
+    Without confirm=True it only tells what it would do (ask the user first).
+    The new interface comes up on probation: unless the PC reaches the Amiga
+    through the new address within `probation` seconds, a script on the Amiga
+    takes it down again, and a restart forgets it, so the way back needs no
+    network. Once reached, it is kept (DEVS:NetInterfaces), the speed before
+    and after is measured, and Amigent's entry moves to the new address.
+    Wi-Fi names and passwords are entered by the user on the Amiga, never here.
+    "confirm" retries reaching the new address; "undo" takes it all back.
+    The Pi's boot partition is never touched.
+    """
+    action = action.strip().lower()
+    record = emu68net.load(_amiga())
+    if action == "report":
+        emu68 = _is_emu68()
+        facts = _with_ctl(lambda: emu68net.report(_session().ctl, bool(emu68),
+                                                  pack.policy_for(_session().host).describe()))
+        if emu68 is None:
+            facts["emu68"] = "unknown: amigentd 1.4.0 tells (amigent-setup --update)"
+        if record:
+            facts["amigent_setup"] = {"interface": record.interface, "state": record.state,
+                                      "new_address": record.new_address, "since": record.started}
+            if record.state == "probation":
+                facts["amigent_setup"]["probation_log"] = _pinet_log(record) or "running"
+        return json.dumps(facts, indent=1)
+    if action == "confirm":
+        if not record or record.state != "probation":
+            return "no interface on probation; amiga_pi_network('report') shows the state"
+        if not record.new_address:
+            status = _with_ctl(lambda: _session().ctl.exec("ShowNetStatus"))
+            record.new_address = emu68net.new_address(record.before_addresses, emu68net.addresses(
+                status.output), record.old_address, machines.local_networks())
+            if not record.new_address:
+                return f"{record.interface} has no address yet; amiga_pi_network('confirm') again"
+        return _pinet_keep(record)
+    if action == "undo":
+        if not record or record.state == "undone":
+            return "nothing to undo: Amigent set up no Pi network on this Amiga"
+        return _pinet_undo(record)
+    if action != "setup":
+        raise AmigaError("action is report, setup, confirm or undo")
+    k = emu68net.kind(interface)
+    if record and record.state in ("probation", "kept"):
+        return (f"{record.interface} is set up already ({record.state}); amiga_pi_network('undo') "
+                "first to set it up again")
+    return _pinet_setup(k, confirm, probation)
+
+
+@mcp.tool()
+def amiga_serial_log(action: str = "status", port: str = "", baud: int = serial_log.BAUD,
+                     lines: int = 40, low: str = "", high: str = "", verbose: int = 1,
+                     disassemble: bool = False, confirm: bool = False) -> str:
+    """The Pi's serial debug output (Emu68), recorded on this PC through a USB serial adapter.
+
+    "start" records port (COM5, /dev/ttyUSB0; default the only USB adapter) at
+    baud (921600, Emu68's speed) with time stamps until "stop", into the
+    config folder (serial/<machine-id>.log); `amigent-serial` does the same on
+    its own. Only reads. amiga_debug_log then includes what came, and
+    amiga_status gives the last lines when the Amiga stops answering.
+    "status" tells whether it records, "show" the last `lines` lines.
+
+    "narrow" limits Emu68's JIT debug output to the 68k addresses low..high
+    (hex, e.g. $00F80000) with verbosity 0-3 and disassemble, through Emu68's
+    control registers at run time; "wide" switches that off again (verbosity 0,
+    every address). Both run a small program on the Amiga and need
+    confirm=True; only on Emu68.
+    """
+    action = action.strip().lower()
+    host = _session().host
+    if action == "start":
+        try:
+            rec = serial_log.start(host, port, baud)
+        except (RuntimeError, OSError) as e:
+            raise AmigaError(str(e)) from None
+        return f"recording {rec.name} at {rec.baud} baud into {rec.target}; amiga_serial_log('stop') ends it"
+    if action == "stop":
+        if serial_log.stop(host):
+            return "stopped"
+        return "this server was not recording; amigent-serial stops with Ctrl+C"
+    if action == "status":
+        return json.dumps(serial_log.status(host), indent=1)
+    if action == "show":
+        found = serial_log.tail(host, max(1, min(lines, 2000)))
+        return "\n".join(found) if found else "nothing recorded from the serial line yet"
+    if action not in ("narrow", "wide"):
+        raise AmigaError("action is start, stop, status, show, narrow or wide")
+    try:
+        if action == "wide":
+            a, b, verbose, disassemble = 0, 0xFFFFFFFF, 0, False
+        else:
+            a, b = (int(v.strip().lstrip("$").removeprefix("0x"), 16) for v in (low, high))
+        program = serial_log.range_program(a, b, verbose, disassemble)
+    except ValueError as e:
+        raise AmigaError(f"low and high are hex addresses such as $00F80000 ({e})") from None
+    if not _is_emu68():
+        raise AmigaError("these control registers exist only on Emu68 (no devicetree.resource in "
+                         "amiga_loaded); on another CPU the program would crash")
+    if action == "narrow":
+        what = (f"Emu68's debug output to ${a:08X}..${b:08X}, verbosity {verbose}"
+                + (", disassembled" if disassemble else ""))
+    else:
+        what = "Emu68's debug output back to verbosity 0 for every address"
+    if not confirm:
+        return f"nothing changed. Would set {what}. Ask the user; then the same call with confirm=True"
+    path = "RAM:amigent-emu68dbg"
+    _with_ctl(lambda: _session().ctl.write_file(path, program))
+    result = _with_ctl(lambda: _session().ctl.exec(path, timeout=20))
+    if result.rc:
+        raise AmigaError(f"the program ended with rc={result.rc}: {result.output.strip()[-300:]}")
+    return f"set {what}; only code translated from now on follows it (the JIT cache was cleared)"
 
 
 RUN_DIR = "RAM:amigent-run"

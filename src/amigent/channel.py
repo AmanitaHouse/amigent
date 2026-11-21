@@ -233,9 +233,11 @@ def perform(ctl, requests: list[Request]) -> list:
 class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
-    def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None):
+    def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None,
+                 address: str | None = None):
         self.host = identity(host)
         self.port = port
+        self.address = address  # dial here, not where the registry says, and never look elsewhere
         self.timeout = timeout
         self.key = key
         self._sock: socket.socket | None = None
@@ -250,7 +252,10 @@ class AmigaChannel(VolumeFlush):
     def connect(self) -> None:
         self.close()
         try:
-            self._sock = tls.connect(self.host, self.port, self.timeout)
+            if self.address:
+                self._sock = tls._dial(self.address, self.host, self.port, self.timeout)
+            else:
+                self._sock = tls.connect(self.host, self.port, self.timeout)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             hello = self._exact(8)
             if hello[:4] != b"AMGT":

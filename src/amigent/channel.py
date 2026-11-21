@@ -7,6 +7,7 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import re
 import struct
@@ -75,7 +76,7 @@ def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int
         if feature == "TASKCTL" and info.get("loaded") == "1":
             return TASKCTL
         if feature == "TRACE" and info.get("loaded") == "1":
-            return TRACE
+            return None if info.get("trace") == "0" else TRACE
         if feature == "POKE":
             return POKE
         return None
@@ -110,6 +111,46 @@ SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
 DISK_RATE = 20_000  # bytes/s for the far end to settle a READ/WRITE, pessimistic on purpose
+
+
+def peer_is_loopback(host: str) -> bool:
+    """127.0.0.1 and localhost. The TLS pump is one of these. A name is not."""
+    text = str(host).split("%", 1)[0]
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def audio_uses_tls(flags: int, host: str) -> bool:
+    """Remote audio goes over TLS when the daemon has closed the plain port."""
+    return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
+
+
+def apollo_commands(info: dict | None) -> frozenset[str]:
+    """AUDIO (and PIP only when SYSINFO says ``pip=1``) offered by this daemon.
+
+    This contribution streams AUDIO only. ``pip=0`` is not a picture.
+    """
+    info = info or {}
+    commands = set()
+    if info.get("audio") == "1":
+        commands.add("AUDIO")
+    if info.get("pip") == "1":
+        commands.add("PIP")
+    return frozenset(commands)
+
+
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """s16le stereo at rate, as a WAV the host tools can play."""
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(pcm), b"WAVE",
+        b"fmt ", 16, 1, 2, rate, rate * 4, 4, 16,
+        b"data", len(pcm))
+    return header + pcm
 
 
 def budget(size: int, rate: float, base: float = 30.0) -> float:
@@ -316,7 +357,10 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
             if flags & PLAIN_CLOSED and not hasattr(self._sock, "version"):
-                raise AmigaError(PLAIN_CLOSED_TEXT)
+                if flags & 2:
+                    raise AmigaError(PLAIN_CLOSED_TEXT)
+                from .tls import TLS_UNAVAILABLE_TEXT
+                raise AmigaError(TLS_UNAVAILABLE_TEXT)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -332,6 +376,7 @@ class AmigaChannel(VolumeFlush):
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
             self._notes = self._read_from = None  # a new amigentd may answer now
+            self._audio_opcode = 0
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -791,6 +836,15 @@ class Commands:
                  timeout: float = 30.0):
         self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
+
+    def connect_audio(self, *, tls: bool) -> None:
+        """The music stream. A TLS failure stays a failure and does not fall through to amigactld."""
+        channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+        channel.connect()
+        if tls and not hasattr(channel._sock, "version"):
+            channel.close()
+            raise AmigaError(PLAIN_CLOSED_TEXT)
+        self.backend = channel
 
     def connect(self) -> None:
         if self.backend is None:

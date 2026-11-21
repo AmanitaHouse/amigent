@@ -504,7 +504,7 @@ def test_scripts_name_the_right_paths():
     r.before = {"C:": {"Dir": entry("FILE"), "New": entry("FILE")}, "SYS:WBStartup": {}}
     r.added = ["C:Foo", "SYS:WBStartup/Bar"]
     r.changed = ["C:Dir"]
-    assert 'Copy "C:" "Stuff:amigent/undo/demo/C" ALL CLONE QUIET' in install.begin_script(r)
+    assert 'Copy "C:" "Stuff:amigent/undo/demo/C" ALL CLONE NOREQ QUIET' in install.begin_script(r)
     prune = install.prune_script(r)
     assert "undo/demo/C/New" in prune and "undo/demo/C/Dir" not in prune
     undo = install.undo_script(r, [])
@@ -564,6 +564,9 @@ def test_install_round_trip(monkeypatch):
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     monkeypatch.setattr(install, "SYSTEM", ["C:", "LIBS:"])
     monkeypatch.setattr(server.files, "makedirs", lambda ctl, path: None)
+    monkeypatch.setattr(server, "_start_job", lambda script, title="": 1)  # the backup job
+    monkeypatch.setattr(server, "_wait_job", lambda number, wait: "")
+    monkeypatch.setattr(server, "_marker_ok", lambda record: True)
     assert "ready" in server.amiga_install_begin("demo")
     trees["C:"]["Foo"] = entry("FILE")
     trees["LIBS:"]["x.library"] = entry("FILE")

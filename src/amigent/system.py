@@ -27,16 +27,24 @@ def describe_system(version: str, cpu: str) -> dict:
     major = int(kick.group(1)) if kick else 0
     morphos = re.search(r"MorphOS(?: version)? ?(\d+\.\d+)?", version)
     os4 = re.search(r"AmigaOS 4(?:\.\d+)*", version)
+    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
+    ppc = re.search(r"\b(?:PowerPC|PPC)[ \w./-]*", cpu)
     if morphos:
         os_name = "MorphOS" + (f" {morphos.group(1)}" if morphos.group(1) else "")
     elif os4:
         os_name = os4.group(0)
+    elif re.search(r"\bApolloOS\b", version):
+        os_name = "ApolloOS"
+    elif re.search(r"\bAROS\b", version):
+        os_name = "AROS"
+    elif major >= 50 and not ppc and "68080" in chips:
+        os_name = "ApolloOS"  # exec 51 on a 68080; AmigaOS 4 runs on PowerPC
+    elif major >= 50 and not ppc and chips:
+        os_name = "AROS"  # exec 50 or later on a 68k CPU is not AmigaOS 4
     elif major >= 50:  # 50 and later are AmigaOS 4 (MorphOS says its name)
         os_name = "AmigaOS 4"
     else:
         os_name = OS_NAMES.get(major, f"Kickstart {major}" if major else "")
-    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
-    ppc = re.search(r"\b(?:PowerPC|PPC)[ \w./-]*", cpu)
     return {
         "os": os_name,
         "kickstart": f"{kick.group(1)}.{kick.group(2)}" if kick else "",

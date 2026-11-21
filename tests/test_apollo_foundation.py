@@ -21,11 +21,11 @@ PROTOCOL_6 = (
 )
 
 
-def test_apolloos_is_the_name_or_exec_51_with_the_fpga_bit():
+def test_apolloos_is_the_name_or_exec_51_with_the_68080_bit():
     assert setup.apollo_os({"os": "ApolloOS"})
     assert setup.apollo_os({}, "exec.library 51.1 (ApolloOS)")
     assert setup.apollo_os({"exec_version": "51.16", "attn_flags": "0x400"})
-    assert setup.apollo_os({"exec_version": "51", "attn_flags": str(setup.AFF_FPGA)})
+    assert setup.apollo_os({"exec_version": "51", "attn_flags": str(setup.AFF_68080)})
     assert not setup.apollo_os({"os": "AmigaOS", "exec_version": "47.4", "attn_flags": "0x400"})
     assert not setup.apollo_os({"exec_version": "47", "attn_flags": "0x400"})
     assert not setup.apollo_os({"exec_version": "51.1", "attn_flags": "0"})
@@ -89,7 +89,7 @@ def test_setup_keeps_the_classic_daemon_when_the_probe_or_binary_is_absent(tmp_p
     (binary / "amigent-apollo-probe").write_bytes(b"probe")
     link = Link(0, probe=0)
     assert setup.amigentd_build(link) == "amigentd"
-    assert "T:amigent-apollo-probe" in link.puts
+    assert link.puts == []  # without an Apollo build the probe is not even sent
 
     (binary / "amigentd.apollo").write_bytes(b"apollo")
     assert setup.amigentd_build(Link(0, probe=0)) == "amigentd.apollo"
@@ -213,3 +213,55 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
     assert "amigent-apollo-probe" in makefile
     assert "amigentd.apollo" not in makefile and "apollo.c" not in makefile
     assert "-m68080" not in makefile and "-m68000" in makefile
+
+
+def test_an_update_asks_nothing_about_apolloos_without_an_apollo_build(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    binary = package / "bin"
+    binary.mkdir(parents=True)
+    (binary / "amigentd").write_bytes(b"classic")
+    (binary / "amigent-apollo-probe").write_bytes(b"probe")
+    monkeypatch.setattr(setup, "AMIGA", package)
+    bare = Channel(info={}, probe="ApolloOS\n")
+    assert setup.build_for_channel(bare) == "amigentd"
+    assert bare.commands == ["CPU CHECK 68020"] and bare.files == {}
+
+
+def test_a_described_amiga_is_not_asked_for_its_exec_version(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    binary = package / "bin"
+    binary.mkdir(parents=True)
+    for name in ("amigentd", "amigentd.apollo", "amigent-apollo-probe"):
+        (binary / name).write_bytes(name.encode())
+    monkeypatch.setattr(setup, "AMIGA", package)
+    for info, build in (({"exec_version": "47.4", "attn_flags": "0x400"}, "amigentd"),
+                        ({"exec_version": "51.1", "attn_flags": "0x400"}, "amigentd.apollo"),
+                        ({"exec_version": "51.1", "attn_flags": "0x8f"}, "amigentd")):
+        channel = Channel(info=info)
+        assert setup.build_for_channel(channel) == build
+        assert channel.commands == ["CPU CHECK 68020"] and channel.files == {}
+
+
+def test_the_c_detection_reads_only_exec_and_never_the_board_register():
+    detect = (ROOT / "amiga" / "apollo" / "apollo_detect.c").read_text(encoding="utf-8")
+    body = detect.split("BOOL apollo_os_here(void)", 1)[1]
+    assert "AFF_68080 (1L << 10)" in detect and "AFF_FPGA" not in detect
+    assert "lib_Version >= 51" in body and "AttnFlags & AFF_68080" in body
+    assert "apollo_board" not in body and "VREG_BOARD" not in body and "lib_IdString" not in body
+
+
+def test_apolloos_and_aros_are_not_taken_for_amigaos_4():
+    from amigent.system import describe_system, native_ppc
+
+    apollo = describe_system("Kickstart 51.16, Workbench 51.1\n", "System: 68080 68882\n")
+    assert apollo["os"] == "ApolloOS" and not native_ppc(apollo)
+    named = describe_system("ApolloOS R9.3\nKickstart 51.16\n", "")
+    assert named["os"] == "ApolloOS" and not native_ppc(named)
+    aros = describe_system("AROS\nKickstart 51.1\n", "")
+    assert aros["os"] == "AROS" and not native_ppc(aros)
+    aros68k = describe_system("Kickstart 51.1, Workbench 51.1\n", "System: 68040\n")
+    assert aros68k["os"] == "AROS" and not native_ppc(aros68k)
+    os4 = describe_system("Kickstart 54.30, Workbench 53.12\n", "System: PowerPC 7447\n")
+    assert os4["os"] == "AmigaOS 4" and native_ppc(os4)
+    unknown = describe_system("Kickstart 53.30\n", "")
+    assert unknown["os"] == "AmigaOS 4"

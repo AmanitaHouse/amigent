@@ -33,7 +33,7 @@ from .paths import AMIGA
 from .secret import new_key, own_key, save_key
 
 SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
-AFF_FPGA = 1 << 10  # exec's attention bit for the Apollo core, from the Apollo NDK
+AFF_68080 = 1 << 10  # exec's AttnFlags bit for the 68080 (AFB_68080 10 in ApolloOS's cpu_m68k.h)
 
 
 def find_amiga() -> str | None:
@@ -59,9 +59,9 @@ def run(link: Amigentd, command: str) -> None:
 def apollo_os(info: dict | None = None, version_text: str = "") -> bool:
     """ApolloOS, as opposed to AmigaOS on the same Vampire.
 
-    The public ApolloOS tree calls the system ApolloOS and its exec is version
-    51, and the core sets the FPGA attention bit. AmigaOS on a Vampire stays on
-    exec 45 to 47 and keeps the plain amigentd.
+    The public ApolloOS tree calls the system ApolloOS, its exec is version 51
+    and sets the 68080 attention bit. AmigaOS on a Vampire runs exec 40 to 47
+    and keeps the plain amigentd.
     """
     info = info or {}
     if info.get("os") == "ApolloOS" or "ApolloOS" in (version_text or ""):
@@ -74,7 +74,7 @@ def apollo_os(info: dict | None = None, version_text: str = "") -> bool:
         flags = int(str(info.get("attn_flags", "0") or "0"), 0)
     except ValueError:
         flags = 0
-    return major >= 51 and bool(flags & AFF_FPGA)
+    return major >= 51 and bool(flags & AFF_68080)
 
 
 def _chosen(machine: Machine) -> str:
@@ -131,24 +131,30 @@ def build_for_channel(channel) -> str:
     cpu = detect_cpu(lambda command: channel.exec(command).rc)
     if cpu is None:
         raise SystemExit("the CPU could not be identified, so the installed amigentd was left in place.")
-    info: dict = {}
-    version_text = ""
-    if cpu >= CPU_68020:
-        try:
-            info = channel.sysinfo() or {}
-        except (AmigaError, AttributeError):
-            info = {}
-        if not apollo_os(info):
-            try:
-                version_text = channel.exec("Version FULL exec.library").output
-            except (AmigaError, AttributeError):
-                version_text = ""
-        # A daemon that already described itself is trusted. With no description,
-        # the probe reads the board register and exec's id string. A probe that
-        # is missing or does not succeed leaves the classic choice in place.
-        if not apollo_os(info, version_text) and not _reported(info):
-            version_text = _probe_output(channel) or version_text
-    return _chosen(_machine(cpu, apollo_os(info, version_text)))
+    apollo = cpu >= CPU_68020 and _apollo_packaged() and _apollo_by_channel(channel)
+    return _chosen(_machine(cpu, apollo))
+
+
+def _apollo_packaged() -> bool:
+    """Only an Apollo build makes ApolloOS matter; without one nothing is asked."""
+    return (AMIGA / "bin" / "amigentd.apollo").is_file()
+
+
+def _apollo_by_channel(channel) -> bool:
+    """ApolloOS by what the running amigentd says, else exec's version text, else the probe."""
+    try:
+        info = channel.sysinfo() or {}
+    except (AmigaError, AttributeError):
+        info = {}
+    if _reported(info):  # a daemon that already described itself is trusted
+        return apollo_os(info)
+    try:
+        version_text = channel.exec("Version FULL exec.library").output
+    except (AmigaError, AttributeError):
+        version_text = ""
+    # The probe reads exec's version and AttnFlags. A probe that is missing or
+    # does not succeed leaves the classic choice in place.
+    return apollo_os({}, version_text) or apollo_os({}, _probe_output(channel))
 
 
 def _probe_output(channel) -> str:
@@ -172,9 +178,10 @@ def _apollo_by_probe(link: Amigentd) -> bool:
     """SETUP only returns a program's exit code. 0 means the probe said ApolloOS.
 
     A missing probe is an unsuccessful probe: the caller keeps the classic binary.
+    Without an Apollo build in the package the probe is not even sent.
     """
     probe = AMIGA / "bin" / "amigent-apollo-probe"
-    if not probe.is_file():
+    if not _apollo_packaged() or not probe.is_file():
         return False
     link.put("T:amigent-apollo-probe", probe.read_bytes())
     link.run("Protect T:amigent-apollo-probe +e")

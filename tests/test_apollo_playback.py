@@ -120,9 +120,16 @@ class Link:
         self.connected = False
 
 
+def _apollo_audio(**extra):
+    info = {"os": "ApolloOS", "cpu": "68080", "audio": "1", "daemon_protocol": 6}
+    info.update(extra)
+    return info
+
+
 def _page(host="192.0.2.10", flags=0):
     viewer = Viewer(host, screen_port=1, ctl_port=1)
     viewer.screen.flags = flags
+    viewer.online = True
     viewer.clients.add(object())
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
@@ -132,7 +139,7 @@ def _page(host="192.0.2.10", flags=0):
 
 def test_playback_starts_only_when_asked_and_stops_cleanly():
     viewer = _page(flags=PLAIN_CLOSED)
-    viewer.amiga = {"audio": "1"}
+    viewer.amiga = _apollo_audio()
     assert not viewer._hearing()
     viewer.submit({"t": "audio", "on": True})
     assert viewer._hearing() and viewer._audio_ready()
@@ -159,12 +166,13 @@ def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
     viewer = _page()
     viewer.amiga = {}
     viewer.submit({"t": "audio", "on": True})
-    assert viewer._hearing() and not viewer._audio_ready()
+    # Empty / ineligible capabilities never arm Hear.
+    assert not viewer._hearing() and not viewer._audio_ready()
+    assert ("audio", {"on": False}) in viewer.sent
     viewer.amiga = {"os": "AmigaOS", "audio": ""}
     assert not viewer._audio_ready() and not viewer.hear
-    assert ("audio", {"on": False}) in viewer.sent
 
-    viewer.amiga = {"audio": "1"}
+    viewer.amiga = _apollo_audio()
     viewer.submit({"t": "audio", "on": True})
     link = Link()
     link.reads = [AmigaError("the Amiga does not answer")]
@@ -181,10 +189,10 @@ def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
 
 def test_reconnection_does_not_keep_playback():
     viewer = _page()
-    viewer.amiga = {"audio": "1"}
+    viewer.amiga = _apollo_audio()
     viewer.submit({"t": "audio", "on": True})
     viewer._set_online(False, "the Amiga does not answer")
-    assert viewer.hear is False
+    assert viewer.hear is False and viewer.amiga == {}
     viewer._set_online(True)
     assert viewer.hear is False and not viewer._hearing()
     client = next(iter(viewer.clients))
@@ -201,8 +209,9 @@ def test_the_page_arms_playback_from_the_button_and_keeps_the_screen_path():
     assert 'send({ t: "audio", on: false })' in js
     assert "amigent-pcm" in js and "kind === 5" in js
     assert "function drawTiles" in js and "function onBinary" in js
+    assert "hearEligible" in js
     connect = js.split("function connect()", 1)[1].split("function showState()", 1)[0]
-    assert "audio" not in connect
+    assert 't: "audio"' not in connect
 
 
 def test_listen_validates_and_reports_transport_results(monkeypatch):

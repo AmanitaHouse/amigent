@@ -94,18 +94,28 @@
   let host = "";
   let address = "";
   let reason = "";  // why the Amiga does not answer, as the PC side says it
+  // Bumped when the connection identity changes so a late amiga/SYSINFO
+  // payload from a previous session cannot re-offer Hear.
+  let capabilityEpoch = 0;
 
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
   }
 
+  function invalidateHearCapabilities() {
+    capabilityEpoch += 1;
+    amiga = {};
+    showHear(null);
+  }
+
   function connect() {
     ws = new WebSocket(`ws://${location.host}/ws?t=${encodeURIComponent(token)}`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { socketOpen = true; showState(); };
+    ws.onopen = () => { socketOpen = true; showState(); showHear(amiga); };
     ws.onclose = () => {
       socketOpen = false;
       stopHear(false);
+      invalidateHearCapabilities();
       showState();
       setTimeout(connect, 1000);
     };
@@ -148,7 +158,21 @@
   }
 
   function apolloMachine(info) {
-    return info.os === "ApolloOS" || String(info.cpu || "").includes("68080");
+    return !!(info && (info.os === "ApolloOS" || String(info.cpu || "").includes("68080")));
+  }
+
+  // Hear is visible only for an active Apollo connection with protocol ≥ 6
+  // and SYSINFO audio=1. Protocol 6 alone is not Apollo evidence.
+  function infoHearEligible(info) {
+    if (!info || typeof info !== "object") return false;
+    if (!apolloMachine(info)) return false;
+    const proto = Number(info.daemon_protocol);
+    if (!Number.isFinite(proto) || proto < 6) return false;
+    return info.audio === "1";
+  }
+
+  function hearEligible(info) {
+    return !!(socketOpen && amigaOnline === true && infoHearEligible(info));
   }
 
   // graphics is available Chip RAM. null when that field was absent: a real zero still shows.
@@ -168,6 +192,11 @@
   let toldOutdated = false;
 
   function showAmiga(info) {
+    const epoch = capabilityEpoch;
+    if (!info || typeof info !== "object") {
+      showHear(null);
+      return;
+    }
     amiga = info;
     if (info.pc_outdated && !toldOutdated) {
       toldOutdated = true;
@@ -218,13 +247,15 @@
     }
     $("st-mem").textContent = t("status_fast", { size: shown.fast });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
-    showHear(info);
+    // Drop capabilities that arrived after a disconnect / address change.
+    if (epoch !== capabilityEpoch) return;
+    showHear(amiga);
     showState();
   }
 
   function showHear(info) {
     const button = $("hear");
-    const offered = !!(info && info.audio === "1");
+    const offered = hearEligible(info);
     button.hidden = !offered;
     if (!offered && hearing) stopHear(true);
   }
@@ -253,16 +284,22 @@
         $("about-host").textContent = m.address && m.address !== host ? `${host} (${m.address})` : host;
         address = m.address || host;
         reason = m.reason || "";
-        if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
-        showScreens(m.screens || []);
         amigaOnline = m.online;
+        showScreens(m.screens || []);
+        if (m.online && m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
+        else invalidateHearCapabilities();
         if (m.w) setSize(m.w, m.h);
         showState();
+        showHear(amiga);
         break;
       case "size":
         setSize(m.w, m.h);
         break;
       case "amiga":
+        if (amigaOnline !== true) {
+          // Stale capability while disconnected / connecting — ignore for Hear.
+          return;
+        }
         showAmiga(m);
         break;
       case "screens":
@@ -271,7 +308,12 @@
       case "online":
         amigaOnline = m.online;
         reason = m.reason || "";
-        if (!m.online) stopHear(false);
+        if (!m.online) {
+          stopHear(false);
+          invalidateHearCapabilities();
+        } else {
+          showHear(amiga);
+        }
         showState();
         break;
       case "audio":
@@ -279,6 +321,7 @@
         break;
       case "address":
         stopHear(false);
+        invalidateHearCapabilities();
         $("about-host").textContent = `${host} (${m.address})`;
         break;
       case "stats":
@@ -877,6 +920,11 @@ registerProcessor("amigent-pcm", AmigentPcm);
   $("hear").addEventListener("click", () => {
     if (hearing) {
       stopHear(true);
+      return;
+    }
+    // Visibility is not the only gate: refuse activation unless still eligible.
+    if (!hearEligible(amiga)) {
+      showHear(amiga);
       return;
     }
     hearing = true;

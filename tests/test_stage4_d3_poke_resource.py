@@ -71,7 +71,7 @@ def test_zero_length_fails_without_skip_or_alloc():
 def test_allowpoke_off_skips_at_most_peek_max():
     poke = function_body(DAEMON, "c_poke")
     refuse = poke.split("if (!allow_poke)", 1)[1].split("#ifdef AMIGENT_APOLLO", 1)[0]
-    assert "l_skip(l, n, IO_SECONDS)" in refuse
+    assert "l_skip_until(l, n, deadline)" in refuse
     assert "AllocVec" not in refuse
     assert "CopyMem" not in refuse
 
@@ -80,18 +80,18 @@ def test_mmio_and_ram_refuse_before_alloc():
     poke = function_body(DAEMON, "c_poke")
     assert poke.index("apollo_mmio_hit") < poke.index("AllocVec")
     mmio = poke.split("apollo_mmio_hit(at, n)", 1)[1].split("if (!peek_allowed", 1)[0]
-    assert "l_skip" in mmio and "AllocVec" not in mmio and "CopyMem" not in mmio
+    assert "l_skip_until" in mmio and "AllocVec" not in mmio and "CopyMem" not in mmio
 
 
 def test_alloc_failure_skips_bounded_payload():
     poke = function_body(DAEMON, "c_poke")
-    fail = poke.split("if (!(data = AllocVec", 1)[1].split("if (!l_recv", 1)[0]
-    assert "l_skip" in fail and "ERROR_NO_FREE_STORE" in fail
+    fail = poke.split("if (!(data = AllocVec", 1)[1].split("if (!l_recv_until", 1)[0]
+    assert "l_skip_until" in fail and "ERROR_NO_FREE_STORE" in fail
 
 
 def test_recv_failure_frees_and_closes():
     poke = function_body(DAEMON, "c_poke")
-    recv = poke.split("if (!l_recv(l, data, n, IO_SECONDS))", 1)[1].split("mon_say", 1)[0]
+    recv = poke.split("if (!l_recv_until(l, data, n, deadline))", 1)[1].split("mon_say", 1)[0]
     assert "FreeVec(data)" in recv and "return FALSE" in recv
     assert "CopyMem" not in recv
 

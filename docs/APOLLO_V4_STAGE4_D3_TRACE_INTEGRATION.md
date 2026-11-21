@@ -8,7 +8,8 @@
 
 1. D3 POKE resource harden (source + fixture + tests).  
 2. Apollo TRACE fail-closed (source + client capability + tests).  
-3. Combined native build, package pins, and this document.
+3. Combined native build / package.  
+4. POKE payload wall-clock deadline + package refresh.
 
 Standalone review branches remain: `review/stage4-d3-poke-resource` (`edb200b`),  
 `review/stage4-trace-failclosed` (`24084e3`).
@@ -18,34 +19,41 @@ Standalone review branches remain: `review/stage4-d3-poke-resource` (`edb200b`),
 | Field | Value |
 |-------|-------|
 | Path | `src/amigent/amiga/bin/amigentd.apollo` |
-| Size | 128308 |
-| SHA-256 | `6765f090c4e92898c479cac36bb0021872f6c046238a3d7a670b906ae82c9f85` |
+| Size | 128744 |
+| SHA-256 | `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` |
 | Toolchain | ApolloCrossDev GCC-6.50-Stable, `-m68080 -DAMIGENT_APOLLO` |
 | Status | **NOT HARDWARE VALIDATED** |
-| Offline regression | **404 passed**, 5 skipped (`tests/` excluding `tests/native`) |
-| Tip commit | `2f393bc6fb429b4479719b94cddc24e8dc9e6974` |
+| Offline regression | **413 passed**, 5 skipped (`tests/` excluding `tests/native`) |
 
-Includes both D3 POKE resource gates and Apollo TRACE set refusal strings.
+Includes D3 POKE resource gates, Apollo TRACE set refusal, and POKE payload wall-clock deadline.
 
 Preserved HW identity: `tests/fixtures/amigentd.apollo.fforksafe-00443719` (`00443719…` / 129944 B).
 
-Standalone D3-only (`077d997…`) and TRACE-only (`918ffd07…`) binaries are **not** packaged here.
+Prior review-only binaries (`077d997…`, `918ffd07…`, `6765f090…`) are **not** packaged and are **not** hardware-validated.
 
 ## SUPERSEDED_APOLLO_SHA256
 
 - `1e0e3f65…` (F-DAE)  
 - `00443719…` (F-FORKSAFE)  
 
-Unknown Apollo digests remain protected. Standalone experimental builds are not listed.
+Unknown Apollo digests remain protected. Standalone experimental / intermediate review builds are not listed.
 
-## IO_SECONDS note
+## POKE payload wall-clock deadline
 
-`IO_SECONDS` (30) is a **per-WaitSelect progress timeout**, not a total-request deadline.  
-Bounded refuses may still hold a channel while draining ≤64 KiB. Oversized declares close without drain.
+Confirmed: `l_wait` / `l_recv` / `l_skip` restarted a full `IO_SECONDS` per fragment, so a
+slow drip could extend a refused POKE indefinitely.
+
+Fix: `POKE_DEADLINE_MS = IO_SECONDS * 1000` (**30 s** total wall-clock) from `now_ms()` at the
+start of the bounded payload phase; `l_skip_until` / `l_recv_until` use remaining time and do
+**not** reset on each fragment. Oversized declares still close without drain. Deadline
+expiry or incomplete recv closes the channel (`FALSE`) so bytes are not read as the next command.
+
+Maximum enforceable POKE payload duration: **30 seconds** wall-clock.
 
 ## Recommended PR order (draft only — not published)
 
-**Option A (preferred):** one security-hardening PR with the three commits above.  
-**Option B:** PR1 D3 source → PR2 TRACE source → PR3 package update (depends on 1+2).
+**Option A (preferred):** one security-hardening PR with separately reviewable commits
+(D3 → TRACE → package → deadline).  
+**Option B:** PR1 D3 source → PR2 TRACE → PR3 package/deadline (depends on 1+2).
 
-Do not merge without explicit authorisation. Hardware validation of `6765f090…` requires a separate GO.
+Do not merge without explicit authorisation. Hardware validation of `63db83ff…` requires a separate GO.

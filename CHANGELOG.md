@@ -178,6 +178,13 @@ Versions follow [semver](https://semver.org). The number lives in
 - `amiga_memory` reads a running program's memory by hunk:
   `ProTracker:hunk1+$120`, or `task=`, `hunk=` and `offset=`. The read stays
   inside the hunk. (#44)
+- `amiga_wait_task` waits until a task or program runs, or until it has
+  ended, for programs a script started with `Run`. (#45)
+- `amiga_amigus_status` tells whether an AmiGUS card is there, whether
+  amigus.library and the AHI driver are loaded, and who holds PCM, wavetable
+  and codec. It reads amigus.library's records and reserves nothing. (#45)
+- `amiga_audio_levels` reads an AmiGUS card's left and right output level for
+  a few seconds, with the small program `amigent-levels` on the Amiga. (#45)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

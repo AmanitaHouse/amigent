@@ -257,6 +257,9 @@ starts the old one again.
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
 | `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_emu68_card` | Emu68's boot partition on the PiStorm's SD card, read only: kernel and version, board variant, Kickstart, `cmdline.txt` options explained, free space, problems; `check=True` reads every file |
+| `amiga_emu68_option`, `amiga_emu68_kickstart`, `amiga_emu68_undo` | change one `cmdline.txt` option or the Kickstart file, and take it back; dry run until `confirm=True`, backup on the card and the PC first, see [Emu68's SD card](#emu68s-sd-card) |
+| `amiga_emu68_update` | update Emu68 from a release zip on the PC, after checking version, board and VideoCore.card, with a backup of the whole boot partition |
 | `amiga_amigus_status`, `amiga_audio_levels` | an AmiGUS card: which driver holds PCM, wavetable and codec, without reserving anything; its left and right output level over a few seconds |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
@@ -381,6 +384,79 @@ Before `amiga_run` starts a program on an Amiga without an FPU, or on a
 FPU instructions; on an Amiga without an FPU it does not start one that has
 them (`check_fpu=False` runs it anyway). This is a heuristic: a program may
 test for an FPU before using it.
+
+## Emu68's SD card
+
+On a PiStorm, Emu68 starts from the FAT partition of the Pi's SD card:
+`config.txt` names the Emu68 file (`kernel=`) and the Kickstart
+(`initramfs kick.rom`), `cmdline.txt` holds Emu68's options. A mistake there
+and the Amiga does not start, and nothing on the Amiga can fix it. The
+`amiga_emu68_*` tools therefore go carefully:
+
+- `amiga_emu68_card` only reads. It finds the partition among the mounted
+  volumes (or takes `volume="BOOT:"`), so the partition has to be mounted on
+  the Amiga with a FAT file system. To write to it from the Amiga the card
+  driver needs `sd.unit0=rw` (`emmc.unit0=rw` on a Pi 4); that makes the whole
+  card writable, partition table included, so set it only while needed.
+- Nothing is written unless the user has created a file `amigent-write-ok.txt`
+  in the boot partition. Amigent never creates it.
+- Every writing call shows its plan and writes nothing until it is called
+  again with `confirm=True`.
+- Before writing, the files it replaces are copied to `amigent-backup/<id>/`
+  on the card and to the settings folder on the PC (`emu68/<machine>/<id>/`),
+  each with a `manifest.json` of sizes and checksums, and checked. If that
+  fails, nothing is written.
+- New files are written next to the old ones as `<name>.amigent-new`, read
+  back, and only then swapped in and read back again. On a failure the old
+  file goes back. Only the files the plan names are touched; never
+  `cmdline.txt` or the Kickstart during an update, never FPGA files, never the
+  Amiga partitions.
+- An update first checks the Emu68 version on the card against the new one,
+  the board variant (the file names changed with Emu68 1.1: `Emu68-pistorm`
+  was the CPLD PiStorm in 1.0 and is the PiStorm32-lite in 1.1), and the
+  version of `LIBS:Picasso96/VideoCore.card`: Emu68 1.1 needs 1.5, which does
+  not work with 1.0. Then it backs up the whole boot partition. After the
+  restart, `amiga_emu68_update(after_restart=True)` checks that the new Emu68
+  runs, by the versions of the drivers it brings in its ROM. Emu68 1.1 takes
+  most options from overlays in `config.txt`; the update names the
+  `cmdline.txt` options this concerns.
+- When PiStormBoot is installed, use its boot menu for changes by hand;
+  Amigent leaves its files alone.
+
+**Writing to the boot partition is untested on real hardware so far.** Try it
+on a second SD card with a copy of the system first.
+
+### Rescue from the PC
+
+If the Amiga no longer starts after a change, a power cycle does not help: the
+Pi always starts what is on the card. Then:
+
+1. Switch the Amiga off, take the SD card out of the Pi and put it into a card
+   reader on the PC. The boot partition appears as a drive (Windows), under
+   `/Volumes` (macOS) or under `/media` (Linux).
+2. With Amigent on the PC, list the backups and check one:
+
+   ```
+   python -m amigent.emu68card list
+   python -m amigent.emu68card verify <backup folder>
+   ```
+
+3. Show what a restore would write, then write it:
+
+   ```
+   python -m amigent.emu68card restore <backup folder> <card drive>
+   python -m amigent.emu68card restore <backup folder> <card drive> --yes
+   ```
+
+   The backup folder can also be the one on the card,
+   `<card drive>/amigent-backup/<id>`. Files the change added stay on the card;
+   they do no harm.
+4. Without Amigent: copy everything inside `amigent-backup/<id>/files/` on the
+   card to the top of the card, replacing the files there. The `README.txt` in
+   that folder says the same.
+5. Eject the card safely, put it back into the Pi and switch on.
+
+Never format or repartition the card for this; only files are copied.
 
 ## Remote desktop
 

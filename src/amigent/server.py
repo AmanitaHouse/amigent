@@ -3653,6 +3653,177 @@ def amiga_update(apply: bool = False, skip: bool = False) -> str:
     return "\n".join(said)
 
 
+# ---- Emu68's boot partition on the SD card (#18, #19)
+
+
+def _emu68_card(volume: str = ""):
+    """The boot partition as a card, after making sure this Amiga runs Emu68."""
+    from . import emu68card
+    try:
+        loaded = _loaded()
+        if not any(lib.kind == "R" and lib.name.lower() == system.EMU68_RESOURCE for lib in loaded.libraries):
+            raise AmigaError("this Amiga does not run Emu68 (no devicetree.resource); nothing to do")
+    except AmigaError as e:
+        if "Emu68" in str(e):
+            raise
+        # an amigentd before 1.4.0 has no LOADED: the card's own config.txt has to tell
+    ctl = _session().ctl
+    if volume:
+        return emu68card.AmigaCard(ctl, volume, _with_ctl)
+    for v in _with_ctl(lambda: ctl.volumes()):
+        card = emu68card.AmigaCard(ctl, v["name"], _with_ctl)
+        try:
+            text = card.read("config.txt") if (card.size("config.txt") or 0) < 65536 else b""
+        except AmigaError:
+            continue
+        if b"emu68" in text.lower():
+            return card
+    raise AmigaError("no volume with an Emu68 config.txt; the boot partition is not mounted on the "
+                     "Amiga (it needs a FAT file system, and to be written, sd.unit0=rw or emmc.unit0=rw), "
+                     "or name it with volume='BOOT:'")
+
+
+def _emu68_root():
+    from . import emu68card, paths
+    return emu68card.default_root() / paths.safe(_session().host)
+
+
+@mcp.tool()
+def amiga_emu68_card(check: bool = False, write_test: bool = False, volume: str = "") -> str:
+    """Emu68's boot partition on the PiStorm's SD card, read only: kernel and its
+    Emu68 version, board variant, Kickstart file (size, checksum), FPGA files
+    named in config.txt (never written), every cmdline.txt option explained,
+    overlays, free space, backups, problems such as a missing file, and whether
+    changes are allowed (the user's marker file amigent-write-ok.txt on the card).
+
+    check=True reads every file once on the Amiga (read errors, read speed);
+    write_test=True also writes, reads back and deletes a 256 KB test file, only
+    on a card that allows changes. volume: the boot partition, found by itself.
+    Says what sd.unit0=rw means when it is set. Does nothing without Emu68.
+    """
+    from . import emu68card
+    card = _emu68_card(volume)
+    return emu68card.overview(card, check=check, write_test=write_test)
+
+
+@mcp.tool()
+def amiga_emu68_option(name: str = "", value: str = "", remove: bool = False, force: bool = False,
+                       confirm: bool = False, volume: str = "") -> str:
+    """Change one Emu68 option in cmdline.txt on the SD card, with a way back.
+
+    name and value as in cmdline.txt (vc4.mem, 32; nofpu without a value);
+    remove=True takes the option out. The option must be one Emu68 knows and the
+    value valid; force=True writes an unknown option anyway. Without name: the
+    list of known options and their values.
+
+    A dry run that shows the plan unless confirm=True, and only on a card with
+    the user's marker file amigent-write-ok.txt. Before writing, cmdline.txt goes
+    into a backup on the card and on the PC; after writing it is read back. Takes
+    effect at the next start; never restarts by itself. amiga_emu68_undo takes it back.
+    Writing is untested on real hardware: try it on a second SD card first.
+    """
+    from . import emu68card
+    if not name.strip():
+        lines = ["Emu68 options in cmdline.txt (Emu68 1.0; 1.1 takes most from overlays in config.txt):"]
+        for o in emu68card.OPTIONS.values():
+            values = "" if o.kind == "flag" else "=" + emu68card._values(o)
+            lines.append(f"  {o.name}{values}: {o.text}")
+        return "\n".join(lines)
+    card = _emu68_card(volume)
+    return emu68card.change_option(card, _emu68_root(), name.strip(), value.strip() or None,
+                                   remove=remove, force=force, confirm=confirm)
+
+
+@mcp.tool()
+def amiga_emu68_kickstart(file: str, confirm: bool = False, volume: str = "") -> str:
+    """Boot another Kickstart: changes the ROM name in config.txt's initramfs line.
+
+    file: a ROM file on the card (its name, such as kick31.rom), or an Amiga
+    path (DEVS:Kickstarts/kick.rom) which is copied onto the card first. The ROM
+    is checked first: size 256 KB to 2 MB, a Kickstart header, not byte swapped
+    or encrypted, the checksum right (or checksum_rom set). The old ROM stays on
+    the card, so going back is this call with its name, or amiga_emu68_undo.
+
+    A dry run unless confirm=True, only on a card with the marker file
+    amigent-write-ok.txt, with a backup on the card and the PC and a read back.
+    Takes effect at the next start. Untested on real hardware: try a second card first.
+    """
+    from . import emu68card
+    card = _emu68_card(volume)
+    file = file.strip()
+    if ":" in file:
+        data = _with_ctl(lambda: _session().ctl.read_file(file))
+        name = file.split(":", 1)[1].rsplit("/", 1)[-1]
+        return emu68card.change_kickstart(card, _emu68_root(), name, data, confirm=confirm)
+    return emu68card.change_kickstart(card, _emu68_root(), file, confirm=confirm)
+
+
+@mcp.tool()
+def amiga_emu68_undo(backup: str = "", confirm: bool = False, volume: str = "") -> str:
+    """Put the SD card's boot files back as one backup has them: the last change by
+    default, or the backup named (as amiga_emu68_card or an earlier answer gives it).
+
+    Only the files of that backup are written, each checked against its checksum
+    first; the present state is backed up before. A dry run unless confirm=True,
+    and only on a card with the marker file amigent-write-ok.txt.
+    """
+    from . import emu68card
+    card = _emu68_card(volume)
+    return emu68card.undo(card, _emu68_root(), backup.strip(), confirm=confirm)
+
+
+def _videocore_version():
+    for path in ("LIBS:Picasso96/VideoCore.card", "LIBS:Picasso96/emu68-vc4.card"):
+        try:
+            result = _with_ctl(lambda: _session().ctl.exec(f"Version FILE {path}"))
+        except AmigaError:
+            continue
+        m = re.search(r"(\d+)\.(\d+)", result.output)
+        if result.rc == 0 and m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+@mcp.tool()
+def amiga_emu68_update(archive: str = "", confirm: bool = False, after_restart: bool = False,
+                       volume: str = "") -> str:
+    """Update Emu68 on the SD card, with a backup of the whole boot partition.
+
+    archive: an Emu68 release on this PC, the zip from github.com/michalsc/Emu68
+    or its unpacked folder. Checks first and stops if something does not fit:
+    the version on the card against the new one, the board variant (PiStorm32-
+    lite/16 or the CPLD PiStorm), VideoCore.card in LIBS:Picasso96 against what
+    the release needs (1.1 needs 1.5, 1.0 does not work with 1.5).
+
+    With confirm=True: backs up the whole boot partition on the card (with a
+    README on how to go back) and on the PC, with checksums; writes the kernel
+    and the Pi firmware files next to the old ones, verifies them, swaps them in
+    and verifies again. cmdline.txt, the Kickstart, FPGA files and the Amiga
+    partitions are never written; config.txt only in its kernel= line when the
+    kernel's name changes. Then the user restarts (amiga_restart), and
+    after_restart=True confirms that the new Emu68 runs.
+
+    If the new Emu68 does not start, a power cycle does not help; the rescue is
+    the card in a PC: python -m amigent.emu68card restore <backup> <card drive>.
+    Only on a card with the user's marker file amigent-write-ok.txt, and only on
+    the user's yes. Untested on real hardware: try it on a second SD card first.
+    """
+    from . import emu68card
+    if after_restart:
+        versions = {lib.name: (lib.version, lib.revision) for lib in _loaded().libraries}
+        return emu68card.confirm_update(_emu68_root(), versions)
+    if not archive.strip():
+        raise AmigaError("archive: the Emu68 release zip or folder on this PC")
+    path = Path(archive.strip()).expanduser()
+    if not path.exists():
+        raise AmigaError(f"{path} is not on this PC")
+    card = _emu68_card(volume)
+    files = emu68card.read_archive(path)
+    root = _emu68_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return emu68card.update(card, files, root, videocore=_videocore_version(), confirm=confirm)
+
+
 def _close_for_update() -> None:
     """Our own connections go, so amigent-setup --update has each Amiga to itself."""
     with sessions._lock:

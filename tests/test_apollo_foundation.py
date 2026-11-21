@@ -284,3 +284,12 @@ def test_v4_sysinfo_corrects_amigaos4_when_cpu_text_is_empty():
     # Real AmigaOS 4 SYSINFO must not be rewritten
     os4 = describe_system("Kickstart 54.30\n", "System: PowerPC 7447\n")
     assert reconcile_system(os4, {"os": "AmigaOS 4", "cpu": "PowerPC"})["os"].startswith("AmigaOS 4")
+
+
+def test_a_68080_alone_does_not_make_apolloos():
+    """A Vampire with AmigaOS 3 has the 68080 bit too; only SYSINFO os=ApolloOS renames."""
+    from amigent.system import describe_system, reconcile_system
+
+    facts = describe_system("Kickstart 51.51, Workbench 40.0\n", "")
+    info = {"os": "AmigaOS", "cpu": "68080", "attn_flags": "42111"}
+    assert reconcile_system(facts, info) == facts

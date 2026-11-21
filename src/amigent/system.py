@@ -97,15 +97,11 @@ def reconcile_system(facts: dict, info: dict | None) -> dict:
     """
     if not info:
         return facts
-    flags = attn_flags(info) or 0
     sys_os = str(info.get("os") or "")
     sys_cpu = str(info.get("cpu") or "")
-    apollo = (
-        sys_os == "ApolloOS"
-        or bool(flags & AFF_68080)
-        or sys_cpu.endswith("68080")
-    )
-    if not apollo:
+    # amigentd says ApolloOS only for exec 51+ with the 68080 bit; a 68080 or bit 10
+    # alone is also a Vampire running AmigaOS 3, so they do not rename the OS here.
+    if sys_os != "ApolloOS":
         return facts
     out = dict(facts)
     if out.get("os", "").startswith("AmigaOS 4") or not out.get("os"):

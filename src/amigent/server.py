@@ -1172,6 +1172,110 @@ def amiga_audio_levels(seconds: int = 2, hz: int = 10, peak: bool = True) -> str
     return amigus.levels(result.output, seconds, hz, peak)
 
 
+def _graphics_info() -> "graphics.Info":
+    """Board, driver and 3D libraries; remembered for the screenshot note."""
+    from . import graphics
+    ctl = _session().ctl
+    try:
+        loaded = _loaded()
+    except AmigaError:
+        loaded = None  # amigentd before 1.4.0: no LOADED, no PEEK
+    peek = (lambda a, n: _with_ctl(lambda: ctl.peek(a, n))) if loaded else None
+    run = lambda c: (lambda r: (r.rc, r.output))(_with_ctl(lambda: ctl.exec(c)))  # noqa: E731
+    info = graphics.detect(loaded, peek, run, lambda p: _with_ctl(lambda: ctl.list_dir(p, recursive=True)))
+    _session().graphics = info
+    return info
+
+
+@mcp.tool()
+def amiga_graphics() -> str:
+    """The graphics board, read only: Picasso96 or CyberGraphX with versions, the
+    card driver (VideoCore.card, uaegfx.card, ZZ9000.card, PicassoIV.card, ...) and
+    chip driver in memory, the graphics boards in the Zorro list with their bus,
+    and for 3D Warp3D, its drivers and MiniGL, in memory or in LIBS:.
+
+    Says whether the card sits behind a slow bus (Zorro II), where screen reads
+    cost more. Screen modes: amiga_screen_modes.
+    """
+    from . import graphics
+    return graphics.describe(_graphics_info())
+
+
+def _p96_settings(path: str) -> bytes | None:
+    try:
+        return _with_ctl(lambda: _session().ctl.read_file(path))
+    except AmigaError:
+        return None
+
+
+@mcp.tool()
+def amiga_screen_modes(action: str = "list", modes: str = "", depth: int = 0, board: str = "",
+                       need: str = "", confirm: bool = False) -> str:
+    """The Picasso96 screen modes and which colour depths are switched on, from
+    DEVS:Picasso96Settings; switch single ones on or off.
+
+    action: list (default, read only), on, off, or undo. modes: '640x480', a
+    full name like 'VideoCore:640x480', several by comma, or 'all'; depth: 8,
+    16, 24 or 32, 0 for every depth of those modes; board filters the list.
+    need='640x480x32' says whether a program asking for that mode gets it and,
+    if it is switched off, which switch is missing.
+    on/off without confirm=True only says what would change. With it the file
+    is first copied to DEVS:Picasso96Settings.amigent-undo (the very first
+    state also to .amigent-orig), then changed in place. undo (confirm=True)
+    puts that copy back in one call; a second undo redoes. Picasso96 reads the
+    file when it starts, so a change counts after a restart. With CyberGraphX
+    this only explains: its modes are not managed here.
+    """
+    from . import graphics
+    if action not in ("list", "on", "off", "undo"):
+        raise AmigaError("action: list, on, off or undo")
+    ctl = _session().ctl
+    data = _p96_settings(graphics.SETTINGS)
+    if data is None:
+        why = f"no {graphics.SETTINGS}: Picasso96 is not installed here or has not saved its modes yet"
+        info = _session().graphics
+        if info and info.system == "CyberGraphX":
+            why += "; this Amiga runs CyberGraphX, whose modes Amigent does not manage"
+        raise AmigaError(why)
+    try:
+        found = graphics.parse_settings(data)
+        if action == "list":
+            text = graphics.listing(found, board)
+            return text + ("\n\n" + graphics.explain(found, need) if need else "")
+        if action == "undo":
+            old = _p96_settings(graphics.UNDO)
+            if old is None:
+                return f"nothing to undo: no {graphics.UNDO}"
+            graphics.parse_settings(old)  # never put back something that is not settings
+            if not confirm:
+                return (f"undo would put {graphics.UNDO} back as {graphics.SETTINGS}; "
+                        "call again with confirm=True")
+            _with_ctl(lambda: ctl.write_file(graphics.SETTINGS, old))
+            _with_ctl(lambda: ctl.write_file(graphics.UNDO, data))
+            return (f"{graphics.SETTINGS} is back as it was before the last change; another undo "
+                    "redoes it. Picasso96 reads it when it starts: restart the Amiga for it to count.")
+        if depth not in (0, 8, 15, 16, 24, 32):
+            raise AmigaError("depth: 8, 16, 24 or 32, or 0 for all")
+        new, changed = graphics.change(data, modes, depth, action == "on")
+    except graphics.SettingsError as e:
+        raise AmigaError(str(e)) from e
+    if not changed:
+        return f"nothing to change: those modes are already {action}"
+    what = f"switch {action}: " + ", ".join(changed)
+    if not confirm:
+        return f"would {what}. Call again with confirm=True (ask the user first)."
+    if _p96_settings(graphics.ORIGINAL) is None:
+        _with_ctl(lambda: ctl.write_file(graphics.ORIGINAL, data))
+    _with_ctl(lambda: ctl.write_file(graphics.UNDO, data))
+    _with_ctl(lambda: ctl.write_file(graphics.SETTINGS, new))
+    if _p96_settings(graphics.SETTINGS) != new:
+        _with_ctl(lambda: ctl.write_file(graphics.SETTINGS, data))
+        raise AmigaError(f"{graphics.SETTINGS} did not read back as written; the old one is back")
+    return (f"did {what}. The settings from before are in {graphics.UNDO} (undo: "
+            "amiga_screen_modes(action='undo', confirm=True)). Picasso96 reads them when it starts: "
+            "restart the Amiga (amiga_restart) for the change to count.")
+
+
 @mcp.tool()
 def amiga_locks(screen_id: str = "") -> str:
     """Who holds the layer locks of a screen and its windows, and who waits for them.
@@ -1872,6 +1976,8 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
         found = _screens_or_none()  # after the picture: the link is up, the protocol known
     if shown := display_note(found or []):
         note += "\n" + shown
+    if slow := _slow_bus_note(region):
+        note += "\n" + slow
     out = [note, McpImage(data=pictures.png(image), format="png")]
     if text:
         try:
@@ -1927,6 +2033,16 @@ def _shot_behind(target: dict, found: list | None, region: tuple, text: bool) ->
     if text:
         out.append("no text: amiga_screen_text reads the front screen only")
     return out
+
+
+def _slow_bus_note(region: tuple) -> str:
+    """Once a session, for a whole screen on a Zorro II card (known from amiga_graphics)."""
+    info, session = _session().graphics, _session()
+    if not info or not info.slow_bus or any(region) or session.slow_bus_told:
+        return ""
+    session.slow_bus_told = True
+    return ("the graphics card sits on Zorro II: each look reads its memory over the slow bus; "
+            "a region, or changed=True after a click, keeps it quick")
 
 
 def _screen_name(s: dict) -> str:

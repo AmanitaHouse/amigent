@@ -237,6 +237,13 @@ Versions follow [semver](https://semver.org). The number lives in
   `amiga_serial_log('narrow', low=..., high=...)` limits Emu68's JIT debug
   output to an address range at run time. Without an adapter nothing
   changes. (#21)
+- `amiga_graphics` tells the graphics board: Picasso96 or CyberGraphX, the
+  card and chip driver with versions, the board's Zorro bus, and Warp3D and
+  MiniGL. `amiga_screen_modes` lists the Picasso96 screen modes with the colour
+  depths switched on, explains a missing mode, and switches single depths on or
+  off with a copy first and undo in one call. On a Zorro II card the remote
+  desktop asks for smaller pieces and looks less often. Boards other than
+  PiStorm and UAE are not tested. (#22)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

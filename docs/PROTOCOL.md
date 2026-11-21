@@ -8,6 +8,8 @@ keyboard; up to four more run commands and move files, see
 ## starting
 
     amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
+    amigentd FOLLOW <pipe> TO <file>         (job helper, see below)
+    amigentd EMU68JIT <reg:value:mask,...>   (JIT settings, see emu68)
 
 Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 
@@ -498,6 +500,7 @@ else.
 | 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
+| 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO) |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -586,6 +589,8 @@ separated by tabs.
   `poke`, `1` when amigentd runs with `ALLOWPOKE`; `probe`, `1` when LOCKS,
   CPU, DRAG and QUIET are understood; `execbase`, exec's base in hex; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
+- From amigentd 1.5.0 SYSINFO also has `emu68`: present when EMU68 is
+  understood, `1` when Emu68 runs on this Amiga, `0` otherwise.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.
@@ -672,6 +677,40 @@ and releases the button at the end. Zigzag goes 8 steps right and 8 left, jumps
 
 event_us is how long input.device took the event, frame_us from the event to
 the next frame, left and top the window's place then.
+
+### emu68
+
+EMU68 looks for Emu68 first: `devicetree.resource` with an `/emu68` node that
+has an `idstring`. Without it the answer is `emu68=0` and nothing else is
+touched (a build without Emu68 support adds `why=`); arg 1 then fails with
+`not Emu68`. With it, `key=value` lines:
+
+- always: `emu68=1`; `cntfrq` (Hz of the free running counter), `cnt_hi`,
+  `cnt_lo`, `insn_hi`, `insn_lo` (68k instructions), `arm_hi`, `arm_lo` (ARM
+  instructions), each half in 8 hex digits; `jit_size`, `jit_free`,
+  `jit_count`, `jit_cmiss`, `jit_sfthresh` in decimal; `jitctrl`, `jitctrl2`,
+  `cacr` in hex. These are Emu68's control registers $E0-$EC and $1E0, read
+  with MOVEC in supervisor mode, the 64 bit counters again until their high
+  half stands still.
+- with arg 0 also, when they are there: `idstring`, `version` (`1.0.4`),
+  `git`, `variant` (from `/emu68`), `model`, `compatible` (from `/`),
+  `bootargs` (from `/chosen`, up to 4 KB), `jit_size_mb`; from the Pi
+  firmware's mailbox `board_revision` (hex), `firmware`, `temp`, `temp_max`
+  (millidegrees Celsius), `arm_clock`, `arm_clock_measured`, `arm_clock_max`
+  (Hz), `core_volt` (microvolts), `throttled` (hex, the firmware's
+  get_throttled bits: 0-3 now, 16-19 since power on); and `mailbox`:
+  `resource` (through `mailbox.resource`), `direct` (at the address in the
+  device tree, under Forbid with a time limit, as EmuControl does) or `none`.
+
+Arg 1 sets JIT fields: for each register `$EA` (JITSCFTHRESH), `$EB`
+(JITCTRL) or `$1E0` (JITCTRL2) the bits of the mask take the value's bits.
+Masks are cut to the fields Emu68 documents: all of `$EA`, `$FFFFFFF1` of
+`$EB`, `$00000FFB` of `$1E0`; other registers are ignored. Read, change and
+write happen under Disable, then the caches are cleared so the JIT translates
+anew. The answer is that of arg 2. Nothing is written anywhere else.
+
+`amigentd EMU68JIT reg:value:mask,...` (hex) does the same from a Shell and
+quits; on an Amiga without Emu68 it changes nothing and returns 5.
 
 ### job helper
 

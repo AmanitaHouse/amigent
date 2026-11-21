@@ -17,7 +17,7 @@ from amigent.paths import AMIGA
 ROOT = Path(__file__).resolve().parent.parent
 PROTOCOL_6 = (
     "CMD_NOTE", "CMD_LOADED", "CMD_PEEK", "CMD_TASKS", "CMD_TASKCTL", "CMD_POKE",
-    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET",
+    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET", "CMD_EMU68",
 )
 
 

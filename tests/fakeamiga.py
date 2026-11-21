@@ -62,6 +62,10 @@ class FakeAmiga:
         self.info: dict[str, str] = {}  # more SYSINFO lines, such as attn_flags
         self.answers: dict[str, tuple[int, str]] = {}  # EXEC: command -> (rc, output)
         self.loaded: list[str] = []  # LOADED lines, answered from protocol 6 on
+        # EMU68 (48): None answers emu68=0; else the registers 0xea, 0xeb, 0x1e0 and more lines
+        self.emu68: dict[int, int] | None = None
+        self.emu68_lines: dict[str, str] = {}
+        self.emu68_sets: list[list[tuple[int, int, int]]] = []
         # SCREENS beyond the one picture: dicts with handle, title, flags, picture.
         # None: one Workbench screen of the picture, without the 1.5.0 display bits.
         self.screen_list: list[dict] | None = None
@@ -216,6 +220,8 @@ class FakeAmiga:
         if cmd == 30:
             extra = "".join(f"{k}={v}\n" for k, v in self.info.items())
             return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n{extra}")
+        if cmd == 48 and self.protocol >= 6:
+            return self._emu68(arg, path.encode("iso-8859-1"))
         if cmd == 38 and self.protocol >= 6:
             return self.text("".join(line + "\n" for line in self.loaded))
         if cmd == 31:
@@ -223,6 +229,25 @@ class FakeAmiga:
         if cmd == 6:
             return b"\0"
         return self.fail("not on a command channel")
+
+    def _emu68(self, arg: int, raw: bytes) -> bytes:
+        if self.emu68 is None:
+            return self.text("emu68=0\n")
+        if arg == 1:
+            items = [struct.unpack(">III", raw[i:i + 12]) for i in range(0, len(raw) - 11, 12)]
+            self.emu68_sets.append(items)
+            allowed = {0xEA: 0xFFFFFFFF, 0xEB: 0xFFFFFFF1, 0x1E0: 0x00000FFB}
+            for reg, value, mask in items:
+                if reg in allowed:
+                    mask &= allowed[reg]
+                    self.emu68[reg] = (self.emu68[reg] & ~mask) | (value & mask)
+        r = self.emu68
+        body = (f"emu68=1\ncntfrq=1000000\ncnt_hi=00000000\ncnt_lo=00100000\ninsn_hi=00000000\n"
+                f"insn_lo=10000000\njit_size=33554432\njit_free=16777216\njit_count=1200\n"
+                f"jit_sfthresh={r[0xEA]}\njitctrl={r[0xEB]:08x}\njit_cmiss=500\njitctrl2={r[0x1E0]:08x}\n")
+        if arg == 0:
+            body += "".join(f"{k}={v}\n" for k, v in self.emu68_lines.items())
+        return self.text(body)
 
     def _dir(self, path: str, stat: bool) -> bytes:
         clean = path.rstrip("/") if not path.endswith(":") else path

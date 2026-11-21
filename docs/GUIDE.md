@@ -256,7 +256,8 @@ starts the old one again.
 | `amiga_where`, `amiga_memory` | name an address (program and hunk, library function, ROM module); read memory as hex, text or 68k code; `prog hunk 4 +$10` (or `task=`, `hunk=`, `offset=`, kept inside the hunk) and the vectors below $400 (ExecBase at 4) work too |
 | `amiga_tasks`, `amiga_task` | all tasks with priority, state and stack, programs that run twice marked; change a priority, send Ctrl-C to F; `stack=N` names what a task waits for and its return addresses |
 | `amiga_locks` | who holds the layer locks of a screen and its windows, and who waits |
-| `amiga_cpu` | CPU load per task, sampled on the Amiga itself |
+| `amiga_cpu` | CPU load per task, sampled on the Amiga itself; under Emu68 also the real MIPS |
+| `amiga_emu68`, `amiga_emu68_jit` | under Emu68 (PiStorm and other Pi boards): Emu68 version, the Pi, boot options, temperature, under-voltage and throttling, JIT counters; JIT settings while it runs, taken back with one call, per program, see [EMU68.md](EMU68.md) |
 | `amiga_amigus_status`, `amiga_audio_levels` | an AmiGUS card: which driver holds PCM, wavetable and codec, without reserving anything; its left and right output level over a few seconds |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |

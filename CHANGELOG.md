@@ -118,6 +118,29 @@ Versions follow [semver](https://semver.org). The number lives in
   is mended at the Amiga; Amigent says which of the two it is and how to
   recover. (#27)
 
+### Emu68
+
+- `amiga_emu68` tells what runs on the Raspberry Pi of a PiStorm or another
+  Emu68 board: Emu68's version and variant, the Pi's model and memory, the
+  boot options from `cmdline.txt`, temperature, ARM clock and core voltage,
+  whether the Pi reported under-voltage or throttling since power on, and the
+  JIT cache and counters. It names PiStormBoot and Emu68PWM when they are there.
+  `amiga_status` mentions under-voltage and throttling by itself, and
+  `amiga_cpu` adds the real MIPS and JIT cache misses. Read only; on an Amiga
+  without Emu68 it says so and touches nothing
+  ([#16](https://github.com/akustikrausch/amigent/issues/16)).
+- `amiga_emu68_jit` shows and changes the JIT settings Emu68 documents as
+  changeable at run time (chip and DBF slowdown, blitter wait, CCR scan depth,
+  instruction depth, inlining, loop count, soft flush), with no restart and
+  nothing written to the SD card. `restore=True` puts back the values from
+  before the first change, which the PC keeps. `program=` runs a program with
+  settings and the Amiga puts the old ones back when it ends; `remember=True`
+  keeps them as a note for the next start
+  ([#17](https://github.com/akustikrausch/amigent/issues/17)).
+- amigentd 1.5.0: new command EMU68 (48), `emu68` in SYSINFO, and
+  `amigentd EMU68JIT reg:value:mask,...` for job scripts. See
+  [docs/EMU68.md](docs/EMU68.md).
+
 ### FPU
 
 - Amigent tells the FPU from exec's AttnFlags instead of the text of `C:CPU`:

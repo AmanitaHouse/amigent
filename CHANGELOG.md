@@ -197,6 +197,10 @@ Versions follow [semver](https://semver.org). The number lives in
   is the card in a PC: `python -m amigent.emu68card restore <backup> <card>`
   on Windows, macOS or Linux
   ([#19](https://github.com/akustikrausch/amigent/issues/19)).
+- A `config.txt` with one kernel per board, as AmiKit ships it (`[gpio24=0]`
+  for PiStorm32-lite, `[gpio24=1]` for the CPLD PiStorm), is read and changed:
+  the update replaces only the kernel for the board of the release, a new
+  Kickstart goes into every `initramfs` line, and comment lines stay.
 - Every writing call is a dry run until `confirm=True`, writes only on a card
   where the user created `amigent-write-ok.txt`, refuses when the backup
   fails, reads back what it wrote, and touches only the files its plan names.

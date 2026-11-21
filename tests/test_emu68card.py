@@ -487,3 +487,47 @@ def test_a_comment_line_above_the_options_is_kept_and_not_read_as_options():
     assert parse_cmdline(text) == [("logo", "black"), ("vc4.mem", "16"), ("sd.unit0", "rw")]
     new, _ = set_option(text, "sd.unit0", "ro")
     assert new == "# https://example.org/#emu68\nlogo=black vc4.mem=16 sd.unit0=ro\n"
+
+
+AMIKIT = ("# AmiKit\narm_64bit=1\n[pi4]\narm_boost=1\n[all]\ngpio=0-27=ip\n"
+          "# PiStorm32-lite\n[gpio24=0]\n[gpio4=1]\nkernel=Emu68-pistorm32lite\n"
+          "#initramfs firmware.bin.gz,kick.rom\ninitramfs kick.rom\n"
+          "# PiStorm\n[gpio24=1]\nkernel=Emu68-pistorm\ninitramfs kick.rom\n")
+
+
+@pytest.fixture
+def amikit(card):
+    card.write("config.txt", AMIKIT.encode())
+    card.write("Emu68-pistorm", kernel("1.0.4", MODULES_107))
+    card.write("Emu68-pistorm32lite", kernel("1.0.4", MODULES_107))
+    return card
+
+
+def test_a_card_with_one_kernel_per_board_is_read_and_changed(amikit, pc):
+    text = ec.overview(amikit)
+    assert "problem" not in text
+    assert "Emu68-pistorm32lite, Emu68 1.0.4, for PiStorm32-lite" in text
+    assert "Emu68-pistorm, Emu68 1.0.4, for PiStorm with CPLD" in text
+    ec.change_kickstart(amikit, pc, "kick2.rom", rom(47, 115), confirm=True)
+    assert amikit.read("config.txt").decode().count("initramfs kick2.rom") == 2
+    assert "#initramfs firmware.bin.gz,kick.rom" in amikit.read("config.txt").decode()
+
+
+def test_an_update_on_a_card_with_one_kernel_per_board_writes_only_its_board(amikit, pc):
+    before = snapshot(amikit)
+    new = {"Emu68-pistorm32lite": kernel("1.0.7", MODULES_107), "start4.elf": b"new start4",
+           "config.txt": b"kernel=Emu68-pistorm32lite\n"}
+    text = ec.update(amikit, new, pc, videocore=(1, 2), running="1.0.4", confirm=True)
+    assert "Stop" not in text, text
+    assert amikit.read("Emu68-pistorm32lite") == new["Emu68-pistorm32lite"]
+    assert amikit.read("start4.elf") == b"new start4"
+    for untouched in ("config.txt", "Emu68-pistorm", "kick.rom", "cmdline.txt"):
+        assert amikit.read(untouched) == before[untouched]
+    dry = ec.update(amikit, {"Emu68-pistorm": kernel("1.0.7", MODULES_107)}, pc, videocore=None)
+    assert "Emu68-pistorm32lite for PiStorm32-lite or PiStorm16 stays at Emu68 1.0.7" in dry
+
+
+def test_several_kernels_without_board_filters_still_stop(card):
+    card.write("config.txt", b"kernel=Emu68-pistorm32lite\n[pi4]\nkernel=Emu68-pistorm\ninitramfs kick.rom\n")
+    card.write("Emu68-pistorm", kernel("1.0.4", MODULES_107))
+    assert "several kernels" in ec.overview(card)

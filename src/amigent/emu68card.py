@@ -317,8 +317,26 @@ def initramfs_files(value: str) -> list[str]:
     return [p for p in value.split()[0].split(",") if p] if value.split() else []
 
 
-def replace_config(text: str, key: str, new: str) -> str:
-    """Only the value of the key line (kernel=..., or the ROM of initramfs); the rest stays byte for byte."""
+def board_switch(text: str) -> bool:
+    """config.txt picks the kernel by the board, as AmiKit's does: every kernel= line sits
+    under a [gpio...] filter ([gpio24=0] PiStorm32-lite, [gpio24=1] CPLD PiStorm)."""
+    section, kernels = "", 0
+    for line in text.splitlines():
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            continue
+        if bare.startswith("["):
+            section = bare.lower()
+        elif "=" in bare and bare.split("=", 1)[0].strip().lower() == "kernel":
+            if not section.startswith("[gpio"):
+                return False
+            kernels += 1
+    return kernels > 1
+
+
+def replace_config(text: str, key: str, new: str, old: str | None = None, every: bool = False) -> str:
+    """Only the value of the key line (kernel=..., or the ROM of initramfs); the rest stays byte for byte.
+    old: only the kernel= line with that value; every: all initramfs lines (they name the same ROM)."""
     out, hits = [], 0
     for line in text.splitlines(keepends=True):
         body = line.rstrip("\r\n")
@@ -332,12 +350,13 @@ def replace_config(text: str, key: str, new: str) -> str:
                 indent = body[:len(body) - len(body.lstrip())]
                 body = indent + " ".join([words[0], ",".join(files)] + words[2:])
                 hits += 1
-            elif key != "initramfs" and "=" in bare and bare.split("=", 1)[0].strip().lower() == key:
+            elif (key != "initramfs" and "=" in bare and bare.split("=", 1)[0].strip().lower() == key
+                  and (old is None or bare.split("=", 1)[1].strip().lower() == old.lower())):
                 indent = body[:len(body) - len(body.lstrip())]
                 body = f"{indent}{bare.split('=', 1)[0].strip()}={new}"
                 hits += 1
         out.append(body + ending)
-    if hits != 1:
+    if hits != 1 and not (every and hits > 1):
         raise CardError(f"config.txt has {hits} {key} lines; change it by hand" if hits else
                         f"config.txt has no {key} line")
     return "".join(out)
@@ -371,6 +390,8 @@ class Boot:
     cmdline: str = ""
     kernel: str = ""
     version: str | None = None
+    kernels: dict[str, str | None] = field(default_factory=dict)  # several, when the board picks one
+    roms: int = 1  # initramfs lines, all naming the same files
     variant: str = "unknown"
     rom: str = ""
     firmware: list[str] = field(default_factory=list)  # FPGA files before the ROM: shown, never written
@@ -387,11 +408,18 @@ def read_boot(card, files: list[tuple[str, int]] | None = None, kernel_bytes: bo
     except CardError:
         boot.problems.append("config.txt is missing: this is not an Emu68 boot partition")
         return boot
-    kernels = config_lines(boot.config, "kernel")
-    if len(set(k.lower() for k in kernels)) > 1:
+    kernels = list(dict.fromkeys(config_lines(boot.config, "kernel")))
+    several = len({k.lower() for k in kernels}) > 1
+    if several and not board_switch(boot.config):
         boot.problems.append(f"config.txt names several kernels ({', '.join(kernels)}), by Pi model; "
-                             "Amigent changes only cards with one")
+                             "Amigent changes only cards with one, or with one per board")
     boot.kernel = kernels[0] if kernels else ""
+    if several and kernel_bytes:
+        for k in kernels[1:]:
+            if not _has(card, k):
+                boot.problems.append(f"the kernel {k} named in config.txt is not on the card")
+            else:
+                boot.kernels[k] = _about(card, k, kernel_version)
     if not boot.kernel:
         boot.problems.append("config.txt has no kernel= line")
     elif not _has(card, boot.kernel):
@@ -400,10 +428,14 @@ def read_boot(card, files: list[tuple[str, int]] | None = None, kernel_bytes: bo
         boot.version = _about(card, boot.kernel, kernel_version)
         if not boot.version:
             boot.problems.append(f"{boot.kernel} carries no Emu68 version string")
+    if several and kernel_bytes and boot.kernel:
+        boot.kernels = {boot.kernel: boot.version, **boot.kernels}
     boot.variant = variant(boot.kernel, boot.version) if boot.kernel else "unknown"
     rams = config_lines(boot.config, "initramfs")
-    if len(rams) > 1:
-        boot.problems.append("config.txt has several initramfs lines; Amigent changes only cards with one")
+    boot.roms = len(rams)
+    if len({r.lower() for r in rams}) > 1:
+        boot.problems.append("config.txt has several different initramfs lines; Amigent changes only "
+                             "cards where they name the same files")
     if rams:
         names = initramfs_files(rams[0])
         boot.rom, boot.firmware = names[-1], names[:-1]
@@ -1042,7 +1074,7 @@ def change_kickstart(card, pc_root: Path, name: str, data: bytes | None = None,
         writes[name] = data
     fixes = any(n == "checksum_rom" for n, _ in parse_cmdline(boot.cmdline))
     what, notes = check_kickstart(data, fix_checksum=fixes)
-    config = replace_config(boot.config, "initramfs", name)
+    config = replace_config(boot.config, "initramfs", name, every=True)
     writes["config.txt"] = config.encode("latin-1")
     if boot.firmware:
         notes.append(f"the FPGA file {', '.join(boot.firmware)} before the ROM stays as it is")
@@ -1066,7 +1098,11 @@ def overview(card, check: bool = False, write_test: bool = False, log=None) -> s
     files = card.files()
     boot = read_boot(card, files)
     out = [f"Emu68 boot partition {card.label}"]
-    if boot.kernel:
+    if len(boot.kernels) > 1:
+        out.append("  kernels, config.txt picks one by the board ([gpio...] sections):")
+        for k, v in boot.kernels.items():
+            out.append(f"    {k}, Emu68 {v or 'version unknown'}, for {VARIANT_TEXT[variant(k, v)]}")
+    elif boot.kernel:
         out.append(f"  kernel: {boot.kernel}, Emu68 {boot.version or 'version unknown'}, for "
                    f"{VARIANT_TEXT[boot.variant]}")
     if boot.rom and _has(card, boot.rom):
@@ -1198,7 +1234,7 @@ class UpdatePlan:
 def plan_update(card, archive: dict[str, bytes], boot: Boot, videocore: tuple | None,
                 running: str | None = None, files: list | None = None) -> UpdatePlan:
     problems, notes, lines = [], [], []
-    current = running or boot.version
+    on_board = boot.kernels or ({boot.kernel: boot.version} if boot.kernel else {})
     if boot.problems:
         problems += boot.problems
     kernels = {n: d for n, d in archive.items() if "/" not in n and KERNEL.fullmatch(n)}
@@ -1206,11 +1242,19 @@ def plan_update(card, archive: dict[str, bytes], boot: Boot, videocore: tuple | 
     new_version = next((v for v in versions.values() if v), None)
     if not kernels or not new_version:
         problems.append("the archive holds no Emu68 kernel with a version")
-    match = [n for n in kernels if variant(n, versions[n]) == boot.variant]
+    boards = {variant(k, v): k for k, v in reversed(list(on_board.items()))}
+    match = [n for n in kernels if variant(n, versions[n]) in boards]
     if kernels and not match:
+        boots = " or ".join(VARIANT_TEXT[b] for b in boards) or VARIANT_TEXT[boot.variant]
         problems.append(f"the archive is for {', '.join(VARIANT_TEXT[variant(n, versions[n])] for n in kernels)}; "
-                        f"this card boots {VARIANT_TEXT[boot.variant]}")
+                        f"this card boots {boots}")
     kernel = match[0] if match else ""
+    old = boards.get(variant(kernel, versions[kernel])) if kernel else boot.kernel
+    current = running or on_board.get(old, boot.version)
+    for k, v in on_board.items():
+        if old and k.lower() != old.lower():
+            notes.append(f"{k} for {VARIANT_TEXT[variant(k, v)]} stays at Emu68 {v or '?'}; "
+                         "the update is for the other board")
     if new_version and current and version_tuple(new_version) == version_tuple(current):
         problems.append(f"Emu68 {current} is on the card already")
     elif new_version and current and version_tuple(new_version) < version_tuple(current):
@@ -1239,10 +1283,13 @@ def plan_update(card, archive: dict[str, bytes], boot: Boot, videocore: tuple | 
             writes[target] = data
         else:
             skipped.append(name)
-    if kernel and boot.kernel and kernel.lower() != boot.kernel.lower():
+    if kernel and old and kernel.lower() != old.lower():
         try:
-            writes["config.txt"] = replace_config(boot.config, "kernel", kernel).encode("latin-1")
-            lines.append(f"config.txt: kernel={boot.kernel} -> kernel={kernel} (only this line)")
+            if len(on_board) > 1 and kernel.lower() in {k.lower() for k in on_board}:
+                raise CardError(f"the new kernel's name {kernel} is the other board's kernel on this "
+                                "card; change config.txt by hand")
+            writes["config.txt"] = replace_config(boot.config, "kernel", kernel, old=old).encode("latin-1")
+            lines.append(f"config.txt: kernel={old} -> kernel={kernel} (only this line)")
         except CardError as e:
             problems.append(str(e))
     if skipped:

@@ -113,7 +113,7 @@ Until that design exists and is authorised: **do not propose a positive-path D3 
 
 ## 9. Documentation commit SHA
 
-Recorded on `validation/apollo-v4-evidence-prep` when this review is committed (see git log for `APOLLO_V4_STAGE4_D3_POKE_SAFETY_REVIEW.md`).
+`e6820074b01d85f943ba9de7e955dc386c17a31d` on `validation/apollo-v4-evidence-prep`
 
 ## 10. Production / main / binaries
 

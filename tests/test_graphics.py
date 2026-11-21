@@ -227,3 +227,8 @@ def test_the_screen_loop_takes_smaller_pieces_on_a_slow_bus():
     assert planner.piece_tiles(False, True) == screenfeed.SLOW_BUS_PIECE
     planner.rate = 1e9
     assert planner.piece_tiles(True, False) == screenfeed.SLOW_BUS_PIECE
+
+
+def test_amikits_emu68_vc4_card_is_the_pistorm_videocore():
+    from amigent.graphics import CARDS
+    assert CARDS["emu68-vc4.card"][0] == "PiStorm (Raspberry Pi VideoCore)"

@@ -74,6 +74,7 @@ ZORRO_BOARDS = {
 # "local" is read at CPU speed; "Zorro" ones depend on the slot.
 CARDS = {
     "videocore.card": ("PiStorm (Raspberry Pi VideoCore)", "local"),
+    "emu68-vc4.card": ("PiStorm (Raspberry Pi VideoCore)", "local"),  # the name AmiKit ships
     "uaegfx.card": ("UAE graphics card (emulator)", "local"),
     "zz9000.card": ("ZZ9000", "Zorro"),
     "picassoiv.card": ("Picasso IV", "Zorro"),

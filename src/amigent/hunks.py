@@ -18,6 +18,7 @@ HUNK_UNIT, HUNK_NAME, HUNK_CODE, HUNK_DATA, HUNK_BSS = 0x3E7, 0x3E8, 0x3E9, 0x3E
 HUNK_RELOC32, HUNK_RELOC16, HUNK_RELOC8, HUNK_EXT, HUNK_SYMBOL = 0x3EC, 0x3ED, 0x3EE, 0x3EF, 0x3F0
 HUNK_DEBUG, HUNK_END, HUNK_HEADER = 0x3F1, 0x3F2, 0x3F3
 HUNK_DREL32, HUNK_DREL16, HUNK_DREL8, HUNK_RELOC32SHORT = 0x3F7, 0x3F8, 0x3F9, 0x3FC
+HUNK_PPC_CODE = 0x4E9  # PowerPC code in a WarpOS program (EHF, extended hunk format)
 
 # FPU operations (cpGEN opmode, the low 7 bits of the command word)
 OPS = {
@@ -68,8 +69,11 @@ class NotAProgram(ValueError):
     pass
 
 
-def code_hunks(data: bytes) -> list[tuple[int, bytes]]:
-    """(hunk number, bytes) of each code hunk of a loadable hunk file."""
+def code_hunks(data: bytes, ppc: list | None = None) -> list[tuple[int, bytes]]:
+    """(hunk number, bytes) of each 68k code hunk of a loadable hunk file.
+
+    ppc, when given, collects the numbers of PowerPC code hunks (WarpOS programs).
+    """
     pos = 0
 
     def long() -> int:
@@ -94,7 +98,7 @@ def code_hunks(data: bytes) -> list[tuple[int, bytes]]:
     out, number = [], first
     while pos < len(data):
         kind = long() & 0x3FFFFFFF
-        if kind in (HUNK_CODE, HUNK_DATA):
+        if kind in (HUNK_CODE, HUNK_DATA, HUNK_PPC_CODE):
             size = long()
             if size & 0xC0000000 == 0xC0000000:
                 long()
@@ -103,6 +107,8 @@ def code_hunks(data: bytes) -> list[tuple[int, bytes]]:
                 raise NotAProgram("a hunk is longer than the file")
             if kind == HUNK_CODE:
                 out.append((number, data[pos:pos + size]))
+            elif kind == HUNK_PPC_CODE and ppc is not None:
+                ppc.append(number)
             pos += size
         elif kind == HUNK_BSS:
             if long() & 0xC0000000 == 0xC0000000:
@@ -176,6 +182,13 @@ def fpu_instruction(code: bytes, at: int) -> str:
             return "fnop"
         return "fbcc" if word & 0x3F < 0x20 and word & 0x3F not in (0, 0x10) else ""
     return ""  # FSAVE/FRESTORE: task switchers, not programs
+
+
+def ppc_hunks(data: bytes) -> int:
+    """How many PowerPC code hunks a program has: more than 0 for a WarpOS program."""
+    found: list[int] = []
+    code_hunks(data, found)
+    return len(found)
 
 
 def fpu_use(data: bytes, most: int = 4) -> FpuUse:

@@ -260,14 +260,15 @@ starts the old one again.
 | `amiga_amigus_status`, `amiga_audio_levels` | an AmiGUS card: which driver holds PCM, wavetable and codec, without reserving anything; its left and right output level over a few seconds |
 | `amiga_drag_measure` | drag a window by its title bar and time every step: median, p95, max, steps it did not follow |
 | `amiga_quiet_monitor` | amigent-monitor stops drawing for a while, so it does not spoil a measurement |
-| `amiga_software_failure` | a Software Failure requester: its text, the guru in words (for a line-F guru whether the FPU or its library is missing), and Suspend (never Reboot) |
+| `amiga_software_failure` | a Software Failure requester: its text, the guru in words (for a line-F guru whether the FPU or its library is missing), and Suspend (never Reboot); a WarpOS or PowerUP crash window in words, and closing it |
+| `amiga_ppc` | a PowerPC board, read only: the card, the 68k CPU beside it, WarpOS or PowerUP with versions, the flash ROM, 68040/68060.library, patches at boot, known conflicts; the PowerPC tasks with their load; the crash window |
 | `amiga_trace` | tracepoints: the registers of a program when it gets to an address, without stopping it |
 | `amiga_memory_write` | patch RAM, only when amigentd runs with `ALLOWPOKE` |
 | `amiga_hrtmon` | load HRTmon (Aminet dev/debug/HRTmon) for the user at the Amiga; entering it halts the system, so the agent never does |
 | `amiga_gurus` | guru codes in words, the last one and those MCP logged; a line-F guru against this Amiga's FPU |
 | `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
 | `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |
-| `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has |
+| `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has, `target="warpos"` a PowerPC program for WarpOS |
 | `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
 | `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
@@ -381,6 +382,28 @@ Before `amiga_run` starts a program on an Amiga without an FPU, or on a
 FPU instructions; on an Amiga without an FPU it does not start one that has
 them (`check_fpu=False` runs it anyway). This is a heuristic: a program may
 test for an FPU before using it.
+
+PowerPC boards: `amiga_ppc` reads a CyberStorm PPC or Blizzard PPC from
+expansion.library's board list (phase5, manufacturer 8512), tells which kernel
+is in memory (WarpOS `powerpc.library` or PowerUP `ppc.library`, and the
+bridges between them: ppclibemu, `powerpc.library` V7), the flash ROM's version
+from its SCSI driver (`cybppc.device`, `blizzppc.device`), the 68040/68060
+libraries, PPC patches in the startup scripts (BPPCFix, BK_RemPPCLib,
+InitPPCLib, BPPCFixFix, CSPPC233Fix) and combinations known not to work, such
+as both kernels at once. It only reads: nothing is opened or loaded that was
+not active, and the flash ROM is never written. With WarpOS running it also
+runs WarpOS's own tools: `showinfo` for the PowerPC and its clock, `stat` for
+the PowerPC tasks and their load, which `amiga_tasks` then lists below the 68k
+tasks. They are found along the Shell's path, or in the folder that
+`AMIGENT_WARPOS_TOOLS` or `amiga_ppc(tools=...)` names. A WarpOS crash window
+(`ENV:PowerPC/crashfile`) is read by `amiga_software_failure` and `amiga_run`:
+the exception in words, the task, SRR0, LR and DAR named like a 68k crash
+address, and the stack pointer for Aminet's checkstack. `amiga_build(folder,
+target="warpos")` builds with vbcc's `+warpos` configuration; vbcc needs its
+ppc-warpos target (Aminet `dev/c/vbcc_target_ppc-warpos`) on the Amiga.
+PowerUP programs are not built yet. None of this has been tried on a real
+PowerPC board; the board numbers, tool output and crash text follow the
+documentation and WarpOS 4.0, and reports from owners are welcome.
 
 ## Remote desktop
 

@@ -166,7 +166,7 @@ def test_build_script_has_an_fpu_option():
     assert script.startswith(".KEY CPU/K,DEVPACK/K,FPU/K") and ".DEF FPU NONE" in script
     assert "-fpu=68881 -o calc main.c -lm881 -lamiga" in script
     assert "-fpu=68040 -o calc main.c -lm040 -lamiga" in script
-    assert script.count('Echo "build failed"') == 3
+    assert script.count('Echo "build failed"') == 4  # three 68k builds and the WarpOS one
 
 
 @pytest.fixture

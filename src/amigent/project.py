@@ -70,14 +70,18 @@ int main(void)
 }}
 '''
 
-BUILD = r'''.KEY CPU/K,DEVPACK/K,FPU/K
+BUILD = r'''.KEY CPU/K,DEVPACK/K,FPU/K,TARGET/K
 .DEF CPU {cpu}
 .DEF DEVPACK {devpack}
 .DEF FPU NONE
+.DEF TARGET 68K
 ; Builds {name} with vbcc. DEVPACK is the folder with vbcc/ and SDK/NDK 3.9/.
 ; FPU 68881 makes FPU code with m881.lib (68020 or better with a 68881/68882 or a
 ; 68040/060 with its library), FPU 68040 with m040.lib (68040/060 FPU only).
 ; Without FPU no FPU instruction is made and the program runs on every Amiga.
+; TARGET WARPOS makes a PowerPC program for WarpOS with vbcc's ppc-warpos target
+; (Aminet dev/c/vbcc_target_ppc-warpos); it runs only on a PowerPC board with WarpOS.
+; A program that calls powerpc.library itself also needs the WarpOS includes in vincludewos:.
 FailAt 21
 Stack 65536
 If NOT EXISTS VBCC:
@@ -87,6 +91,26 @@ Assign vincludeos3: VBCC:targets/m68k-amigaos/include
 Assign vincludeos3: "<DEVPACK>/SDK/NDK 3.9/Include/include_h" ADD
 Assign vlibos3: VBCC:targets/m68k-amigaos/lib
 Path VBCC:bin ADD
+If "<TARGET>" EQ "WARPOS"
+  If NOT EXISTS VBCC:config/warpos
+    Echo "build failed: vbcc has no WarpOS target here (VBCC:config/warpos); install vbcc_target_ppc-warpos"
+    Quit 10
+  EndIf
+  If NOT EXISTS VBCC:bin/vbccppc
+    Echo "build failed: vbcc's PowerPC compiler VBCC:bin/vbccppc is missing"
+    Quit 10
+  EndIf
+  Assign vincludewos: VBCC:targets/ppc-warpos/include
+  Assign vincludewos: "<DEVPACK>/SDK/NDK 3.9/Include/include_h" ADD
+  Assign vlibwos: VBCC:targets/ppc-warpos/lib
+  VBCC:bin/vc +VBCC:config/warpos -c99 -O1 -o {name} main.c -lamiga
+  If WARN
+    Echo "build failed"
+    Quit 10
+  EndIf
+  Echo "built {name} for WarpOS"
+  Quit 0
+EndIf
 If "<FPU>" EQ "NONE"
   VBCC:bin/vc +VBCC:config/aos68k -c99 -O1 -g -cpu=<CPU> -o {name} main.c -lamiga
   If WARN
@@ -114,7 +138,7 @@ Echo "built {name}"
 README = '''{name}
 
 main.c   the program
-build    Execute build [CPU 68000] [DEVPACK path] [FPU 68881|68040]: compiles with vbcc
+build    Execute build [CPU 68000] [DEVPACK path] [FPU 68881|68040] [TARGET WARPOS]: compiles with vbcc
 '''
 
 

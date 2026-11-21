@@ -68,6 +68,8 @@ INSTRUCTIONS = """Amigent operates registered Amigas.
   amiga_locks for who holds the layer locks, amiga_cpu for the load per task,
   amiga_drag_measure for how a window follows the mouse. A "Software Failure"
   requester: amiga_software_failure, never click Reboot.
+- A PowerPC board (CyberStorm PPC, Blizzard PPC): amiga_ppc for the card,
+  kernel and ROM; amiga_build(target="warpos") for WarpOS programs.
 - amiga_drag says which window moved; if none or another did, its title bar
   was covered. amiga_start(..., unique=True) for programs that run only once.
 - Before using a program again, amiga_notes(topic); afterwards amiga_note what
@@ -974,8 +976,40 @@ def _running_as(command: str) -> list:
 def amiga_tasks(name: str = "") -> str:
     """All tasks and processes: address, priority, ready or waiting, stack used of
     its size (with a warning near full), and the program. name filters.
-    Needs amigentd 1.4.0."""
-    return memory.task_table(_tasks(), name)
+    Needs amigentd 1.4.0. With WarpOS running, the PowerPC tasks follow
+    with their CPU load, as WarpOS's tool stat tells it."""
+    table = memory.task_table(_tasks(), name)
+    extra = _ppc_task_section(name)
+    return table + ("\n\n" + extra if extra else "")
+
+
+WARPOS_TOOLS_ENV = "AMIGENT_WARPOS_TOOLS"  # a folder on the Amiga with showinfo and stat
+
+
+def _run_rc(command: str) -> tuple[int, str]:
+    result = _with_ctl(lambda: _session().ctl.exec(command))
+    return result.rc, result.output
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        return _with_ctl(lambda: _session().ctl.read_file(path)).decode("iso-8859-1")
+    except AmigaError as e:
+        if e.code is None:
+            raise
+        return None
+
+
+def _ppc_task_section(name: str = "", folder: str = "") -> str:
+    """PowerPC tasks with their load, only where WarpOS is in LIBS: and in memory; else ''."""
+    from . import ppc
+    try:
+        if "WarpOS" not in _system_facts().get("ppc", ""):
+            return ""
+        kern = ppc.kernel(_loaded().libraries)
+        return ppc.ppc_tasks(_run_rc, kern, folder or os.environ.get(WARPOS_TOOLS_ENV, ""), name)
+    except (AmigaError, AttributeError):
+        return ""
 
 
 @mcp.tool()
@@ -1103,6 +1137,82 @@ def amiga_amigus_status() -> str:
     ctl = _session().ctl
     sysbase = int.from_bytes(_with_ctl(lambda: ctl.peek(4, 4)), "big")
     return amigus.status(loaded, tasks, lambda a, n: _with_ctl(lambda: ctl.peek(a, n)), sysbase)
+
+
+@mcp.tool()
+def amiga_ppc(action: str = "status", tools: str = "") -> str:
+    """A PowerPC board (CyberStorm PPC, Blizzard PPC), read only.
+
+    action status: the card (from expansion.library), the 68k CPU beside it,
+    which kernel runs (WarpOS powerpc.library or PowerUP ppc.library, with
+    versions; ppclibemu and powerpc.library V7 told apart), the flash ROM's
+    version, 68040/68060.library, PPC patches in the startup scripts, and
+    combinations known not to work. With WarpOS running also the PowerPC
+    model and clock from WarpOS's showinfo.
+    action tasks: the PowerPC tasks with their CPU load (WarpOS's stat).
+    action crash: the WarpOS or PowerUP crash window in words (as
+    amiga_software_failure does it); 'dismiss' closes that window.
+    tools: the folder of WarpOS's tools on the Amiga, if they are not along
+    the path (or set AMIGENT_WARPOS_TOOLS). Nothing that was not active is
+    opened or loaded, and the flash ROM is never written. Not tried on a real
+    board yet. Needs amigentd 1.4.0.
+    """
+    from . import ppc
+    folder = tools or os.environ.get(WARPOS_TOOLS_ENV, "")
+    if action in ("crash", "dismiss"):
+        return _ppc_crash(_screen_text(), "show" if action == "crash" else "dismiss") or \
+            "no PowerPC crash window on the front screen (amiga_screen_text shows what is there)"
+    if action == "tasks":
+        kern = ppc.kernel(_loaded().libraries)
+        if not ppc.warpos_running(kern):
+            return ("WarpOS is not in memory, so there are no PowerPC tasks it could tell"
+                    + (" (PowerUP runs; Amigent reads no PowerUP tool yet)" if kern.active == "PowerUP" else ""))
+        return ppc.ppc_tasks(_run_rc, kern, folder)
+    if action != "status":
+        raise AmigaError("action: status, tasks, crash or dismiss")
+    facts = _system_facts()
+    if system.native_ppc(facts):
+        return f"{facts.get('os')} runs on the PowerPC itself; amiga_ppc is for 68k Amigas with a PowerPC board"
+    loaded = _loaded()
+    ctl = _session().ctl
+    return ppc.status(loaded, lambda a, n: _with_ctl(lambda: ctl.peek(a, n)), _run_rc, _read_text,
+                      facts.get("processor", "") or facts.get("cpu", ""), facts.get("ppc", ""), folder)
+
+
+def _ppc_crash(st, action: str = "show") -> str:
+    """A WarpOS or PowerUP crash window in words, and with dismiss its window closed; '' if none."""
+    from . import ppc
+    wins = [w for w in st.windows if not w.monitor
+            and ppc.is_crash_window(w.title, "\n".join(r.text for r in w.rows))]
+    if not wins:
+        return ""
+    w = wins[0]
+    text = "\n".join(r.text for r in w.rows)
+    crash = ppc.parse_crash(w.title, text)
+    try:
+        namer = _namer().name
+    except (AmigaError, AttributeError):
+        namer = None
+    out = [f"PowerPC crash window {w.title!r} {w.id}:", text] + ppc.describe_crash(crash, namer)
+    if action == "show":
+        return "\n".join(out)
+    tree = _with_screen(_session().screen.ui_tree)
+    mine = [g for g in tree if g["kind"] == "gadget" and g["window"] == w.id]
+    close = next((g for g in mine if g["type"] == "sys" and g["label"] == "close"), None)
+    if close:
+        x, y = _centre(close)
+        _with_screen(lambda: _session().screen.click(x, y, "left", False))
+        return "\n".join(out + ["closed the crash window; the crashed PPC task stays as it is"])
+    buttons = [g for g in mine if g["type"] != "sys"]
+    _labels_from_text(buttons)
+    for g in buttons:
+        label = g["label"].lower().strip("_ ")
+        if any(b in label for b in SAFE_BUTTONS) and not any(b in label for b in REBOOT_BUTTONS):
+            x, y = _centre(g)
+            _with_screen(lambda: _session().screen.click(x, y, "left", False))
+            return "\n".join(out + [f"clicked {g['label']!r}; the Amiga runs on"])
+    raise AmigaError("found no close gadget or Suspend button on the PowerPC crash window; not "
+                     "clicking anything else:\n" + "\n".join(out))
 
 
 LEVELS_HELPER = "T:amigent-levels"
@@ -1338,7 +1448,8 @@ def amiga_create_project(name: str, folder: str = "", kind: str = "shell", cpu: 
                          devpack: str = "") -> str:
     """Start a new C program on the Amiga: main.c (kind shell or window), a build
     script for vbcc and a ReadMe, in folder/name (default: Amigent's folder,
-    projects/). Then amiga_build, then amiga_run. devpack is the folder with
+    projects/). Then amiga_build (target="warpos" for a PowerPC program
+    under WarpOS), then amiga_run. devpack is the folder with
     vbcc/ and SDK/NDK 3.9/ (found by itself in SYS:, Work: or Stuff:, or set as
     "devpack" in amigas.json)."""
     from . import project
@@ -1392,8 +1503,11 @@ def _build_fpu(fpu: str, cpu: str) -> tuple[str, str, str]:
     return want, cpu, note
 
 
+BUILD_TARGETS = {"": "", "68k": "", "m68k": "", "aos68k": "", "warpos": "WARPOS", "wos": "WARPOS"}
+
+
 @mcp.tool()
-def amiga_build(folder: str, cpu: str = "", devpack: str = "", fpu: str = "") -> str:
+def amiga_build(folder: str, cpu: str = "", devpack: str = "", fpu: str = "", target: str = "") -> str:
     """Compile a project on the Amiga by running its build script (as a job), and
     report the compiler's messages and whether it worked.
 
@@ -1402,20 +1516,41 @@ def amiga_build(folder: str, cpu: str = "", devpack: str = "", fpu: str = "") ->
     (m881.lib, 68881/68882 or a 68040/060 with its library) or '68040'
     (m040.lib, a 68040/060 FPU). Refused on an Amiga without an FPU. Projects
     made before Amigent 1.5.0 need a new build script for it (amiga_create_project).
+
+    target: '' builds 68k code; 'warpos' a PowerPC program for WarpOS with
+    vbcc's ppc-warpos target (+warpos), which must be installed in vbcc on the
+    Amiga; the script says so if it is not. Not tried on a real PowerPC board yet.
     """
     note = ""
-    if fpu:
+    want = target.strip().lower()
+    if want not in BUILD_TARGETS:
+        raise AmigaError("target: '' (68k) or 'warpos'")
+    target = BUILD_TARGETS[want]
+    if target and (fpu or cpu):
+        raise AmigaError("fpu and cpu are for 68k builds; a WarpOS build is PowerPC code, which "
+                         "always uses the PowerPC's own FPU")
+    if fpu or target:
         try:
             script = _with_ctl(lambda: _session().ctl.read_file(_join(folder, "build"))).decode("iso-8859-1")
         except AmigaError as e:
             raise AmigaError(f"no build script in {folder}: {e}") from None
-        if "FPU/K" not in script.split("\n", 1)[0]:
-            raise AmigaError(f"{_join(folder, 'build')} has no FPU option yet; a project from "
+        option, what = ("TARGET/K", "WarpOS target") if target else ("FPU/K", "FPU option")
+        if option not in script.split("\n", 1)[0]:
+            raise AmigaError(f"{_join(folder, 'build')} has no {what} yet; a project from "
                              "amiga_create_project of Amigent 1.5.0 or newer has it (copy its "
                              "build script over, keeping main.c)")
+    if fpu:
         fpu, cpu, note = _build_fpu(fpu, cpu)
+    if target:
+        note = "PowerPC code for WarpOS (vbcc +warpos)"
+        try:
+            on_disk = _system_facts().get("ppc", "")
+        except AmigaError:
+            on_disk = None
+        if on_disk is not None and "WarpOS" not in on_disk:
+            note += "; this Amiga has no powerpc.library in LIBS:, so it cannot run it"
     args = ((f" CPU {cpu}" if cpu else "") + (f' DEVPACK "{devpack}"' if devpack else "")
-            + (f" FPU {fpu}" if fpu else ""))
+            + (f" FPU {fpu}" if fpu else "") + (f" TARGET {target}" if target else ""))
     out = amiga_job(f'CD "{folder}"\nExecute build{args}', wait=900)
     ok = "built " in out and "build failed" not in out
     return ("built" if ok else "build failed") + (f" with {note}" if note else "") + "\n" + out
@@ -2168,7 +2303,8 @@ def amiga_software_failure(action: str = "show") -> str:
     action dismiss: click the button that leaves the Amiga running (Suspend,
     Entfernen, Ignore...), never Reboot. Registers of the crashed task are not
     in the requester; amiga_task(name, stack=8) reads where it stopped while
-    it is suspended.
+    it is suspended. Without one, a PowerPC crash window (WarpOS, PowerUP)
+    is read instead: exception, task, registers, named; dismiss closes it.
     """
     from . import alerts
 
@@ -2177,7 +2313,10 @@ def amiga_software_failure(action: str = "show") -> str:
                                          for k in ("software failure", "software-fehler", "task held",
                                                    "softwarefehler", "task interferance", "task interference"))]
     if not wins:
-        return "no Software Failure requester on the front screen (amiga_screen_text shows what is there)"
+        if action not in ("show", "dismiss"):
+            raise AmigaError("action: show or dismiss")
+        found = _ppc_crash(st, action)  # a WarpOS or PowerUP crash window instead
+        return found or "no Software Failure requester on the front screen (amiga_screen_text shows what is there)"
     w = wins[0]
     text = "\n".join(r.text for r in w.rows)
     out = [f"requester {w.title!r} {w.id}:", text]
@@ -2929,7 +3068,8 @@ def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False
 
 RUN_DIR = "RAM:amigent-run"
 CRASH_TITLES = ("software failure", "softwarefehler", "program failed", "programm fehlgeschlagen",
-                "guru", "systemanforderung", "system request")
+                "guru", "systemanforderung", "system request", "powerpc exception", "ppc exception",
+                "ppc crash")
 
 
 FPU_CHECK_MAX = 1 << 20  # bytes read from the Amiga for the FPU check; plipbox does ~17 KB/s
@@ -2985,7 +3125,8 @@ def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "",
     program is a path on this PC (uploaded to RAM:amigent-run first, only when
     it changed) or on the Amiga. Reports return code and output, the debug
     output it produced (kprintf, Enforcer hits), requesters that came up
-    meanwhile (such as Software Failure) and, if the Amiga dropped off, what
+    meanwhile (such as Software Failure; a WarpOS crash window is read and
+    explained like a guru) and, if the Amiga dropped off, what
     amiga_status finds after it came back: a restart or a guru code.
 
     check_fpu: on an Amiga without an FPU, a program whose code holds FPU
@@ -3011,6 +3152,9 @@ def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "",
         seen_before = None
     windows_before = _window_titles()
     report = [fpu_note] if fpu_note else []
+    ppc_note = _ppc_program_note(local)
+    if ppc_note:
+        report.append(ppc_note)
     try:
         result = _with_ctl(lambda: _session().ctl.exec(command, cd or None, timeout))
         report.append(f"rc={result.rc}")
@@ -3037,9 +3181,36 @@ def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "",
     if new:
         report.append("new windows: " + ", ".join(repr(t) for t in new))
         if any(any(c in t.lower() for c in CRASH_TITLES) for t in new):
-            report.append("one looks like a crash requester: amiga_screen_text or a screenshot "
-                          "shows it; answer it before running again")
+            crash = ""
+            if any(w in t.lower() for t in new for w in ("powerpc", "ppc")):
+                try:
+                    crash = _ppc_crash(_screen_text())
+                except AmigaError:
+                    crash = ""
+            if crash:
+                report.append(crash + "\namiga_software_failure('dismiss') closes the window")
+            else:
+                report.append("one looks like a crash requester: amiga_screen_text or a screenshot "
+                              "shows it; answer it before running again")
     return "\n".join(report)
+
+
+def _ppc_program_note(local: Path) -> str:
+    """For a WarpOS program from this PC: whether this Amiga has WarpOS to run it."""
+    from . import hunks
+    try:
+        if not local.is_file() or local.stat().st_size > (8 << 20) or not hunks.ppc_hunks(local.read_bytes()):
+            return ""
+    except (OSError, hunks.NotAProgram):
+        return ""
+    try:
+        on_disk = _system_facts().get("ppc", "")
+    except AmigaError:
+        return ""
+    if "WarpOS" in on_disk:
+        return ""
+    return ("note: this is a WarpOS program (PowerPC code), and this Amiga has no powerpc.library "
+            "in LIBS:; it will most likely not start")
 
 
 def _window_titles() -> list[str]:

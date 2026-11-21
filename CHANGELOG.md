@@ -140,6 +140,25 @@ Versions follow [semver](https://semver.org). The number lives in
   warns. The check is a heuristic.
   ([#42](https://github.com/akustikrausch/amigent/issues/42))
 
+### PowerPC boards
+
+- `amiga_ppc` reads a CyberStorm PPC or Blizzard PPC: the card from
+  expansion.library, the 68k CPU beside it, the kernel in memory (WarpOS or
+  PowerUP, with versions, ppclibemu and `powerpc.library` V7 told apart), the
+  flash ROM's version, 68040/68060.library, PPC patches at boot, and
+  combinations known not to work. With WarpOS running, the PowerPC and its
+  clock from WarpOS's `showinfo`. Read only: nothing is loaded that was not
+  active. ([#23](https://github.com/akustikrausch/amigent/issues/23))
+- A WarpOS or PowerUP crash window is read by `amiga_software_failure`,
+  `amiga_ppc("crash")` and `amiga_run`: the exception in words, the task,
+  SRR0 and LR named like a 68k crash address; `dismiss` closes the window.
+  ([#23](https://github.com/akustikrausch/amigent/issues/23))
+- `amiga_build(target="warpos")` builds a PowerPC program with vbcc's WarpOS
+  target; `amiga_tasks` lists the PowerPC tasks with their load (WarpOS's
+  `stat`); `amiga_run` warns when a WarpOS program meets an Amiga without
+  WarpOS. ([#24](https://github.com/akustikrausch/amigent/issues/24))
+- Not tried on a real PowerPC board yet.
+
 ### Building
 
 - A GitHub workflow builds amigentd, amigent-status and amigent-monitor with

@@ -93,9 +93,11 @@ class Run:
                 f"{info.get('running_for', '?')}{', ' + notes if notes else ''}")
 
     def version(self):
-        out = self.s.amiga_exec("Version C:amigentd")
+        # the running amigentd may live elsewhere than C: (an emulator's own folder)
+        where = self.session.ctl.sysinfo().get("self", "") or "C:amigentd"
+        out = self.s.amiga_exec(f'Version "{where}"')
         assert out.startswith("rc=0"), out
-        return f"installed: {out.splitlines()[-1]}"
+        return f"running {where}: {out.splitlines()[-1]}"
 
     def exec(self):
         out = self.s.amiga_exec("Echo \"Grüße aus Amigent\"")
@@ -135,7 +137,8 @@ class Run:
 
     def live_output(self):
         if not self.s._amigentd_path():
-            return "skip: amigentd before 1.4.0 holds a job's output until it ends"
+            return ("skip: amigentd before 1.4.0, or no PIPE: on this Amiga; "
+                    "a job's output then waits until it ends")
         # the Shell hands output on in blocks of a few KB: List SYS:C fills some
         said = self.s.amiga_job("List SYS:C\nWait 5\nEcho omega", wait=1)
         number = int(said.split()[1])

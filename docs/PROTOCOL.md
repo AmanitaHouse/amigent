@@ -786,6 +786,14 @@ Amiga. In SETUP mode the plain port stays open, so `amigent-setup` can deliver
 the certificate; after SETUP_END new plain connections from outside are turned
 away. TLS 1.2 and 1.3, as AmiSSL offers them.
 
+So with `TLSONLY` a broken AmiSSL or a broken certificate locks every other
+computer out until it is mended at the Amiga itself. The hello still tells which:
+without flag `2` AmiSSL does not open; with it, the certificate is missing or
+doesn't load. To get back in: install AmiSSL again, or delete
+`S:amigent-tls.pem` and run `amigent-repair`, which copies the certificate back
+from the Amigent folder. Or start `amigentd SETUP` at the Amiga and run
+`amigent-setup` again from the PC.
+
 ## arexx
 
 amigentd opens the ARexx port `AMIGENT`; a second copy on another port, while

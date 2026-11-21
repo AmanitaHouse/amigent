@@ -1,4 +1,8 @@
-"""TLSONLY refuses remote plaintext even when the TLS listener did not start."""
+"""TLSONLY refuses remote plaintext even when the TLS listener did not start.
+
+These tests read the source text of accept_pending in amigentd.c and model its
+rule in Python; the C code itself does not run here.
+"""
 
 from pathlib import Path
 

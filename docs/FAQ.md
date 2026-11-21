@@ -78,6 +78,12 @@ That Amiga was set up for TLS only. Copy the files for it from
 `tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
 there again with `amigentd SETUP` running.
 
+**Amigent says AmiSSL does not open on the Amiga.**
+amigentd runs `TLSONLY`, and without AmiSSL it has no encrypted port, so it
+turns every other computer away. At the Amiga, install AmiSSL again and run
+`amigent-repair` from the Amigent folder, or start `amigentd SETUP` and run
+`amigent-setup` again from the PC.
+
 **How do I update?**
 Both halves, the PC and the Amiga. Paste this into your AI agent:
 

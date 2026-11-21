@@ -43,6 +43,22 @@ def wanted(host: str) -> bool:
     return os.environ.get("AMIGENT_TLS", "auto").lower() != "off" and pinned(host).exists()
 
 
+AMISSL_OPEN, PLAIN_CLOSED = 2, 4  # hello flags: AmiSSL works; plain is for localhost only
+PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
+                     "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
+                     "to this one, or run amigent-setup again.")
+NO_TLS_TEXT = ("amigentd runs TLSONLY, but AmiSSL does not open there, so it turns every other "
+               "computer away. Repair it at the Amiga: install AmiSSL again and run amigent-repair "
+               "from the Amigent folder, or start amigentd SETUP there and run amigent-setup again.")
+
+
+def plain_closed(flags: int, encrypted: bool) -> str:
+    """Why a plain connection is about to be closed, from the hello flags; '' if it is not."""
+    if encrypted or not flags & PLAIN_CLOSED:
+        return ""
+    return PLAIN_CLOSED_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
+
+
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     """TLS over sock; the pinned certificate gets in, nobody else."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

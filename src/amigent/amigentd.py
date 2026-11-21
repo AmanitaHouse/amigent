@@ -160,6 +160,8 @@ class Amigentd:
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
             self.protocol, self.flags = struct.unpack(">HH", hello[4:8])
+            if refused := tls.plain_closed(self.flags, hasattr(self._sock, "version")):
+                raise AmigentdError(refused)
             if self.flags & 1:  # bit 0: a key is required, bit 1: TLS on the next port
                 self._authenticate()
             if self.protocol >= 2:

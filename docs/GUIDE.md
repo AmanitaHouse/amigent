@@ -509,8 +509,11 @@ or the close gadget ends it, C clears the log.
   on port 6802, and the PC accepts only the certificate `amigent-setup` made for
   that Amiga. Once that works, `amigent-setup` starts `amigentd` with `TLSONLY`:
   other computers then get in only encrypted (`--allow-plain` keeps the plain
-  port open). Without TLS the connection is unencrypted, and someone who can
-  read your network traffic could read the key too.
+  port open). Should AmiSSL or the certificate on the Amiga break, they don't
+  get in at all until it is mended at the Amiga; see
+  [PROTOCOL.md](PROTOCOL.md#tls) for how. Without TLS the connection is
+  unencrypted, and someone who can read your network traffic could read the key
+  too.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

@@ -205,6 +205,8 @@ class Run:
             return "skip: give --trace with amiga/trace-test built for the Amiga (on a fast CPU with a loop count, e.g. \"RAM:trace-test 15000000\")"
         import re
         said = self.s.amiga_job(self.args.trace, wait=3)
+        assert said.startswith("job "), ("the program ended within 3 s; give a larger loop count "
+                                         f"for this CPU (--trace \"{self.args.trace.split()[0]} 400000000\"): {said}")
         number = int(said.split()[1])
         time.sleep(1)
         at = re.search(r"tick at (?:0x)?([0-9a-fA-F]+)", self.s.amiga_job_output(number)).group(1)

@@ -223,8 +223,11 @@ class Run:
         assert vec.startswith("$00000004"), vec
         said = self.s.amiga_job("Wait 20", wait=1)
         number = int(said.split()[1])
-        time.sleep(1)
-        stack = self.s.amiga_task("Wait", stack=6)
+        for _ in range(8):  # a 68000 may take a few seconds to start the job's task
+            time.sleep(1)
+            stack = self.s.amiga_task("Wait", stack=6)
+            if "waits for" in stack:
+                break
         twice = self.s.amiga_start("Wait 1", unique=True)
         self.s.amiga_break(job=number)
         assert twice.startswith("not started"), twice

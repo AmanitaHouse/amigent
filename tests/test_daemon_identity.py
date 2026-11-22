@@ -256,3 +256,31 @@ def test_each_viewer_keeps_its_own_daemon_file():
     assert a["daemon_family"] == "general" and b["daemon_family"] == "68000"
     one._set_online(False, "")
     assert not _cached(one) and _cached(two)
+
+
+def test_two_viewers_with_different_identities_do_not_cross_contaminate():
+    """Reading or refreshing one Viewer's About facts never touches the other's cache."""
+    one, two = _viewer((BIN / "amigentd").read_bytes()), _viewer((BIN / "amigentd.000").read_bytes())
+    info = {"self": "C:amigentd", "loaded": "1"}
+    first = one._connected_daemon(info, 6)
+    second = two._connected_daemon(info, 6)
+    assert first["daemon_family"] == "general" and second["daemon_family"] == "68000"
+    # both name the same path; each answer still comes from its own cached file
+    assert one._connected_daemon(info, 6) == first
+    assert two._connected_daemon(info, 6) == second
+    assert one.ctl.reads == ["C:amigentd"] and two.ctl.reads == ["C:amigentd"]
+    one.retire()
+    assert not _cached(one) and _cached(two)
+    assert two._connected_daemon(info, 6) == second
+    assert two.ctl.reads == ["C:amigentd"]  # retiring the other Viewer cost it no re-read
+
+
+def test_going_online_alone_keeps_the_cache_but_retire_drops_it():
+    """Models a Viewer that rediscovers the same Amiga (DHCP keep) versus an address edit."""
+    viewer = _viewer((BIN / "amigentd").read_bytes())
+    viewer._connected_daemon({"self": "C:amigentd"}, 6)
+    assert _cached(viewer) and not viewer.online
+    viewer._set_online(True, "")  # reached again: the same Viewer, the same session
+    assert viewer.online is True and _cached(viewer)
+    viewer.retire()  # an address edit retires the Viewer: the next connection starts empty
+    assert not _cached(viewer)

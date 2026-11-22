@@ -33,7 +33,7 @@ from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
-from .daemons import describe_connected
+from .daemons import SPECS, describe_connected
 from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
                      exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
@@ -527,13 +527,30 @@ class Viewer:
             blob, version = self._daemon_bytes, self._daemon_version
         elif path and "\n" not in path and '"' not in path:  # quoted for Version: no spaces split it
             try:
-                blob = self._ctl(lambda: self.ctl.read_file(path))
+                blob = self._daemon_file(path)
                 reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
                 version = reported.output.strip().split("\n", 1)[0]
                 self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version
             except (AmigaError, OSError, AttributeError):
                 blob, version = None, ""
         return describe_connected(protocol, version, blob, info, AMIGA / "bin")
+
+    def _daemon_file(self, path: str) -> bytes:
+        """The named file's bytes, found among the packaged builds by size and CRC on the
+        Amiga, so nothing crosses a slow link; b"" when it is none of them. Only a daemon
+        or a test without those requests sends the file itself."""
+        try:
+            size = int(self._ctl(lambda: self.ctl.stat(path))["size"])
+            crc = self._ctl(lambda: self.ctl.checksum(path, size))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return self._ctl(lambda: self.ctl.read_file(path))
+        for spec in SPECS:
+            packaged = AMIGA / "bin" / spec.name
+            if packaged.is_file() and packaged.stat().st_size == size:
+                data = packaged.read_bytes()
+                if zlib.crc32(data) == crc:
+                    return data
+        return b""
 
     def link(self) -> dict:
         """How the picture travels, for the page's Connection tab: no round trip needed."""

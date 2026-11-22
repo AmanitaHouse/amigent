@@ -284,3 +284,18 @@ def test_going_online_alone_keeps_the_cache_but_retire_drops_it():
     assert viewer.online is True and _cached(viewer)
     viewer.retire()  # an address edit retires the Viewer: the next connection starts empty
     assert not _cached(viewer)
+
+
+def test_the_named_file_is_found_by_size_and_crc_without_sending_it():
+    import zlib
+    classic = (BIN / "amigentd").read_bytes()
+    viewer = _viewer(b"never sent")
+    viewer.ctl.stat = lambda path: {"type": "file", "size": len(classic)}
+    viewer.ctl.checksum = lambda path, size=0: zlib.crc32(classic)
+    got = viewer._connected_daemon({"self": "C:amigentd"}, 6)
+    assert got["daemon_family"] == "general" and viewer.ctl.reads == []
+    other = _viewer(b"never sent")
+    other.ctl.stat = lambda path: {"type": "file", "size": 1234}
+    other.ctl.checksum = lambda path, size=0: 0
+    got = other._connected_daemon({"self": "C:amigentd"}, 6)
+    assert got["daemon_family"] == "" and got["daemon_identity"] == "named file" and other.ctl.reads == []

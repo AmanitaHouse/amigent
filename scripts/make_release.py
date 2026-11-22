@@ -189,6 +189,7 @@ NEW IN THIS VERSION
   real hardware.
 - Thanks to reinauer, midwan and AmanitaHouse for their pull requests.
 
+
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
 
 Chipset screens go out as the bitplanes the Amiga keeps anyway, graphics card

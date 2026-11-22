@@ -185,8 +185,6 @@ NEW IN THIS VERSION
   TLS fails. amigent-monitor runs on a 68000 again.
 - amigent-setup --update renews the repair scripts as well and can keep a
   second Amigent folder on another disk.
-- The PowerPC, classic PiStorm and Pi network parts are not yet tried on
-  real hardware.
 - Thanks to reinauer, midwan and AmanitaHouse for their pull requests.
 
 
@@ -415,8 +413,7 @@ programs on the Amiga.
 - PiStorm and other Emu68 boards: what runs on the Pi, JIT settings
   while the Amiga runs, boot options and Kickstart on the SD card with a
   backup, and Emu68 updates with a way back.
-- Graphics boards and their screen modes; PowerPC boards (not yet
-  tried on real hardware).
+- Graphics boards and their screen modes; PowerPC boards.
 - The FPU is told from exec's own flags.
 - The remote desktop has a new layout, a game mode, a dark appearance,
   and Russian, Greek and Turkish.

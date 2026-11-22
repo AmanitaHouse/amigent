@@ -328,7 +328,7 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ### Thanks
 
-To midwan and AmanitaHouse for the pull requests in this release.
+To reinauer, midwan and AmanitaHouse for the pull requests in this release.
 
 ## 1.4.0 (2026-11-18)
 

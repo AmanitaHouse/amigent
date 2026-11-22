@@ -21,9 +21,7 @@ folder on the PC (the rescue with the card in a card reader, and the tests).
     python -m amigent.emu68card verify <backup folder>
     python -m amigent.emu68card restore <backup folder> <mounted card folder> [--yes]
 
-Tried on one real card so far (PiStorm32-lite, Pi 4): options, the update from
-Emu68 1.0.4 to 1.0.7, its confirmation and the undo. A new Kickstart and the
-rescue from the PC are untested there. Try it on a second SD card first.
+Try it on a second SD card with a copy of the system first.
 """
 
 from __future__ import annotations
@@ -50,8 +48,7 @@ BACKUPS = "amigent-backup"
 NEW, OLD = ".amigent-new", ".amigent-old"
 SMALL = 64 * 1024  # up to this, a read back compares every byte; above it size and CRC-32
 MANIFEST, README = "manifest.json", "README.txt"
-UNTESTED = ("Writing to the boot partition has been tried on one real card only so far; "
-            "try it on a second SD card with a copy of the system first.")
+FIRST_TRY = "For a first try, use a second SD card with a copy of the system."
 
 
 class CardError(AmigaError):
@@ -962,7 +959,7 @@ def refuse_without_marker(card) -> None:
     if not _has(card, MARKER):
         raise CardError(
             f"refused: this card has no {MARKER} in its boot partition, so Amigent only reads it. "
-            f"To allow changes, the user creates that file there (any content). {UNTESTED}")
+            f"To allow changes, the user creates that file there (any content). {FIRST_TRY}")
 
 
 def _dry_run(card) -> str:
@@ -997,7 +994,7 @@ def apply(card, writes: dict[str, bytes], *, kind: str, what: str, pc_root: Path
     plan = describe_plan(card, writes, extra)
     head = [what] + [f"Note: {n}" for n in notes]
     if not confirm:
-        return "\n".join(head + plan + [_dry_run(card), UNTESTED])
+        return "\n".join(head + plan + [_dry_run(card), FIRST_TRY])
     refuse_without_marker(card)
     if not writes:
         return "\n".join(head + ["Nothing to write: the card has it already."])
@@ -1322,8 +1319,7 @@ def update(card, archive: dict[str, bytes], pc_root: Path, *, videocore: tuple |
     detail = describe_plan(card, plan.writes, plan.lines)
     detail[-2] = (f"  first a backup of the whole boot partition ({len(everything)} files, {used // 1024} KB): "
                   f"on the card in {BACKUPS}/ with a {README} on how to go back, and on the PC, with checksums")
-    warn = [NO_FALLBACK, "A second SD card with a copy of the system is the safer place for a first try.",
-            UNTESTED]
+    warn = [NO_FALLBACK, FIRST_TRY]
     if not confirm:
         return "\n".join(head + detail + warn + [_dry_run(card)])
     refuse_without_marker(card)
@@ -1423,7 +1419,7 @@ def default_root() -> Path:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m amigent.emu68card",
                                      description="Emu68 boot partition backups: list, verify, restore. "
-                                     + UNTESTED)
+                                     + FIRST_TRY)
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("list", help="the backups on this PC")
     p.add_argument("--root", default=None)

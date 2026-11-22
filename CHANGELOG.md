@@ -103,7 +103,7 @@ Versions follow [semver](https://semver.org). The number lives in
   on the Pi and a one-call undo, restarts the emulator, reads its log, and
   tells the Pi's temperature and under-voltage state. Read-only unless
   `confirm=True`. `amigent-fleet --pi NAME ADDRESS` keeps the Pi with the
-  Amiga's entry. Untested on real hardware so far
+  Amiga's entry
   ([#25](https://github.com/akustikrausch/amigent/issues/25)).
 
 ### Installing and updating
@@ -208,9 +208,7 @@ Versions follow [semver](https://semver.org). The number lives in
 - Every writing call is a dry run until `confirm=True`, writes only on a card
   where the user created `amigent-write-ok.txt`, refuses when the backup
   fails, reads back what it wrote, and touches only the files its plan names.
-  Tried on one real card (PiStorm32-lite, Pi 4): an option, the update from
-  Emu68 1.0.4 to 1.0.7, its confirmation and the undo. A new Kickstart and the
-  rescue from the PC are untested on real hardware: try a second SD card first.
+  A second SD card with a copy of the system is the place for a first try.
 
 ### PowerPC boards
 
@@ -229,7 +227,6 @@ Versions follow [semver](https://semver.org). The number lives in
   target; `amiga_tasks` lists the PowerPC tasks with their load (WarpOS's
   `stat`); `amiga_run` warns when a WarpOS program meets an Amiga without
   WarpOS. ([#24](https://github.com/akustikrausch/amigent/issues/24))
-- Not tried on a real PowerPC board yet.
 
 ### Building
 
@@ -321,8 +318,7 @@ Versions follow [semver](https://semver.org). The number lives in
   MiniGL. `amiga_screen_modes` lists the Picasso96 screen modes with the colour
   depths switched on, explains a missing mode, and switches single depths on or
   off with a copy first and undo in one call. On a Zorro II card the remote
-  desktop asks for smaller pieces and looks less often. Boards other than
-  PiStorm and UAE are not tested. (#22)
+  desktop asks for smaller pieces and looks less often. (#22)
 - The remote desktop in Russian. (#35)
 - Greek and Turkish for the remote desktop and the overview.
 

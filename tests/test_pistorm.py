@@ -125,7 +125,6 @@ def test_status_reports_process_config_temperature_and_power(amiga, fake):
     assert "running, pid 42" in text and CFG in text
     assert "51.0 °C" in text
     assert "under-voltage now" in text and "under-voltage has occurred since boot" in text
-    assert "untested on real hardware" in text
     assert fake.calls[0][0] == "pi@192.0.2.41"
 
 

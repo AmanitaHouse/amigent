@@ -12,7 +12,7 @@ password prompts, the user's known_hosts), and
 - restarts the emulator the way it was started;
 - reads its log and the Pi's temperature and under-voltage state.
 
-Amigent stores no passwords. Untested on real hardware so far.
+Amigent stores no passwords.
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ class Pi:
     def status(self) -> str:
         info = self.probe()
         how = self.how(info)
-        lines = [f"Pi: {self.target}  (classic PiStorm emulator; untested on real hardware)"]
+        lines = [f"Pi: {self.target}  (classic PiStorm emulator)"]
         if info.get("pid"):
             lines.append(f"emulator: running, pid {info['pid']} as {info.get('user') or '?'}, "
                          f"in {info.get('cwd') or '?'}: {' '.join(info['argv'])}")

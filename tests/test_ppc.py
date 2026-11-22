@@ -298,7 +298,7 @@ def test_amiga_ppc_status_with_warpos(on):
     assert "PowerPC: PPC 604E (PVR 00090202), 233 MHz" in out
     assert "Flash ROM: cybppc.device 44.71" in out
     assert "CSPPC233Fix" in out and "crash output: off" in out
-    assert "not tried on a real PowerPC board" in out
+    assert "read only" in out
     assert "board list could not be read" in out  # this fake has no PEEK
 
 

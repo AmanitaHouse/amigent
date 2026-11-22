@@ -545,5 +545,5 @@ def status(loaded, peek, run, read_text, processor: str = "", on_disk: str = "",
     if problems:
         lines.append("Known problems:")
         lines += [f"- {p}" for p in problems]
-    lines.append("(read only: nothing was opened or loaded; not tried on a real PowerPC board yet)")
+    lines.append("(read only: nothing was opened or loaded)")
     return "\n".join(lines)

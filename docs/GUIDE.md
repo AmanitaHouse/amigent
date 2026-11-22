@@ -276,7 +276,7 @@ starts the old one again.
 | `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has, `target="warpos"` a PowerPC program for WarpOS |
 | `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
 | `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
-| `amiga_pistorm` | the classic PiStorm emulator under Linux on the Pi, over SSH: its configuration (with undo), restart, log, the Pi's temperature and power; untested on real hardware |
+| `amiga_pistorm` | the classic PiStorm emulator under Linux on the Pi, over SSH: its configuration (with undo), restart, log, the Pi's temperature and power |
 | `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
@@ -376,8 +376,7 @@ emulator runs from a systemd unit or was started by hand or a script, which
 emulator the way it was started, and reads its log (the unit's journal, or
 the file its output goes to). Nothing changes without `confirm=True`;
 restarting and files owned by root need `sudo` without a password on the
-Pi. Not for Emu68, which has no Linux. This is untested on real hardware
-so far; reports and help with testing are welcome.
+Pi. Not for Emu68, which has no Linux.
 
 Debugging a program: `amiga_create_project` writes `main.c` and a vbcc build
 script, `amiga_build` compiles it on the Amiga, `amiga_run` runs it with its
@@ -551,12 +550,7 @@ and the Amiga does not start, and nothing on the Amiga can fix it. The
 - When PiStormBoot is installed, use its boot menu for changes by hand;
   Amigent leaves its files alone.
 
-**Writing to the boot partition has been tried on one real card only so far**
-(PiStorm32-lite with a Pi 4, a copy of an AmiKit card): an option in
-`cmdline.txt`, the update from Emu68 1.0.4 to 1.0.7, its confirmation after the
-restart, and the undo back to 1.0.4. A new Kickstart and the rescue from the PC
-are untested on real hardware. Try it on a second SD card with a copy of the
-system first.
+**Try changes on a second SD card with a copy of the system first.**
 
 ### Rescue from the PC
 

@@ -1204,8 +1204,7 @@ def amiga_ppc(action: str = "status", tools: str = "") -> str:
     amiga_software_failure does it); 'dismiss' closes that window.
     tools: the folder of WarpOS's tools on the Amiga, if they are not along
     the path (or set AMIGENT_WARPOS_TOOLS). Nothing that was not active is
-    opened or loaded, and the flash ROM is never written. Not tried on a real
-    board yet. Needs amigentd 1.4.0.
+    opened or loaded, and the flash ROM is never written. Needs amigentd 1.4.0.
     """
     from . import ppc
     folder = tools or os.environ.get(WARPOS_TOOLS_ENV, "")
@@ -1884,7 +1883,7 @@ def amiga_build(folder: str, cpu: str = "", devpack: str = "", fpu: str = "", ta
 
     target: '' builds 68k code; 'warpos' a PowerPC program for WarpOS with
     vbcc's ppc-warpos target (+warpos), which must be installed in vbcc on the
-    Amiga; the script says so if it is not. Not tried on a real PowerPC board yet.
+    Amiga; the script says so if it is not.
     """
     note = ""
     want = target.strip().lower()
@@ -3082,7 +3081,7 @@ def amiga_pistorm(action: str = "status", text: str = "", file: str = "", lines:
                   pi: str = "", confirm: bool = False) -> str:
     """The classic PiStorm emulator under Linux on the Amiga's Raspberry Pi, over SSH.
 
-    Not for Emu68, which has no Linux. Untested on real hardware so far.
+    Not for Emu68, which has no Linux.
     The login uses the system's ssh with your own key (BatchMode, your
     known_hosts); Amigent stores no passwords. Read-only unless confirm=True.
 
@@ -4619,7 +4618,7 @@ def amiga_emu68_option(name: str = "", value: str = "", remove: bool = False, fo
     the user's marker file amigent-write-ok.txt. Before writing, cmdline.txt goes
     into a backup on the card and on the PC; after writing it is read back. Takes
     effect at the next start; never restarts by itself. amiga_emu68_undo takes it back.
-    Tried on one real card so far: try it on a second SD card first.
+    Try it on a second SD card first.
     """
     from . import emu68card
     if not name.strip():
@@ -4645,7 +4644,7 @@ def amiga_emu68_kickstart(file: str, confirm: bool = False, volume: str = "") ->
 
     A dry run unless confirm=True, only on a card with the marker file
     amigent-write-ok.txt, with a backup on the card and the PC and a read back.
-    Takes effect at the next start. Untested on real hardware: try a second card first.
+    Takes effect at the next start. Try it on a second SD card first.
     """
     from . import emu68card
     card = _emu68_card(volume)
@@ -4705,8 +4704,7 @@ def amiga_emu68_update(archive: str = "", confirm: bool = False, after_restart: 
     If the new Emu68 does not start, a power cycle does not help; the rescue is
     the card in a PC: python -m amigent.emu68card restore <backup> <card drive>.
     Only on a card with the user's marker file amigent-write-ok.txt, and only on
-    the user's yes. Tried on one real card so far (1.0.4 to 1.0.7 and back):
-    try it on a second SD card first.
+    the user's yes. Try it on a second SD card first.
     """
     from . import emu68card
     if after_restart:

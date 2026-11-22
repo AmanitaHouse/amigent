@@ -4619,7 +4619,7 @@ def amiga_emu68_option(name: str = "", value: str = "", remove: bool = False, fo
     the user's marker file amigent-write-ok.txt. Before writing, cmdline.txt goes
     into a backup on the card and on the PC; after writing it is read back. Takes
     effect at the next start; never restarts by itself. amiga_emu68_undo takes it back.
-    Writing is untested on real hardware: try it on a second SD card first.
+    Tried on one real card so far: try it on a second SD card first.
     """
     from . import emu68card
     if not name.strip():
@@ -4705,7 +4705,8 @@ def amiga_emu68_update(archive: str = "", confirm: bool = False, after_restart: 
     If the new Emu68 does not start, a power cycle does not help; the rescue is
     the card in a PC: python -m amigent.emu68card restore <backup> <card drive>.
     Only on a card with the user's marker file amigent-write-ok.txt, and only on
-    the user's yes. Untested on real hardware: try it on a second SD card first.
+    the user's yes. Tried on one real card so far (1.0.4 to 1.0.7 and back):
+    try it on a second SD card first.
     """
     from . import emu68card
     if after_restart:

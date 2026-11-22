@@ -3,7 +3,7 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
-## 1.5.0 (unreleased)
+## 1.5.0 (2026-11-23)
 
 ### Updates
 
@@ -40,6 +40,10 @@ Versions follow [semver](https://semver.org). The number lives in
 - *About* has tabs for Amigent, this Amiga, the connection (port, TLS,
   protocol, link speed, ping, amigentd version) and the keyboard shortcuts. The
   status bar is labelled and opens the connection details.
+- *About* also names the connected daemon: which build the file it started
+  from is, its target CPU, the protocol and what it can do, apart from the
+  Amiga's own OS and CPU. The file is recognised by size and CRC on the Amiga,
+  so nothing is sent over the link (#51).
 - A dark appearance, following the system or chosen in the ⋯ menu.
 - Questions such as replacing a file or restarting from the overview are
   dialogs in the page's style. *Get file* selects a file first, then gets it.
@@ -204,7 +208,9 @@ Versions follow [semver](https://semver.org). The number lives in
 - Every writing call is a dry run until `confirm=True`, writes only on a card
   where the user created `amigent-write-ok.txt`, refuses when the backup
   fails, reads back what it wrote, and touches only the files its plan names.
-  Writing is untested on real hardware so far: try it on a second SD card.
+  Tried on one real card (PiStorm32-lite, Pi 4): an option, the update from
+  Emu68 1.0.4 to 1.0.7, its confirmation and the undo. A new Kickstart and the
+  rescue from the PC are untested on real hardware: try a second SD card first.
 
 ### PowerPC boards
 

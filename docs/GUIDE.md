@@ -551,8 +551,12 @@ and the Amiga does not start, and nothing on the Amiga can fix it. The
 - When PiStormBoot is installed, use its boot menu for changes by hand;
   Amigent leaves its files alone.
 
-**Writing to the boot partition is untested on real hardware so far.** Try it
-on a second SD card with a copy of the system first.
+**Writing to the boot partition has been tried on one real card only so far**
+(PiStorm32-lite with a Pi 4, a copy of an AmiKit card): an option in
+`cmdline.txt`, the update from Emu68 1.0.4 to 1.0.7, its confirmation after the
+restart, and the undo back to 1.0.4. A new Kickstart and the rescue from the PC
+are untested on real hardware. Try it on a second SD card with a copy of the
+system first.
 
 ### Rescue from the PC
 

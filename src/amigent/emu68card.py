@@ -21,7 +21,9 @@ folder on the PC (the rescue with the card in a card reader, and the tests).
     python -m amigent.emu68card verify <backup folder>
     python -m amigent.emu68card restore <backup folder> <mounted card folder> [--yes]
 
-Untested on real hardware so far: try it on a second SD card first.
+Tried on one real card so far (PiStorm32-lite, Pi 4): options, the update from
+Emu68 1.0.4 to 1.0.7, its confirmation and the undo. A new Kickstart and the
+rescue from the PC are untested there. Try it on a second SD card first.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ BACKUPS = "amigent-backup"
 NEW, OLD = ".amigent-new", ".amigent-old"
 SMALL = 64 * 1024  # up to this, a read back compares every byte; above it size and CRC-32
 MANIFEST, README = "manifest.json", "README.txt"
-UNTESTED = ("Writing to the boot partition is untested on real hardware so far; "
+UNTESTED = ("Writing to the boot partition has been tried on one real card only so far; "
             "try it on a second SD card with a copy of the system first.")
 
 

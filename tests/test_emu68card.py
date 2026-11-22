@@ -126,7 +126,7 @@ def test_without_the_marker_nothing_is_written(card, pc):
 def test_a_dry_run_shows_the_plan_and_writes_nothing(card, pc):
     before = snapshot(card)
     text = ec.change_option(card, pc, "vc4.mem", "32")
-    assert "Dry run" in text and "cmdline.txt: replaced" in text and "untested on real hardware" in text
+    assert "Dry run" in text and "cmdline.txt: replaced" in text and "tried on one real card only" in text
     assert snapshot(card) == before and not pc.exists()
 
 

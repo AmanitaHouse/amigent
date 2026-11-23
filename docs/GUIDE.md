@@ -665,12 +665,13 @@ documentation and WarpOS 4.0, and reports from owners are welcome.
   'BUSY'                      /* "menu" or "held" while a menu or popup holds Intuition up */
   ```
 
-- **System information.** The *i* button shows Kickstart and Workbench versions,
-  CPU, FPU, memory, the network stack and the free space of each volume.
+- **System information.** *About Amigent* in the More menu (⋯), tab *This
+  Amiga*, shows Kickstart and Workbench versions, CPU, FPU, the connected
+  amigentd, memory, the network stack and the free space of each volume.
 
 ![Choosing the target folder on the Amiga](screenshots/send.png)
 
-![System information in the About window](screenshots/about.png)
+![System information on the This Amiga tab of the About window](screenshots/about.png)
 
 `amigent-viewer --install` adds Amigent to the Start menu, the desktop and
 *Installed apps* on Windows (from WSL or a Windows Python), or puts `Amigent.app`

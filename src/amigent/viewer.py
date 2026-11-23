@@ -33,6 +33,8 @@ from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
+from .daemons import describe_connected
+from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
                      exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
 from .screenfeed import Feed, InputQueue

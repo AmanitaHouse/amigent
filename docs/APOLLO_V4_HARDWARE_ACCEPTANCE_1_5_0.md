@@ -18,10 +18,11 @@ Workbench / AmigaShell / removable media if the network daemon is dead.
 
 | Field | Value | Notes |
 |---|---|---|
-| Integration / source baseline | `fa91b07` | Tested Apollo+1.5.0 integration commit (implementation). Stable reference. |
+| Integration / source baseline | `953f7d5` | Apollo+1.5.0 integration with parseable Viewer Hear JS; packages **C**. |
+| Prior packaging baseline | `fa91b07` | Packaged Apollo rebuild / probe / monitor / identity (still valid for binaries). |
 | Candidate package tree | worktree `integrate-150-apollo-rehearsal` on branch `rehearse/integrate-150-apollo` | Binaries under `src/amigent/amiga/bin/` |
-| This procedure revision | `procedure-rev-2026-11-23-hw-cmd` | Independent of git HEAD; bump when the procedure text changes |
-| Live production digest | **unverified until §2 pre-flight** | Historical record of **A** is not a substitute for measuring the V4 |
+| This procedure revision | `procedure-rev-2026-11-23-hear-pass` | Records completed RAM Hear PASS; no permanent install of **C**. |
+| Live production digest | **A** verified on V4-SA 2026-11-23 | Pre-flight and post-restore: `b00fef0e…` |
 
 ### 0.2 Daemon identities
 
@@ -461,6 +462,24 @@ Client baseline `fa91b07` uses `LOADED_PROTOCOL = 6`.
 4. Disconnect Viewer; reconnect; Hear must not stay armed.  
 **ROLLBACK** if Hear cannot stop or the machine hard-locks.
 
+#### 5.4.1 Result — Viewer Hear end-to-end: **PASS — 23 November 2026**
+
+Physical Vampire V4-SA (ApolloOS / 68080). Candidate **C** from RAM
+(`0f1405a1…`, protocol 6 / TLS, SYSINFO `audio=1`). AmigaAMP looping an MP3
+through the established ARNE/AHI path. AmiGent **1.5.0** Viewer (`953f7d5`
+parseable `viewer.js`) with live video and visible Hear.
+
+| Check | Result |
+|---|---|
+| Hear ON | Operator heard the MP3 on the PC; ~1.7 MB PCM in ~20 s |
+| Hear OFF | PCM stopped (0 bytes) |
+| Reconnect | Hear not left armed |
+| Stop **C** / restore **A** | Protocol 5 / TLS; disk still **A** (`b00fef0e…`); User-Startup unchanged |
+
+**Not** a permanent install of **C**. Protocol-only `audio_start`/`audio_stop` from
+an earlier RAM run remains historical evidence only and is **not** this PASS
+(see correction record under `D:\scratch\temp\amigent-ram-acceptance\`).
+
 ### 5.5 MMIO / TRACE — bounded hardware checks after C
 
 These exercise the **daemon guard**. If the daemon is correct, the request is refused **before** custom-register access (see `apollo_mmio.c` comments on why unguarded reads are dangerous).
@@ -529,29 +548,22 @@ No live `amigent-setup --update`, `--force`, or Amiga `Amigent-Update` / `amigen
 | ARexx `QUIT` | Documented in PROTOCOL.md / `amigent-update.rexx` |
 | MMIO window `0xDFF1F4` | In `apollo_mmio.c` |
 | Refusal strings in **C** binary | Present |
-| Live V4 contact | **Not performed** (authorised: none) |
+| Live V4 contact | **Performed 2026-11-23** under explicit operator GO (RAM **C** + Viewer Hear) |
+| Viewer Hear end-to-end | **PASS** (§5.4.1); production left on **A** |
 
 ---
 
 ## 8. Remaining limitations
 
-1. AmigaShell behaviour on **this** Vampire V4 is **OPERATOR VERIFICATION REQUIRED** until confirmed.  
-2. Offline PC rehearsal ≠ proven CF restore on hardware.  
-3. Production identity **A** remains unverified until §2 runs under HW-AUTH.  
-4. macOS app-bundle testing remains out of scope on Windows.  
-5. Candidate **C** is not HW-validated until this procedure completes under authorisation.
+1. Candidate **C** was accepted from **RAM only**; it is **not** permanently installed.  
+2. Permanent install of **C** (if ever authorised) still needs a separate GO and dual recovery.  
+3. macOS app-bundle testing remains out of scope on Windows.  
+4. Upstream PR **#46** (native layout) and **#50** (AUDIO draft) remain open on upstream; this tree carries native layout + validated Hear independently of merging those PRs blindly.
 
 ---
 
-## 9. Readiness for requesting hardware execution authorisation
+## 9. Hardware acceptance status (after 2026-11-23)
 
-**Assessment after this documentation revision:**  
-**READY TO REQUEST** explicit, narrowly scoped hardware authorisation for **§2–§3 pre-flight and recovery validation only**, provided the operator accepts that AmigaShell steps remain to be confirmed on-console.
-
-**NOT READY to declare executable install/test of candidate C** until:
-
-- §2 identity is measured and matches **A** (or written re-baseline), and  
-- §3 AmigaShell restore has been **operator-verified** once using recovery media **without** leaving production on **C**, and  
-- All STOP gates in §6.1 are green.
-
-No claim of full hardware readiness while Amiga restore remains unverified on the physical machine.
+**RAM-based candidate + Viewer Hear:** **PASS** (§5.4.1).  
+**Production:** restored to **A** (protocol 5 / TLS).  
+**Permanent install of C:** **not authorised / not performed**.

@@ -93,8 +93,8 @@ def test_a_classic_daemon_is_not_offered_audio():
 
 
 def test_the_daemon_implements_audio_48_and_not_pip():
-    daemon = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
-    audio = (ROOT / "amiga" / "apollo" / "apollo_audio.c").read_text(encoding="utf-8")
+    daemon = (ROOT / "src/native/amiga/daemon" / "amigentd.c").read_text(encoding="utf-8")
+    audio = (ROOT / "src/native/amiga/apollo" / "apollo_audio.c").read_text(encoding="utf-8")
     assert "case CMD_AUDIO:" in daemon
     assert "apollo_audio(" in audio and "arne.audio" in audio
     assert "apollo_pip" not in daemon and "apollo_pip" not in audio

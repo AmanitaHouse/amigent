@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-MMIO = ROOT / "amiga" / "apollo" / "apollo_mmio.c"
-DAEMON = ROOT / "amiga" / "amigentd.c"
+MMIO = ROOT / "src/native/amiga/apollo" / "apollo_mmio.c"
+DAEMON = ROOT / "src/native/amiga/daemon" / "amigentd.c"
 
 # The windows named by apollo_mmio.c. Each pair is [start, end).
 WINDOWS = (

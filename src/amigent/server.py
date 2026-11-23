@@ -1284,7 +1284,7 @@ def amiga_audio_levels(seconds: int = 2, hz: int = 10, peak: bool = True) -> str
     local = AMIGA / "bin" / "amigent-levels"
     if not local.exists():
         raise AmigaError("amigent-levels is not part of this Amigent package; build it from "
-                         "amiga/amigent-levels.c (see the note at its top)")
+                         "src/native/amiga/tools/amigent-levels.c (see the note at its top)")
     data = local.read_bytes()
     ctl = _session().ctl
     try:

@@ -12,7 +12,7 @@ import pytest
 from amigent.planar import Chunky, unpackbits
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "amiga" / "amigentd.c"
+SOURCE = ROOT / "src/native/amiga/daemon/amigentd.c"
 
 PRELUDE = """#include <stdio.h>
 #include <stdlib.h>

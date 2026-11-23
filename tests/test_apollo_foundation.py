@@ -200,7 +200,7 @@ def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, ca
 
 
 def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
-    daemon = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
+    daemon = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
     names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
     assert names == list(PROTOCOL_6)
@@ -208,9 +208,9 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
     assert "CMD_AUDIO" not in daemon and "CMD_PIP" not in daemon
     assert "AMIGENT_APOLLO" not in daemon
 
-    detect = (ROOT / "amiga" / "apollo" / "apollo_detect.c").read_text(encoding="utf-8")
-    probe = (ROOT / "amiga" / "apollo" / "apollo_probe.c").read_text(encoding="utf-8")
-    makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
+    detect = (ROOT / "src/native/amiga/apollo/apollo_detect.c").read_text(encoding="utf-8")
+    probe = (ROOT / "src/native/amiga/apollo/apollo_probe.c").read_text(encoding="utf-8")
+    makefile = (ROOT / "src/native/amiga/Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_os_here" in detect and "VREG_BOARD" in detect
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
     assert "RETURN_WARN" in probe and "m68080" not in probe
@@ -247,7 +247,7 @@ def test_a_described_amiga_is_not_asked_for_its_exec_version(tmp_path, monkeypat
 
 
 def test_the_c_detection_reads_only_exec_and_never_the_board_register():
-    detect = (ROOT / "amiga" / "apollo" / "apollo_detect.c").read_text(encoding="utf-8")
+    detect = (ROOT / "src/native/amiga/apollo/apollo_detect.c").read_text(encoding="utf-8")
     body = detect.split("BOOL apollo_os_here(void)", 1)[1]
     assert "AFF_68080 (1L << 10)" in detect and "AFF_FPGA" not in detect
     assert "lib_Version >= 51" in body and "AttnFlags & AFF_68080" in body

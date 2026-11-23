@@ -239,7 +239,7 @@ def test_cpu_adds_mips_under_emu68(on, monkeypatch):
 def test_amigentd_allows_exactly_the_fields_offered_here():
     from pathlib import Path
     import re
-    daemon = (Path(__file__).parent.parent / "amiga" / "amigentd.c").read_text(encoding="latin-1")
+    daemon = (Path(__file__).parent.parent / "src/native/amiga/daemon/amigentd.c").read_text(encoding="latin-1")
     masks = {}
     for s in emu68.SETTINGS:
         masks[s.reg] = masks.get(s.reg, 0) | s.mask

@@ -19,7 +19,7 @@
  * sample, TICKS <50ths of a second taken>; or ERROR <text>.
  *
  * Build (vbcc, OS 2.04 and up):
- *   vc +aos68k -c99 -O2 -cpu=68000 -I<NDK>/Include_H -o amigent-levels amiga/amigent-levels.c -lamiga
+ *   vc +aos68k -c99 -O2 -cpu=68000 -I<NDK>/Include_H -o amigent-levels src/native/amiga/tools/amigent-levels.c -lamiga
  *
  * MIT licence, see LICENSE.
  */

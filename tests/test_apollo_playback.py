@@ -19,7 +19,8 @@ from amigent.paths import AMIGA
 from amigent.viewer import Viewer, pcm_message
 from amigent.webserver import WEB
 
-DAEMON = (128744, "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1")  # HW-validated D4/D5/D5B on Apollo V4-SA
+# Current packaged rebuild (1.5.0 sources). Historical HW-smoke 63db83ff… is SUPERSEDED.
+DAEMON = (132140, "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d")
 
 
 def test_audio_capability_follows_the_advertisement_and_the_protocol():

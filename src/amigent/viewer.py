@@ -33,7 +33,7 @@ from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
-from .daemons import describe_connected
+from .daemons import SPECS, describe_connected
 from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
                      exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
@@ -467,8 +467,10 @@ class Viewer:
         shown = "" if online else connection_reason(reason)
         if online != self.online or shown != self.reason:
             if not online:
+                # the next daemon to answer may be another file, or another Amiga
                 self.hear = False
                 self.amiga = {}
+                self._forget_daemon()
             self.online = online
             self.reason = shown
             self.event("online", online=online, reason=self.reason)
@@ -718,6 +720,23 @@ class Viewer:
         self._daemon_bytes: bytes | None = None
         self._daemon_version = ""
 
+    def _daemon_file(self, path: str) -> bytes:
+        """The named file's bytes, found among the packaged builds by size and CRC on the
+        Amiga, so nothing crosses a slow link; b"" when it is none of them. Only a daemon
+        or a test without those requests sends the file itself."""
+        try:
+            size = int(self._ctl(lambda: self.ctl.stat(path))["size"])
+            crc = self._ctl(lambda: self.ctl.checksum(path, size))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return self._ctl(lambda: self.ctl.read_file(path))
+        for spec in SPECS:
+            packaged = AMIGA / "bin" / spec.name
+            if packaged.is_file() and packaged.stat().st_size == size:
+                data = packaged.read_bytes()
+                if zlib.crc32(data) == crc:
+                    return data
+        return b""
+
     def _connected_daemon(self, info: dict, protocol: int) -> dict:
         """Protocol from the handshake; family only from the file SYSINFO named (``self=``)."""
         path = str(info.get("self") or "")
@@ -726,7 +745,7 @@ class Viewer:
             blob, version = self._daemon_bytes, self._daemon_version
         elif path and "\n" not in path and '"' not in path:  # quoted for Version: no spaces split it
             try:
-                blob = self._ctl(lambda: self.ctl.read_file(path))
+                blob = self._daemon_file(path)
                 reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
                 version = reported.output.strip().split("\n", 1)[0]
                 self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version

@@ -24,10 +24,12 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN = AMIGA / "bin"
 HUNK = b"\x00\x00\x03\xf3"
 
-# GCC 6.50 Stable. The daemon links the MMIO guard with AUDIO. build/ is not packaged.
+# ApolloCrossDev GCC-6.50-Stable rebuild of current src/native sources (1.5.0 $VER).
+# Historical HW-smoke 63db83ff…/128744 is SUPERSEDED, not packaged here.
 APOLLO = {
-    "amigentd.apollo": (128744, "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1"),
-    "amigent-apollo-probe": (3112, "ab454b39988bd7b88c24058d0398507456ff12ff180b638d626beac821e1aff4"),
+    "amigentd.apollo": (132140, "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d"),
+    "amigent-apollo-probe": (3108, "ea78c8c508e2e3c12b719ac20ebf175a4805d34a3458e6a4882118ad417d2bb7"),
+    "amigent-monitor.apollo": (22804, "e80c0456d63d435a57febd722caabdf7f1017c99985efa2e016d7f3c9a97bc96"),
 }
 CLASSIC = {
     "amigentd": (118268, "6d5f6d0e9e91b37eeb75c1d5fd379781826e587d82bd93fbf414656bd5d8466a"),
@@ -64,6 +66,9 @@ def test_the_packaged_apollo_executables_match_the_staged_build():
     assert b"pip=1" not in daemon
     probe = _packaged("amigent-apollo-probe")
     assert b"ApolloOS" in probe and b"AmigaOS" in probe and b"arne.audio" not in probe
+    assert b"68080" in probe  # AFF_FPGA core line; exit 0 only with ApolloOS + that bit
+    monitor = _packaged("amigent-monitor.apollo")
+    assert b"$VER: amigent-monitor 1.5.0" in monitor
     for name, (size, digest) in CLASSIC.items():
         data = _packaged(name)
         assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)
@@ -102,8 +107,8 @@ def test_setup_copies_the_apollo_daemon_when_the_probe_says_so():
     link = _install(cpu=0, probe=0)
     assert link.files["C:amigentd.new"] == _packaged("amigentd.apollo")
     assert link.files["T:amigent-apollo-probe"] == _packaged("amigent-apollo-probe")
-    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor")
-    assert b"pip" not in link.files["T:amigent-setup"]
+    assert link.files["SYS:amigent/amigent-monitor"] == _packaged("amigent-monitor.apollo")
+    assert b"pip" not in link.files.get("T:amigent-setup", b"")
 
 
 def test_setup_keeps_the_classic_daemon_when_the_probe_says_amigaos():

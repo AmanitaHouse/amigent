@@ -34,7 +34,7 @@ APOLLO_MARK = b"tracepoints are not supported on this Apollo build yet"
 APOLLO_INFO = {"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"}
 VAMPIRE_INFO = {"os": "AmigaOS", "exec_version": "47.4", "attn_flags": "0x400"}
 EXEC51_INFO = {"exec_version": "51.1", "attn_flags": "0x8f"}  # AROS-like: no 68080 bit
-REAL_APOLLO_SHA = "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1"
+REAL_APOLLO_SHA = "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d"
 HOME = "SYS:amigent"
 
 

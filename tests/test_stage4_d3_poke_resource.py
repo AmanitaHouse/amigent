@@ -149,7 +149,9 @@ def test_update_replaces_fforksafe_but_not_unknown_apollo(tmp_path):
     ffork = (ROOT / "tests/fixtures/amigentd.apollo.fforksafe-00443719").read_bytes()
     ok, why = consider_replacement(ffork, packaged, "amigentd.apollo", BIN)
     assert ok and why == ""
-    unknown = b"$VER: amigentd 1.4.0 (1.1.2026)\x00 " + b"arne.audio" + b" unknown-apollo-bytes"
+    # Same $VER and date as the packaged 1.5.0 candidate, but not a catalogue/hash
+    # match: an unknown same-version install must stay (use --force to replace).
+    unknown = b"$VER: amigentd 1.5.0 (21.11.2026)\x00 " + b"arne.audio" + b" unknown-apollo-bytes"
     keep, reason = consider_replacement(unknown, packaged, "amigentd.apollo", BIN)
     assert not keep
     assert "not one of the builds" in reason or "not the one in this package" in reason

@@ -157,16 +157,22 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
     assert setup.build_for_channel(broken) == "amigentd"
 
 
-APOLLO_SHA = "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1"
+# Packaged from current src/native Apollo tree via ApolloCrossDev GCC-6.50-Stable.
+# Not the historical 1.4.0 HW-smoke digest 63db83ff… (see SUPERSEDED_APOLLO_SHA256).
+APOLLO_SHA = "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d"
+APOLLO_SIZE = 132140
 
 
-def test_the_apollo_daemon_is_packaged_with_the_validated_size_and_hash():
+def test_the_apollo_daemon_is_packaged_with_the_release_size_and_hash():
     data = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
-    assert len(data) == 128744 and hashlib.sha256(data).hexdigest() == APOLLO_SHA
+    assert len(data) == APOLLO_SIZE and hashlib.sha256(data).hexdigest() == APOLLO_SHA
     assert (AMIGA / "bin" / "amigent-apollo-probe").is_file()
     assert b"arne.audio" in data and b"ApolloOS" in data
-    from amigent.daemons import SPECS, available_names
+    assert b"$VER: amigentd 1.5.0" in data
+    from amigent.daemons import APOLLO_SHA256, SPECS, SUPERSEDED_APOLLO_SHA256, available_names
 
+    assert APOLLO_SHA in APOLLO_SHA256
+    assert "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1" in SUPERSEDED_APOLLO_SHA256
     assert "amigentd.apollo" in available_names(AMIGA / "bin")
     assert any(s.name == "amigentd.apollo" and s.verified for s in SPECS)
 
@@ -300,9 +306,12 @@ def test_protocol_6_ends_at_quiet_audio_is_apollo_only_and_the_probe_is_68000_on
     assert "apollo_os_here" in detect and "VREG_BOARD" in detect
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
     assert "RETURN_WARN" in probe and "m68080" not in probe
+    assert "AFF_FPGA" in probe and 'PutStr("68080\\n")' in probe
+    assert "SysBase->AttnFlags & AFF_FPGA" in probe
     assert "amigent-apollo-probe" in makefile
     assert "$(BUILD)/amigentd.apollo" in makefile and "-DAMIGENT_APOLLO" in makefile
     assert "apollo_audio.c" in makefile and "apollo_mmio.c" in makefile
+    assert "amigent-monitor.apollo" in makefile
     probe_flags = makefile.split("PROBE_CFLAGS :=", 1)[1].splitlines()[0]
     assert "-m68000" in probe_flags and "-m68080" not in probe_flags  # the probe stays 68000
     assert "-m68080" in makefile and "apollo_pip" not in makefile

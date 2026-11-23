@@ -104,19 +104,25 @@ def detect_cpu(run) -> int | None:
 
 
 # An installed Apollo daemon is recognised without the packaged file: by the SHA-256 of a
-# validated build, or by text that only the AMIGENT_APOLLO build of amigentd.c contains.
+# packaged build, or by text that only the AMIGENT_APOLLO build of amigentd.c contains.
 # Both survive a package that has no amigentd.apollo, which is what makes an update
-# safe there. This is not a list of retired hashes; a later validated build is
-# recognised by its markers.
+# safe there. Markers recognise Apollo builds whose digest is not listed yet.
+#
+# Packaged release identity (this tree): ApolloCrossDev GCC-6.50-Stable, Makefile.apollo
+# flags (-m68080 -DAMIGENT_APOLLO -nostartfiles -nostdlib), sources under src/native/amiga,
+# $VER amigentd 1.5.0 (21.11.2026). Historical HW-smoke artifact 63db83ff… is amigentd 1.4.0
+# (18.11.2026) and does not implement this tree's 1.5.0 sources — kept only as SUPERSEDED.
 APOLLO_SHA256 = frozenset({
-    "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
+    "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d",
 })
 # Prior packaged Apollo digests that a newer Apollo candidate may replace at the
-# same $VER once package bytes change (identify no longer matches).
+# same specialisation once package bytes change (identify no longer matches).
 SUPERSEDED_APOLLO_SHA256 = frozenset({
     "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
     # F-FORKSAFE / Stage 3B-D2 hardware-tested dump; superseded by D3 POKE resource harden.
     "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+    # 1.4.0-era HW-smoke AUDIO package (128744); superseded by 1.5.0 source rebuild above.
+    "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
 })
 APOLLO_MARKERS = (
     b"tracepoints are not supported on this Apollo build yet",

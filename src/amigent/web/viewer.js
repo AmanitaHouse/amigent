@@ -68,67 +68,469 @@
     paintTheme();
   }
 
-  // ---------------------------------------------------------------- update
-
-  // A newer Amigent: a banner until answered; Later keeps it in the More menu and in About.
-  let offer = null;
-  let bannerShown = "";
-  let version = "";
-
-  function showUpdate(info) {
-    if (!info || !info.version) return;
-    offer = info;
-    const title = t("update_available", { version: info.version, current: info.current });
-    $("update-title").textContent = title;
-    $("update-page").href = info.page;
-    $("about-update-text").textContent = title;
-    $("about-update-page").href = info.page;
-    const list = $("about-update-notes");
-    list.replaceChildren();
-    for (const line of (info.notes || "").split("\n").filter(Boolean).slice(0, 5)) {
-      const item = document.createElement("li");
-      item.textContent = line.replace(/^- /, "");
-      list.append(item);
-    }
-    if (bannerShown !== info.version) {
-      bannerShown = info.version;
-      $("update").hidden = false;
-    }
-    paintUpdate();
+  function invalidateHearCapabilities() {
+    capabilityEpoch += 1;
+    amiga = {};
+    showHear(null);
   }
 
-  function paintUpdate() {
-    const on = !!offer;
-    $("m-update").hidden = $("m-update-sep").hidden = !on;
-    $("more-dot").hidden = !on;
-    $("about-update").hidden = !on;
-    $("about-update-notes").hidden = !on;
-    if (on) $("m-update-text").textContent = t("menu_update", { version: offer.version });
-    $("more").setAttribute("aria-label", t(on ? "more_update" : "more"));
-    $("more").title = $("more").getAttribute("aria-label");
-    $("st-version").textContent = version ? `Amigent ${version}${on ? " · " + t("update_ready") : ""}` : "";
-    $("st-version").classList.toggle("ready", on);
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws?t=${encodeURIComponent(token)}`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { socketOpen = true; showState(); showHear(amiga); };
+    ws.onclose = () => {
+      socketOpen = false;
+      stopHear(false);
+      invalidateHearCapabilities();
+      showState();
+      setTimeout(connect, 1000);
+    };
+    ws.onmessage = (event) => {
+      if (typeof event.data === "string") onEvent(JSON.parse(event.data));
+      else onBinary(event.data);
+    };
   }
 
-  async function answerUpdate(action) {
-    $("update").hidden = true;
-    if (action === "skip") offer = null;
-    paintUpdate();
-    const reply = await fetch(api("/api/update"), { method: "POST", body: action }).catch(() => null);
-    if (!reply || !reply.ok) {
-      const said = reply ? (await reply.json().catch(() => ({}))).error : "";
-      if (action === "now") toast(said || t("update_failed"), true);
+  function where() {
+    return address && address !== host ? `${host} (${address})` : host;
+  }
+
+  function showState() {
+    const overlay = $("overlay");
+    let message = "";
+    if (!socketOpen) message = t("disconnected");
+    else if (amigaOnline === false) message = t("offline");
+    else if (amigaOnline === null) message = t("connecting");
+    overlay.classList.toggle("show", message !== "");
+    $("overlay-text").textContent = message;
+    // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
+    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? shownLinkReason(reason)
+      : amigaOnline === null && address ? where() : "";
+    $("offline-actions").hidden = !(socketOpen && amigaOnline === false);
+    const up = socketOpen && amigaOnline;
+    const waiting = socketOpen && amigaOnline === null;
+    $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
+    $("machine-name").textContent = host || "Amiga";
+    const state = up ? t("machines_online") : waiting ? t("machines_checking") : t("state_offline");
+    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu && amiga.cpu + (amiga.fpu_state && !["none", ""].includes(amiga.fpu_state) ? " + FPU" : "")].filter(Boolean).join(" Â· ") || state : state;
+    $("machine").setAttribute("aria-label", t("machine_switch", { name: host || "Amiga", state }));
+    $("machine").title = up ? [where(), systemLine(amiga), cpuLine(amiga)].filter(Boolean).join("\n") : "";
+    // the machine menu shows this window's own view of its Amiga, which is fresher than the list's
+    window.amigentCurrent = { online: socketOpen ? amigaOnline : false, os: amiga.os || "" };
+    document.dispatchEvent(new Event("amigent-current"));
+  }
+
+  function showPaused(seconds) {
+    $("paused").hidden = !seconds;
+    const m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, "0");
+    if (seconds) $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
+    $("about-picture").textContent = seconds ? t("picture_paused", { time: `${m}:${s}` }) : t("picture_live");
+  }
+
+  // null when SYSINFO did not send an integer. 0 is a real reading.
+  function knownBytes(value) {
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+    if (typeof value === "number") return Number.isInteger(value) && value >= 0 ? value : null;
+    if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return null;
+    return Number(value.trim());
+  }
+
+  function bytes(n) {
+    if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+    if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
+    return `${Math.round(n / 1024)} KB`;
+  }
+
+  function systemLine(info) {
+    return [info.os, info.kickstart && t("kickstart_n", { version: info.kickstart }),
+      info.workbench && t("workbench_n", { version: info.workbench })].filter(Boolean).join(", ");
+  }
+
+  const cpuLine = UI.cpuLine;
+
+  function apolloMachine(info) {
+    return !!(info && (info.os === "ApolloOS" || String(info.cpu || "").includes("68080")));
+  }
+
+  // Hear is visible only for an active Apollo connection with protocol â‰¥ 6
+  // and SYSINFO audio=1. Protocol 6 alone is not Apollo evidence.
+  function infoHearEligible(info) {
+    if (!info || typeof info !== "object") return false;
+    if (!apolloMachine(info)) return false;
+    const proto = Number(info.daemon_protocol);
+    if (!Number.isFinite(proto) || proto < 6) return false;
+    return info.audio === "1";
+  }
+
+  function hearEligible(info) {
+    return !!(socketOpen && amigaOnline === true && infoHearEligible(info));
+  }
+
+
+  let toldOutdated = false;
+
+  function showAmiga(info) {
+    const epoch = capabilityEpoch;
+    if (!info || typeof info !== "object") {
+      showHear(null);
       return;
     }
-    if (action === "now") toast(t("update_running"));
+    amiga = info;
+    if (info.pc_outdated && !toldOutdated) {
+      toldOutdated = true;
+      toast(t("pc_outdated"), true);
+    }
+    const chip = knownBytes(info.chip_free);
+    const fast = bytes(knownBytes(info.fast_free) ?? 0);
+    const memory = chip === null ? t("mem_fast_only", { fast }) : t("mem_line", { chip: bytes(chip), fast });
+    $("about-system").textContent = systemLine(info) || "â€“";
+    $("about-cpu").textContent = cpuLine(info) || "â€“";
+    $("about-memory").textContent = memory;
+    $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "â€“";
+    const list = $("about-volumes");
+    list.replaceChildren();
+    for (const v of info.volumes || []) {
+      const row = document.createElement("div");
+      row.className = "vol";
+      row.textContent = `${v.name}:`;
+      const free = document.createElement("span");
+      free.textContent = t("free_of", { free: bytes(v.free), size: bytes(v.size) });
+      row.append(free);
+      list.append(row);
+    }
+    if (!list.children.length) list.textContent = "â€“";
+    $("st-mem").textContent = bytes((chip ?? 0) + (knownBytes(info.fast_free) ?? 0));
+    $("st-free").hidden = false;
+    // Drop capabilities that arrived after a disconnect / address change.
+    if (epoch !== capabilityEpoch) return;
+    showHear(amiga);
+    showLink();
+    showState();
   }
-  for (const action of ["now", "later", "skip"]) {
-    $(`update-${action}`).addEventListener("click", () => answerUpdate(action));
+
+  // the Connection tab: what the PC knows about the line to this Amiga
+  function showLink() {
+    const link = amiga.link || {};
+    $("about-address").textContent = where() || "â€“";
+    $("about-port").textContent = link.port || "â€“";
+    $("about-tls").textContent = link.tls === undefined ? "â€“" : t(link.tls ? "link_tls_on" : "link_tls_off");
+    $("about-protocol").textContent = link.protocol || "â€“";
+    const warn = amiga.pc_outdated ? t("pc_outdated") : link.amiga_outdated ? t("amiga_outdated") : "";
+    $("about-warn").textContent = warn;
+    $("about-warn").hidden = !warn;
+    $("about-versions").textContent = version
+      ? amiga.amigentd ? t("version_line", { pc: version, amiga: amiga.amigentd }) : t("version_pc", { pc: version })
+      : "â€“";
   }
-  $("about-update-now").addEventListener("click", () => {
-    $("about-dialog").close();
-    answerUpdate("now");
-  });
+
+  // The screen picker: Intuition's screens, front one first, plus the two Amiga screen keys.
+  let screenMenu = null;
+
+  function showHear(info) {
+    const button = $("hear");
+    const offered = hearEligible(info);
+    button.hidden = !offered;
+    if (!offered && hearing) stopHear(true);
+  }
+
+  function showScreens(list) {
+    const pick = $("screen-pick");
+    pick.hidden = list.length < 2;
+    const box = $("screen-list");
+    box.replaceChildren();
+    for (const s of list) {
+      const item = document.createElement("button");
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(!!s.front));
+      item.textContent = `${s.title || t("screen_untitled")} Â· ${s.w}Ã—${s.h}`;
+      item.addEventListener("click", () => {
+        send({ t: "screen", handle: s.handle });
+        canvas.focus();
+      });
+      box.append(item);
+      if (s.front) $("screen-name").textContent = item.textContent;
+    }
+    pick.setAttribute("aria-label", `${t("screen_select")}: ${$("screen-name").textContent}`);
+    screenMenu?.refresh();
+  }
+
+  function onEvent(m) {
+    switch (m.type) {
+      case "hello":
+        host = m.host;
+        document.title = `Amigent Â· ${host}`;
+        if (m.version) {
+          version = m.version;
+          $("about-version").textContent = m.version;
+        }
+        address = m.address || host;
+        $("about-host").textContent = where();
+        reason = m.reason || "";
+        if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
+        if (m.update) showUpdate(m.update);
+        paintUpdate();
+        amigaOnline = m.online;
+        showScreens(m.screens || []);
+        if (m.online && m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
+        else invalidateHearCapabilities();
+        if (m.w) setSize(m.w, m.h);
+        showLink();
+        showState();
+        showHear(amiga);
+        break;
+      case "size":
+        setSize(m.w, m.h);
+        break;
+      case "update":
+        showUpdate(m.update);
+        break;
+      case "amiga":
+        if (amigaOnline !== true) {
+          // Stale capability while disconnected / connecting â€” ignore for Hear.
+          return;
+        }
+        showAmiga(m);
+        break;
+      case "screens":
+        showScreens(m.screens);
+        break;
+      case "online":
+        amigaOnline = m.online;
+        reason = m.reason || "";
+        if (!m.online) {
+          stopHear(false);
+          invalidateHearCapabilities();
+        } else {
+          showHear(amiga);
+        }
+        showState();
+        break;
+      case "audio":
+        if (!m.on) stopHear(false);
+        break;
+      case "address":
+        stopHear(false);
+        invalidateHearCapabilities();
+        address = m.address;
+        $("about-host").textContent = where();
+        showLink();
+        break;
+      case "stats":
+        stats = m;
+        $("st-size").textContent = `${m.w}Ã—${m.h}`;
+        $("about-screen").textContent = `${m.w} Ã— ${m.h}`;
+        $("st-rate").textContent = `${m.kbps.toFixed(1)} KB/s`;
+        $("st-rtt").textContent = `${m.rtt.toFixed(0)} ms`;
+        $("about-speed").textContent = $("st-rate").textContent;
+        $("about-ping").textContent = $("st-rtt").textContent;
+        showPaused(m.paused || 0);
+        break;
+      case "upload":
+        onUpload(m);
+        break;
+      case "toast":
+        toast(m.text ? `${t(m.key)}: ${m.text}` : t(m.key), m.key.endsWith("failed"));
+        break;
+    }
+  }
+
+  // ---------------------------------------------------------------- picture
+
+  const LUT = new Uint32Array(256);
+  for (let v = 0; v < 256; v++) {
+    const r = Math.floor((v & 7) * 255 / 7);
+    const g = Math.floor(((v >> 3) & 7) * 255 / 7);
+    const b = Math.floor(((v >> 6) & 3) * 255 / 3);
+    LUT[v] = 0xff000000 | (b << 16) | (g << 8) | r;
+  }
+
+  // Pictures and tiles must land in the order they came: a snapshot decodes
+  // asynchronously, so everything after it waits for it.
+  let drawing = Promise.resolve();
+
+  function onBinary(buffer) {
+    const kind = new Uint8Array(buffer, 0, 1)[0];
+    if (kind === 1) {
+      drawing = drawing.then(() => drawTiles(buffer));
+    } else if (kind === 3) {
+      drawing = drawing.then(() => drawPixels(buffer));
+    } else if (false) {
+    } else if (kind === 5 && hearing && buffer.byteLength >= 5) {
+      const view = new DataView(buffer);
+      playPcm(view.getUint32(1), new Uint8Array(buffer, 5));
+    } else if (kind === 2) {
+      drawing = drawing
+        .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
+        .then((bitmap) => ctx.drawImage(bitmap, 0, 0))
+        .catch(() => {});
+    }
+  }
+
+  // One ImageData per tile shape, reused: no garbage per tile, the collector stays in its cave.
+  const scratch = new Map();
+
+  function tileImage(w, h) {
+    const key = w << 16 | h;
+    let entry = scratch.get(key);
+    if (!entry) {
+      const image = ctx.createImageData(w, h);
+      entry = { image, pixels: new Uint32Array(image.data.buffer) };
+      scratch.set(key, entry);
+    }
+    return entry;
+  }
+
+  function drawTiles(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    let at = 1;
+    while (at < buffer.byteLength) {
+      const x = view.getUint16(at), y = view.getUint16(at + 2);
+      const w = view.getUint16(at + 4), h = view.getUint16(at + 6);
+      const size = view.getUint32(at + 8);
+      const data = bytes.subarray(at + 12, at + 12 + size);
+      at += 12 + size;
+      const { image, pixels } = tileImage(w, h);
+      if (size === w * h && size !== 0) {
+        for (let i = 0; i < size; i++) pixels[i] = LUT[data[i]];
+      } else {
+        let p = 0;
+        for (let i = 0; i + 1 < size; i += 2) {
+          const run = data[i] + 1;
+          pixels.fill(LUT[data[i + 1]], p, p + run);
+          p += run;
+        }
+      }
+      ctx.putImageData(image, x, y);
+    }
+  }
+
+  // Message 3: regions the PC already decoded (bitplanes, HAM), three bytes a pixel.
+  function drawPixels(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    let at = 1;
+    while (at < buffer.byteLength) {
+      const x = view.getUint16(at), y = view.getUint16(at + 2);
+      const w = view.getUint16(at + 4), h = view.getUint16(at + 6);
+      at += 8;
+      const { image, pixels } = tileImage(w, h);
+      for (let i = 0, n = w * h; i < n; i++, at += 3) {
+        pixels[i] = 0xff000000 | (bytes[at + 2] << 16) | (bytes[at + 1] << 8) | bytes[at];
+      }
+      ctx.putImageData(image, x, y);
+    }
+  }
+
+  let hearing = false;
+  let audioCtx = null, player = null, playerBoot = null;
+  const playerQueue = [];
+  const WORKLET = `
+class AmigentPcm extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = 48000 * 8;
+    this.L = new Float32Array(this.cap);
+    this.R = new Float32Array(this.cap);
+    this.w = 0;
+    this.r = 0;
+    this.rate = 48000;
+    this.started = false;
+    this.port.onmessage = (e) => {
+      const pcm = e.data.pcm;
+      const n = pcm.length >> 1;
+      if (e.data.rate) this.rate = e.data.rate;
+      if (this.w - this.r + n >= this.cap) this.r = this.w + n - this.cap + 1;
+      for (let i = 0; i < n; i++) {
+        const at = this.w % this.cap;
+        this.L[at] = pcm[i * 2];
+        this.R[at] = pcm[i * 2 + 1];
+        this.w++;
+      }
+    };
+  }
+  process(_inputs, outputs) {
+    const ch = outputs[0];
+    if (!ch || !ch[0]) return true;
+    const L = ch[0];
+    const R = ch[1] || ch[0];
+    if (!this.started) {
+      if (this.w - this.r < this.rate * 0.25) {
+        L.fill(0);
+        if (ch[1]) R.fill(0);
+        return true;
+      }
+      this.started = true;
+    }
+    const step = this.rate / sampleRate;
+    for (let i = 0; i < L.length; i++) {
+      if (this.w - this.r < 2) {
+        L[i] = 0;
+        if (ch[1]) R[i] = 0;
+        continue;
+      }
+      const i0 = Math.floor(this.r);
+      const f = this.r - i0;
+      const a = i0 % this.cap;
+      const b = (i0 + 1) % this.cap;
+      L[i] = this.L[a] * (1 - f) + this.L[b] * f;
+      if (ch[1]) R[i] = this.R[a] * (1 - f) + this.R[b] * f;
+      this.r += step;
+    }
+    return true;
+  }
+}
+registerProcessor("amigent-pcm", AmigentPcm);
+`;
+
+  function playPcm(rate, pcm) {
+    if (!hearing || !pcm.byteLength || pcm.byteLength % 4) return;
+    const samples = pcm.byteLength / 4;
+    const out = new Float32Array(samples * 2);
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    for (let i = 0; i < samples; i++) {
+      out[i * 2] = view.getInt16(i * 4, true) / 32768;
+      out[i * 2 + 1] = view.getInt16(i * 4 + 2, true) / 32768;
+    }
+    const item = { rate: rate || 48000, pcm: out };
+    if (player) {
+      player.port.postMessage(item, [out.buffer]);
+      return;
+    }
+    playerQueue.push(item);
+    if (!playerBoot) {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+      playerBoot = audioCtx.audioWorklet.addModule(url).then(() => {
+        URL.revokeObjectURL(url);
+        if (!hearing) return;
+        player = new AudioWorkletNode(audioCtx, "amigent-pcm", { outputChannelCount: [2] });
+        player.connect(audioCtx.destination);
+        for (const queued of playerQueue) player.port.postMessage(queued, [queued.pcm.buffer]);
+        playerQueue.length = 0;
+      }).catch(() => { URL.revokeObjectURL(url); playerBoot = null; });
+    }
+  }
+
+
+  function stopHear(tell) {
+    hearing = false;
+    const button = $("hear");
+    if (button) button.setAttribute("aria-pressed", "false");
+    playerQueue.length = 0;
+    playerBoot = null;
+    if (player) {
+      try { player.disconnect(); } catch (_) {}
+      player = null;
+    }
+    if (audioCtx) {
+      const ctx = audioCtx;
+      audioCtx = null;
+      try { ctx.close(); } catch (_) {}
+    }
+    if (tell) send({ t: "audio", on: false });
+  }
 
   // ---------------------------------------------------------------- link
 
@@ -187,7 +589,7 @@
     $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
     $("machine-name").textContent = host || "Amiga";
     const state = up ? t("machines_online") : waiting ? t("machines_checking") : t("state_offline");
-    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu && amiga.cpu + (amiga.fpu_state && !["none", ""].includes(amiga.fpu_state) ? " + FPU" : "")].filter(Boolean).join(" · ") || state : state;
+    $("machine-sub").textContent = up ? [amiga.os, amiga.cpu && amiga.cpu + (amiga.fpu_state && !["none", ""].includes(amiga.fpu_state) ? " + FPU" : "")].filter(Boolean).join(" Â· ") || state : state;
     $("machine").setAttribute("aria-label", t("machine_switch", { name: host || "Amiga", state }));
     $("machine").title = up ? [where(), systemLine(amiga), cpuLine(amiga)].filter(Boolean).join("\n") : "";
     // the machine menu shows this window's own view of its Amiga, which is fresher than the list's
@@ -234,8 +636,8 @@
     const chip = knownBytes(info.chip_free);
     const fast = bytes(knownBytes(info.fast_free) ?? 0);
     const memory = chip === null ? t("mem_fast_only", { fast }) : t("mem_line", { chip: bytes(chip), fast });
-    $("about-system").textContent = systemLine(info) || "–";
-    $("about-cpu").textContent = cpuLine(info) || "–";
+    $("about-system").textContent = systemLine(info) || "â€“";
+    $("about-cpu").textContent = cpuLine(info) || "â€“";
     // Family comes from the file SYSINFO named, never from this machine's OS or CPU. After an
     // update that file may already be the replacement while the connected process is the old one,
     // so a match is shown as a named file, not as the proven running binary.
@@ -243,13 +645,13 @@
     const family = info.daemon_family || unknown;
     const version = info.daemon_version || unknown;
     $("about-daemon").textContent = info.daemon_identity === "named file"
-      ? `${family} (${t("named_file")}) · ${version}` : `${family} · ${version}`;
+      ? `${family} (${t("named_file")}) Â· ${version}` : `${family} Â· ${version}`;
     $("about-protocol").textContent = info.daemon_protocol ? String(info.daemon_protocol) : unknown;
     $("about-daemon-cpu").textContent = info.daemon_target || unknown;
     const caps = info.daemon_capabilities || [];
     $("about-daemon-caps").textContent = caps.length ? caps.join(", ") : unknown;
     $("about-memory").textContent = memory;
-    $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
+    $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "â€“";
     const list = $("about-volumes");
     list.replaceChildren();
     for (const v of info.volumes || []) {
@@ -261,7 +663,7 @@
       row.append(free);
       list.append(row);
     }
-    if (!list.children.length) list.textContent = "–";
+    if (!list.children.length) list.textContent = "â€“";
     $("st-mem").textContent = bytes((chip ?? 0) + (knownBytes(info.fast_free) ?? 0));
     $("st-free").hidden = false;
     showLink();
@@ -271,16 +673,16 @@
   // the Connection tab: what the PC knows about the line to this Amiga
   function showLink() {
     const link = amiga.link || {};
-    $("about-address").textContent = where() || "–";
-    $("about-port").textContent = link.port || "–";
-    $("about-tls").textContent = link.tls === undefined ? "–" : t(link.tls ? "link_tls_on" : "link_tls_off");
-    $("about-protocol").textContent = link.protocol || "–";
+    $("about-address").textContent = where() || "â€“";
+    $("about-port").textContent = link.port || "â€“";
+    $("about-tls").textContent = link.tls === undefined ? "â€“" : t(link.tls ? "link_tls_on" : "link_tls_off");
+    $("about-protocol").textContent = link.protocol || "â€“";
     const warn = amiga.pc_outdated ? t("pc_outdated") : link.amiga_outdated ? t("amiga_outdated") : "";
     $("about-warn").textContent = warn;
     $("about-warn").hidden = !warn;
     $("about-versions").textContent = version
       ? amiga.amigentd ? t("version_line", { pc: version, amiga: amiga.amigentd }) : t("version_pc", { pc: version })
-      : "–";
+      : "â€“";
   }
 
   // The screen picker: Intuition's screens, front one first, plus the two Amiga screen keys.
@@ -295,7 +697,7 @@
       const item = document.createElement("button");
       item.setAttribute("role", "menuitemradio");
       item.setAttribute("aria-checked", String(!!s.front));
-      item.textContent = `${s.title || t("screen_untitled")} · ${s.w}×${s.h}`;
+      item.textContent = `${s.title || t("screen_untitled")} Â· ${s.w}Ã—${s.h}`;
       item.addEventListener("click", () => {
         send({ t: "screen", handle: s.handle });
         canvas.focus();
@@ -311,7 +713,7 @@
     switch (m.type) {
       case "hello":
         host = m.host;
-        document.title = `Amigent · ${host}`;
+        document.title = `Amigent Â· ${host}`;
         if (m.version) {
           version = m.version;
           $("about-version").textContent = m.version;
@@ -353,8 +755,8 @@
         break;
       case "stats":
         stats = m;
-        $("st-size").textContent = `${m.w}×${m.h}`;
-        $("about-screen").textContent = `${m.w} × ${m.h}`;
+        $("st-size").textContent = `${m.w}Ã—${m.h}`;
+        $("about-screen").textContent = `${m.w} Ã— ${m.h}`;
         $("st-rate").textContent = `${m.kbps.toFixed(1)} KB/s`;
         $("st-rtt").textContent = `${m.rtt.toFixed(0)} ms`;
         $("about-speed").textContent = $("st-rate").textContent;
@@ -852,6 +1254,23 @@
   new MutationObserver(() => $("m-fit").setAttribute("aria-checked", $("fit").getAttribute("aria-pressed")))
     .observe($("fit"), { attributes: true, attributeFilter: ["aria-pressed"] });
 
+    $("hear").addEventListener("click", () => {
+    if (hearing) {
+      stopHear(true);
+      return;
+    }
+    // Visibility is not the only gate: refuse activation unless still eligible.
+    if (!hearEligible(amiga)) {
+      showHear(amiga);
+      return;
+    }
+    hearing = true;
+    $("hear").setAttribute("aria-pressed", "true");
+    if (!audioCtx) audioCtx = new AudioContext();
+    audioCtx.resume().catch(() => {});
+    send({ t: "audio", on: true });
+  });
+
   $("fullscreen").addEventListener("click", () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen().catch(() => {});
@@ -1139,7 +1558,7 @@
     row.querySelector(".bar i").style.width = `${m.state === "queued" ? 0 : percent}%`;
     const status = row.querySelector("span");
     if (m.state === "queued") status.textContent = t("queued");
-    else if (m.state === "sending") status.textContent = `${percent}% · ${sizeText(m.size)}`;
+    else if (m.state === "sending") status.textContent = `${percent}% Â· ${sizeText(m.size)}`;
     else if (m.state === "done") {
       row.classList.add("done");
       status.textContent = t("upload_done", { size: sizeText(m.size) });

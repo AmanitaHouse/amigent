@@ -1,0 +1,17 @@
+#!/bin/bash
+# Build amigentd.apollo with ApolloCrossDev.
+# Export APOLLOCROSSDEV to the ApolloCrossDev checkout. From any directory:
+#   src/native/amiga/build-amigentd-apollo
+#   make -f src/native/amiga/Makefile.apollo
+# The default target writes only under build/apollo.
+# Copying into src/amigent/amiga/bin is explicit:
+#   src/native/amiga/build-amigentd-apollo install
+# vasm is never left to its default output name, a.out.
+#
+# From Windows PowerShell, keep redirections inside a single-quoted bash
+# script. This is the form that does not create a file named " 2":
+#   wsl.exe --exec /bin/bash -lc 'src/native/amiga/build-amigentd-apollo > /tmp/apollo.log 2>&1'
+# PowerShell parses 2>&1 inside a double-quoted argument as its own
+# redirection and opens that file in the current directory.
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec make -f "$HERE/Makefile.apollo" "$@"

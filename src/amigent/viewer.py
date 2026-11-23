@@ -347,14 +347,21 @@ class Viewer:
             with self.clients_lock:
                 self.clients.add(ws)
                 self.ever_joined = True
+                n = len(self.clients)
+        print(f"{time.strftime('%H:%M:%S')} viewer page joined ({n} open)",
+              file=sys.stderr, flush=True)
         self.feed.ring()
 
     def leave(self, ws: WebSocket) -> None:
         with self.clients_lock:
             self.clients.discard(ws)
+            n = len(self.clients)
             if not self.clients:
                 self.alone_since = time.monotonic()
                 self.hear = False
+        print(f"{time.strftime('%H:%M:%S')} viewer page left ({n} open)",
+              file=sys.stderr, flush=True)
+        self.feed.ring()  # let the feed release a stale Amiga socket after WATCH_RELEASE
 
     def _watching(self) -> bool:
         with self.clients_lock:

@@ -279,23 +279,85 @@ def disassemble(data: bytes, address: int, a6: str = "", namer: Namer | None = N
     return "\n".join(lines)
 
 
+_HUNK = re.compile(r"(.+?)(?:\s+|:)hunk\s*(\d+)\s*(?:\+\s*(\$|0x)?([0-9a-fA-F]+))?", re.I)
+
+
+def split_hunk(text: str) -> tuple[str, int, int] | None:
+    """'prog hunk 4 +$10' as amiga_where writes it, also 'prog:hunk4+0x10' and
+    'prog hunk 4': (prog, 4, 0x10). The offset is hex, with or without $."""
+    m = _HUNK.fullmatch(text.strip())
+    if not m:
+        return None
+    return m.group(1).strip(), int(m.group(2)), int(m.group(4), 16) if m.group(4) else 0
+
+
+def parse_offset(text) -> int:
+    """An offset given on its own: a number, or text with $ or 0x for hex, else decimal."""
+    if isinstance(text, int):
+        return text
+    t = str(text).strip().replace(" ", "").lstrip("+")
+    if not t:
+        return 0
+    try:
+        if t.startswith("$"):
+            return int(t[1:], 16)
+        return int(t, 0) if t.lower().startswith(("0x", "-0x")) else int(t)
+    except ValueError:
+        raise ValueError(f"offset {text!r}: a number, $120 or 0x120 for hex") from None
+
+
+def programs(loaded: Loaded) -> list[list[Hunk]]:
+    """The hunks one program per list, as LOADED gives them: hunk 0 starts the next."""
+    out: list[list[Hunk]] = []
+    for h in loaded.hunks:
+        if out and h.number and (h.task, h.command) == (out[-1][0].task, out[-1][0].command):
+            out[-1].append(h)
+        else:
+            out.append([h])
+    return out
+
+
+def find_hunk(loaded: Loaded, who: str, number: int, task: TaskInfo | None = None) -> Hunk:
+    """Hunk number of the program who: a task name, the command or its file name.
+
+    task: the task when it was given by address; then its name and command
+    pick the program. Two programs that match are an error, not a guess."""
+    if task is not None:
+        groups = [g for g in programs(loaded)
+                  if g[0].task == task.name and (not task.command or g[0].command == task.command)]
+        who = f"{task.label} (${task.address:08X})"
+    else:
+        want = who.strip().lower()
+        short = want.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        groups = []
+        for g in programs(loaded):
+            cmd = (g[0].command or "").lower()
+            names = (cmd, g[0].task.lower(), cmd.rsplit("/", 1)[-1].rsplit(":", 1)[-1])
+            if want in names or short in names:
+                groups.append(g)
+    if not groups:
+        raise ValueError(f"no running program {who}; amiga_loaded('programs') lists those that run, "
+                         "with their hunks")
+    if len(groups) > 1:
+        raise ValueError(f"{len(groups)} running programs match {who}; give the task's address "
+                         "from amiga_tasks")
+    hunks = groups[0]
+    for h in hunks:
+        if h.number == number:
+            return h
+    raise ValueError(f"{who} has hunks 0 to {hunks[-1].number}, no hunk {number}")
+
+
 def resolve(text: str, namer: Namer) -> int:
     """'$0A12B4C0', '0x...', '12345', 'dos.library' (its base) or 'dos.library/Write'
-    (where Write's code starts, from the jump table)."""
+    (where Write's code starts, from the jump table), or 'prog hunk 4 +$10'."""
     t = text.strip()
-    # 'prog hunk 4 +$10' as amiga_where writes it; also 'prog:hunk4+0x10', 'prog hunk 4'
-    m = re.fullmatch(r"(.+?)(?:\s+|:)hunk\s*(\d+)\s*(?:\+\s*(\$|0x)?([0-9a-fA-F]+))?", t, re.I)
-    if m:
-        who, number = m.group(1).strip().lower(), int(m.group(2))
-        off = int(m.group(4), 16) if m.group(4) else 0
-        short = who.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
-        for h in namer.loaded.hunks:
-            cmd = (h.command or "").lower()
-            names = (cmd, h.task.lower(), cmd.rsplit("/", 1)[-1].rsplit(":", 1)[-1])
-            if h.number == number and (who in names or short in names):
-                return h.start + off
-        raise ValueError(f"no running program {m.group(1)} with hunk {number}; "
-                         "amiga_loaded('programs', name) lists its hunks")
+    if parts := split_hunk(t):
+        who, number, off = parts
+        h = find_hunk(namer.loaded, who, number)
+        if off >= h.size:
+            raise ValueError(f"{who} hunk {number} is ${h.size:X} bytes; +${off:X} is beyond it")
+        return h.start + off
     if "/" in t:
         lib_name, fn = t.split("/", 1)
         lib = _find_lib(namer.loaded, lib_name)
@@ -392,6 +454,17 @@ def task_table(tasks: list[TaskInfo], name: str = "") -> str:
     return "\n".join(rows) or "no such task"
 
 
+def match_tasks(tasks: list[TaskInfo], which: str) -> list[TaskInfo]:
+    """Tasks by name or command: exact names (or the program's file name) first,
+    else every task whose name contains it."""
+    w = which.strip().lower()
+    if not w:
+        return []
+    hits = [t for t in tasks if w in (t.name.lower(), t.command.lower())
+            or t.command.lower().endswith(("/" + w, ":" + w))]
+    return hits or [t for t in tasks if w in t.label.lower()]
+
+
 def find_task(tasks: list[TaskInfo], which: str) -> TaskInfo:
     """By address ($.. or hex) or by name or command, which must be unique."""
     w = which.strip()
@@ -404,10 +477,7 @@ def find_task(tasks: list[TaskInfo], which: str) -> TaskInfo:
             if t.address == at:
                 return t
         raise ValueError(f"no task at ${at:08X}")
-    hits = [t for t in tasks if w.lower() in (t.name.lower(), t.command.lower())
-            or t.command.lower().endswith(("/" + w.lower(), ":" + w.lower()))]
-    if not hits:
-        hits = [t for t in tasks if w.lower() in t.label.lower()]
+    hits = match_tasks(tasks, w)
     if len(hits) != 1:
         raise ValueError(f"{len(hits)} tasks match {which!r}: " + ", ".join(
             f"{t.label} (${t.address:08X})" for t in hits[:8]) if hits else f"no task matches {which!r}")

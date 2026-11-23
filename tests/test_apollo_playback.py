@@ -19,7 +19,8 @@ from amigent.paths import AMIGA
 from amigent.viewer import Viewer, pcm_message
 from amigent.webserver import WEB
 
-DAEMON = (128744, "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1")  # D3+TRACE+POKE deadline; NOT HARDWARE VALIDATED
+# Current packaged rebuild (1.5.0 sources). Historical HW-smoke 63db83ff… is SUPERSEDED.
+DAEMON = (132140, "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d")
 
 
 def test_audio_capability_follows_the_advertisement_and_the_protocol():
@@ -31,8 +32,9 @@ def test_audio_capability_follows_the_advertisement_and_the_protocol():
     assert feature_opcode(4, "AUDIO", {"audio": "1"}) is None
     viewer = (WEB.parent / "viewer.py").read_text(encoding="utf-8")
     page = (WEB / "viewer.js").read_text(encoding="utf-8")
-    # The fork keeps the SAGA picture-in-picture beside the on-demand audio.
-    assert "_poll_pip" in viewer and "drawPip" in page and "kind === 4" in page
+    # This contribution ships Hear only; PIP surface polling stays out of scope.
+    assert "_poll_pip" not in viewer and "drawPip" not in page
+    assert "hear_eligible" in viewer and "showHear" in page and "kind === 5" in page
 
 
 def test_remote_tlsonly_audio_does_not_accept_plaintext(monkeypatch):
@@ -228,7 +230,7 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
         def audio(self, ms):
             raise AssertionError("the mix was read")
 
-    monkeypatch.setattr(server, "ctl", Quiet())
+    monkeypatch.setattr(server._session(), "ctl", Quiet())
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     assert server.amiga_listen(1) == ["this Amiga has no AHI mix to hear"]
 
@@ -239,7 +241,7 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
         def audio(self, ms):
             raise AmigaError("the Amiga does not answer")
 
-    monkeypatch.setattr(server, "ctl", Down())
+    monkeypatch.setattr(server._session(), "ctl", Down())
     with pytest.raises(AmigaError, match="does not answer"):
         server.amiga_listen(1)
 
@@ -253,7 +255,7 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
             assert ms == 200
             return 48000, pcm
 
-    monkeypatch.setattr(server, "ctl", Playing())
+    monkeypatch.setattr(server._session(), "ctl", Playing())
     text, block = server.amiga_listen(0.2)
     assert text == f"heard {len(pcm)} bytes at 48000 Hz"
     assert block.data == pcm_wav(pcm, 48000) and block.data.startswith(b"RIFF")
@@ -269,7 +271,7 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
         def audio(self, ms):
             return 48000, b""
 
-    monkeypatch.setattr(server, "ctl", Silent())
+    monkeypatch.setattr(server._session(), "ctl", Silent())
     assert server.amiga_listen(1) == ["nothing is playing through AHI"]
 
 
@@ -284,7 +286,7 @@ def test_fork_apollo_source_does_not_write_stream_diagnostics():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    apollo = (root / "src/native/amiga/platform/apollo/apollo.c").read_text(encoding="utf-8")
+    apollo = (root / "src/native/amiga" / "apollo" / "apollo_audio.c").read_text(encoding="utf-8")
     assert 'Open("T:audio-mem"' not in apollo
     assert 'Open("T:audio-ptrs"' not in apollo
     assert "dump_mix" not in apollo

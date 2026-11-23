@@ -26,10 +26,16 @@ from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLD
 def pinned(host: str) -> Path:
     """This Amiga's pinned cert: by name, by any address it ever had, or by what DNS says."""
     names = roster.aliases(host)
+    ident, blocked = roster.pin_conflicts(host)
     for name in names:
+        if safe(name) in blocked:
+            continue
         path = FOLDER / f"tls-{safe(name)}.pem"
         if path.exists():
             return path
+    if blocked:
+        raise roster.RegistryError(f"Ambiguous TLS pin for {host}. "
+                                  f"Save its verified certificate as tls-{ident}.pem.")
     return FOLDER / f"tls-{safe(names[0])}.pem"
 
 
@@ -37,13 +43,30 @@ def wanted(host: str) -> bool:
     return os.environ.get("AMIGENT_TLS", "auto").lower() != "off" and pinned(host).exists()
 
 
-TLS_UNAVAILABLE_TEXT = (
-    "amigentd accepts only encrypted connections, but its TLS port is not available. "
-    "The plain connection was closed before any key was sent."
-)
-TLS_HANDSHAKE_TEXT = (
-    "amigentd's TLS handshake failed. The connection was not retried in the clear."
-)
+AMISSL_OPEN, PLAIN_CLOSED = 2, 4  # hello flags: AmiSSL works; plain is for localhost only
+PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
+                     "certificate (tls-<id>.pem → tls-<address>.pem in ~/.config/amigent/ on the PC that set it up) "
+                     "to this one, or run amigent-setup again.")
+NO_TLS_TEXT = ("amigentd runs TLSONLY, but AmiSSL does not open there, so it turns every other "
+               "computer away. Repair it at the Amiga: install AmiSSL again and run amigent-repair "
+               "from the Amigent folder, or start amigentd SETUP there and run amigent-setup again.")
+
+NO_CERT_TEXT = ("amigentd runs TLSONLY and AmiSSL works, but S:amigent-tls.pem does not load, so "
+                "its encrypted port is closed and every other computer is turned away. Repair it "
+                "at the Amiga: delete S:amigent-tls.pem and run amigent-repair from the Amigent "
+                "folder, or start amigentd SETUP there and run amigent-setup again.")
+HELLO_SECONDS = 1.0  # the plain hello after a refused TLS port; the Amiga is up, so it is quick
+
+
+class TlsDown(ConnectionRefusedError):
+    """The TLS port refused, and the plain port's hello says why."""
+
+
+def plain_closed(flags: int, encrypted: bool) -> str:
+    """Why a plain connection is about to be closed, from the hello flags; '' if it is not."""
+    if encrypted or not flags & PLAIN_CLOSED:
+        return ""
+    return PLAIN_CLOSED_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
 
 
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
@@ -55,9 +78,38 @@ def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     return context.wrap_socket(sock)
 
 
+def _why_tls_refused(address: str, port: int) -> str:
+    """After the TLS port refused: what the plain port's hello says about it, or ''.
+
+    Only the 8-byte hello is read; nothing at all is sent, no key and no command,
+    and the line is closed at once.
+    """
+    try:
+        with socket.create_connection((address, port), HELLO_SECONDS) as plain:
+            plain.settimeout(HELLO_SECONDS)
+            hello = b""
+            while len(hello) < 8 and (chunk := plain.recv(8 - len(hello))):
+                hello += chunk
+    except OSError:
+        return ""
+    if len(hello) < 8 or hello[:4] != b"AMGT":
+        return ""
+    flags = int.from_bytes(hello[6:8], "big")
+    if not flags & PLAIN_CLOSED:
+        return ""
+    return NO_CERT_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
+
+
 def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
     if wanted(host):
-        sock = socket.create_connection((address, port + 1), timeout)
+        try:
+            sock = socket.create_connection((address, port + 1), timeout)
+        except ConnectionRefusedError as e:
+            # Refused means the Amiga is up and the TLS port shut; an Amiga that is off
+            # times out instead and costs no second try.
+            if why := _why_tls_refused(address, port):
+                raise TlsDown(why) from e
+            raise
         try:
             return wrap(sock, host)
         except (OSError, ssl.SSLError):
@@ -72,10 +124,15 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     host is a name or an address. No answer there? One sweep of the local
     network, and the Amiga is picked up again at its new address.
     """
+    host = roster.identity(host)
     address = roster.address(host)  # machines is only rung when the line stays dead
     try:
         return _dial(address, host, port, timeout)
+    except TlsDown:
+        raise  # it answered where it was; nothing to look for
     except (OSError, ssl.SSLError):
+        if not roster.is_id(host):
+            raise  # a one-off address must never change the saved registry
         moved = machines.relocate(host)
         if not moved or moved == address:
             raise
@@ -113,7 +170,7 @@ def make_certificate(host: str) -> tuple[bytes, bytes] | None:
 
 def remember(host: str, certificate: bytes) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = FOLDER / f"tls-{safe(host)}.pem"
+    path = FOLDER / f"tls-{safe(roster.identity(host))}.pem"
     path.write_bytes(certificate)
     return path
 

@@ -2,7 +2,9 @@
 installations that can be undone, Aminet, and several steps in one call."""
 
 import json
+import os
 import shutil
+from pathlib import Path
 import socket
 import struct
 import subprocess
@@ -167,6 +169,82 @@ def test_a_floor_alone_is_no_estimate(tmp_path):
     assert p.line_kbs is None
     p.note(1024 * 1024, 1.0)
     assert p.line_kbs == 1024.0
+
+
+def _fast(tmp_path, fast=pack.FAST_CPU, best=400, inflate=500, line=None, mode="auto", host="10.0.0.9"):
+    p = pack.Policy("fast", host, mode=mode, path=tmp_path / "link.json")
+    p.learn({"deflate_fast": str(int(fast)), "deflate_best": str(best), "inflate": str(inflate)})
+    p.line_kbs = line
+    return p
+
+
+def test_a_fast_cpu_stays_raw_until_a_real_sample(tmp_path):
+    """1500 KB/s against the assumed 100 KB/s line would pack at once, and a packed
+    reply is not allowed to start the measurement, so the guess would never end."""
+    p = _fast(tmp_path, best=200)
+    assert p.line_kbs is None
+    assert p.level() == 0 and p.upload() is False and p.frame_level() == 0
+    p.note(1024 * 1024, 1.0, at_least=True)
+    assert p.line_kbs is None and p.level() == 0
+    p.note(1024 * 1024, 10.0)  # a raw reply, about 102 KB/s
+    assert p.line_kbs == pytest.approx(102.4)
+    assert p.level() == 1 and p.upload()  # the measured line, not the assumption
+    p.note(1024 * 1024, 0.25)  # a later raw reply, about 4096 KB/s, blended in
+    assert p.level() == 0 and not p.upload()
+
+
+def test_a_slower_cpu_keeps_the_assumed_line(tmp_path):
+    p = _fast(tmp_path, fast=pack.FAST_CPU - 1, best=140, inflate=500)
+    assert p.line_kbs is None and p.level() == 1 and p.upload()
+
+
+def test_a_measured_link_does_not_wait_for_another_sample(tmp_path):
+    slow = _fast(tmp_path, fast=2000, best=900, line=40)
+    assert slow.level() == 2 and slow.upload()
+    quick = _fast(tmp_path, fast=2000, best=900, line=8000)
+    assert quick.level() == 0 and not quick.upload()
+
+
+def test_an_explicit_mode_is_not_held_for_a_sample(tmp_path):
+    assert _fast(tmp_path, mode="fast").level() == 1
+    assert _fast(tmp_path, mode="fast").upload()
+    assert _fast(tmp_path, mode="best", best=900).level() == 2
+    assert _fast(tmp_path, mode="off").level() == 0
+    assert _fast(tmp_path, mode="off").upload() is False
+
+
+def test_a_68000_never_deflates_in_auto_mode(tmp_path):
+    """Deflate costs a 68000 more time than it saves bytes (#43): auto mode leaves
+    it off, also for the screens' tries now and then; a choice by hand still packs."""
+    for cpu in ("68000", "68010"):
+        p = pack.Policy("slow", "10.0.0.9", path=tmp_path / f"link-{cpu}.json")
+        p.learn({"deflate_fast": "40", "deflate_best": "15", "inflate": "300", "cpu": cpu})
+        p.line_kbs = 5.0  # a line slow enough that the rates alone would pack
+        assert p.slow_cpu and p.level() == 0
+        assert [p.frame_level() for _ in range(100)] == [0] * 100
+        p.set_mode("fast")
+        assert p.level() == 1 and p.frame_level() == 1
+    quick = pack.Policy("quick", "10.0.0.9", path=tmp_path / "link.json")
+    quick.learn({"deflate_fast": "40", "deflate_best": "15", "inflate": "300", "cpu": "68020"})
+    quick.line_kbs = 5.0
+    assert not quick.slow_cpu and quick.level() == 2
+
+
+def test_a_failed_save_removes_the_part_file(tmp_path, monkeypatch):
+    path = tmp_path / "link.json"
+    policy = pack.Policy("fast", "10.0.0.9", path=path)
+    real = Path.write_text
+
+    def fail(self, *args, **kwargs):
+        if self.name.endswith(".part"):
+            real(self, *args, **kwargs)
+            raise OSError("disk")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail)
+    policy.note(64 * 1024, 1.0)
+    assert not path.exists()
+    assert not path.with_name(f"{path.name}.{os.getpid()}.part").exists()
 
 
 def _screens(p, plain_kbs, packed_kbs, count):
@@ -398,6 +476,41 @@ def test_click_point_lies_on_the_word():
     assert 140 < x < 200 and y == 5
 
 
+MONITOR = [
+    "I\t30\t0\t5\t4096",
+    "W\t00000009\t0\t0\t300\t200\tm\tAmigent Monitor",
+    "L\t00000009\t10\t20\t200\t10\tC  click_text Ready",
+    "L\t00000009\t10\t40\t200\t10\tchip free          1.81 MB",
+    "W\t00000001\t320\t0\t300\t200\ta\tShell",
+    "L\t00000001\t330\t20\t80\t10\tReady",
+]
+
+
+def test_the_monitor_window_is_read_and_marked():
+    st = screentext.parse(MONITOR)
+    assert st.windows[0].monitor and not st.windows[1].monitor
+    text = screentext.render(st)
+    assert "chip free" in text and "amigent-monitor" in text
+    assert "chip free" in screentext.render(st, window="Amigent Monitor")
+
+
+def test_searches_and_clicks_skip_the_monitor_unless_named():
+    st = screentext.parse(MONITOR)
+    win, row = screentext.find_row(st, "Ready")
+    assert win.title == "Shell"
+    win, row = screentext.find_row(st, "click_text", window="Monitor")
+    assert win.monitor
+    assert screentext.find_row(st, "click_text") is None
+    found = screentext.render(st, find="ready")
+    assert "Shell" in found and "Monitor" not in found
+    assert "click_text" in screentext.render(st, window="monitor", find="click")
+
+
+def test_older_amigentd_without_the_flag_parse_as_before():
+    st = screentext.parse(LINES)
+    assert not any(w.monitor for w in st.windows)
+
+
 # ---- notes
 
 
@@ -443,7 +556,7 @@ def test_scripts_name_the_right_paths():
     r.before = {"C:": {"Dir": entry("FILE"), "New": entry("FILE")}, "SYS:WBStartup": {}}
     r.added = ["C:Foo", "SYS:WBStartup/Bar"]
     r.changed = ["C:Dir"]
-    assert 'Copy "C:" "Stuff:amigent/undo/demo/C" ALL CLONE QUIET' in install.begin_script(r)
+    assert 'Copy "C:" "Stuff:amigent/undo/demo/C" ALL CLONE NOREQ QUIET' in install.begin_script(r)
     prune = install.prune_script(r)
     assert "undo/demo/C/New" in prune and "undo/demo/C/Dir" not in prune
     undo = install.undo_script(r, [])
@@ -499,10 +612,13 @@ class TreeCtl:
 def test_install_round_trip(monkeypatch):
     trees = {"C:": {"Dir": entry("FILE")}, "LIBS:": {}}
     fake = TreeCtl(trees)
-    monkeypatch.setattr(server, "ctl", fake)
+    monkeypatch.setattr(server._session(), 'ctl', fake)
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     monkeypatch.setattr(install, "SYSTEM", ["C:", "LIBS:"])
     monkeypatch.setattr(server.files, "makedirs", lambda ctl, path: None)
+    monkeypatch.setattr(server, "_start_job", lambda script, title="": 1)  # the backup job
+    monkeypatch.setattr(server, "_wait_job", lambda number, wait: "")
+    monkeypatch.setattr(server, "_marker_ok", lambda record: True)
     assert "ready" in server.amiga_install_begin("demo")
     trees["C:"]["Foo"] = entry("FILE")
     trees["LIBS:"]["x.library"] = entry("FILE")
@@ -587,7 +703,7 @@ def test_wait_reports(monkeypatch):
                 raise AmigaError("timeout", 2)
             return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
 
-    monkeypatch.setattr(server, "ctl", C())
+    monkeypatch.setattr(server._session(), 'ctl', C())
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     assert server.amiga_wait_window("Req") == "window 'Req' 0000beef (1,2 30x40) active"
     assert server.amiga_wait_window("slow", timeout=3).startswith("timeout")
@@ -598,7 +714,7 @@ def test_changed_box_covers_the_new_tiles(monkeypatch):
     class S:
         changes = [(1.0, 0, 0, 64, 64), (5.0, 128, 64, 64, 64), (6.0, 192, 128, 64, 32)]
 
-    monkeypatch.setattr(server, "screen", S())
+    monkeypatch.setattr(server._session(), 'screen', S())
     assert server._changed_box(2.0) == (128, 64, 128, 96)
     assert server._changed_box(9.0) is None
 
@@ -607,7 +723,7 @@ def test_separate_changes_stay_separate(monkeypatch):
     class S:
         changes = [(5.0, 0, 0, 64, 64), (5.0, 64, 0, 64, 64), (5.0, 1856, 1024, 64, 56)]
 
-    monkeypatch.setattr(server, "screen", S())
+    monkeypatch.setattr(server._session(), 'screen', S())
     assert server._changed_boxes(1.0) == [(0, 0, 128, 64), (1856, 1024, 64, 56)]
 
 
@@ -628,7 +744,7 @@ def test_new_window_after_a_start_excludes_those_open_before(monkeypatch):
             seen["kind"], seen["known"] = kind, known
             return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
 
-    monkeypatch.setattr(server, "ctl", C())
+    monkeypatch.setattr(server._session(), 'ctl', C())
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     monkeypatch.setattr(server, "_clear_hold", lambda: "")
     monkeypatch.setattr(server, "_window_ids", lambda: [0x1000, 0x2000])

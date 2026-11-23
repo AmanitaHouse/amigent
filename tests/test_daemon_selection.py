@@ -6,9 +6,9 @@ These tests use the packaged files and stand-ins. They do not contact an Amiga.
 from amigent import setup
 from amigent.client import ExecResult
 from amigent.daemons import (
-    AFF_FPGA, APOLLO_MARK, CPU_68000, CPU_68010, CPU_68020, CPU_68030, CPU_68040, CPU_68060,
-    CPU_68080, EXPERIMENTAL, Machine, available_names, choose, consider_replacement,
-    cpu_is_68080, detect_cpu, embedded_version, identify,
+    CPU_68000, CPU_68010, CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080,
+    EXPERIMENTAL, Machine, available_names, choose, consider_replacement, detect_cpu,
+    embedded_version, identify,
 )
 from amigent.errors import AmigaError
 from amigent.paths import AMIGA
@@ -25,75 +25,148 @@ def _answers(table):
     return run
 
 
-def test_cpu_checks_stop_at_the_first_cpu_the_machine_lacks():
-    assert detect_cpu(_answers([("CPU CHECK 68020", 5), ("CPU CHECK 68010", 5)])) == CPU_68000
-    assert detect_cpu(_answers([("CPU CHECK 68020", 5), ("CPU CHECK 68010", 0)])) == CPU_68010
-    assert detect_cpu(_answers([("CPU CHECK 68020", 0), ("CPU CHECK 68030", 5)])) == CPU_68020
-    assert detect_cpu(_answers([
-        ("CPU CHECK 68020", 0), ("CPU CHECK 68030", 0), ("CPU CHECK 68040", 0), ("CPU CHECK 68060", 5),
-    ])) == CPU_68040
-    assert detect_cpu(_answers([("CPU CHECK 68020", 20)])) is None
+def test_one_cpu_check_is_all_a_choice_needs():
+    asked = []
+
+    def run(command):
+        asked.append(command)
+        return {"CPU CHECK 68020": answer}.get(command, 10)
+
+    for answer, cpu in ((5, CPU_68000), (0, CPU_68020), (20, None)):
+        asked.clear()
+        assert detect_cpu(run) == cpu
+        assert asked == ["CPU CHECK 68020"]
+    # the builds part at the 68020 only: every CPU on either side gets the same file
+    present = available_names(BIN)
+    assert {choose(Machine(c), present).name for c in (CPU_68000, CPU_68010)} == {"amigentd.000"}
+    assert {choose(Machine(c), present).name
+            for c in (CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080)} == {"amigentd"}
+
+
+def test_the_build_date_breaks_a_tie_and_force_overrides(tmp_path, monkeypatch):
+    from amigent.daemons import embedded_date
+
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    packaged = b"$VER: amigentd 1.5.0 (21.11.2026)\x00 rebuilt"
+    (binary / "amigentd").write_bytes(packaged)
+    earlier = b"$VER: amigentd 1.5.0 (19.11.2026)\x00 first build"
+    later = b"$VER: amigentd 1.5.0 (2.12.2026)\x00 own build"
+    assert embedded_date(packaged) == (2026, 11, 21) and embedded_date(b"no version") is None
+    replace, reason = consider_replacement(earlier, packaged, "amigentd", binary)
+    assert replace and reason == ""
+    keep, reason = consider_replacement(later, packaged, "amigentd", binary)
+    assert not keep and "later date" in reason and "--force" in reason
+
+    package = tmp_path
+    (package / "amigent-update.rexx").write_bytes(b"/* stand-in */")
+    monkeypatch.setattr(setup, "AMIGA", package)
+    monkeypatch.setattr(setup.time, "sleep", lambda _seconds: None)
+    channel = Channel(later)
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    monkeypatch.setattr(setup, "update_folders", lambda *a: None)
+    monkeypatch.setattr(setup, "UPDATE_WAIT", 0)
+    assert setup.update("192.0.2.1", None) == 0
+    assert "C:amigentd.new" not in channel.files
+    setup.update("192.0.2.1", None, force=True)
+    assert channel.files["C:amigentd.new"] == packaged
+
+
+def test_a_dead_line_while_reading_c_amigentd_is_not_a_missing_file(monkeypatch, capsys):
+    class Dead(Channel):
+        def read_file(self, path):
+            raise AmigaError("connection closed by amigentd")
+
+    monkeypatch.setattr(setup, "update_windows", lambda *a: None)
+    channel = Dead(b"$VER: amigentd 1.4.0 (1.1.2026)")
+    monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    monkeypatch.setattr(setup, "update_folders", lambda *a: (_ for _ in ()).throw(AssertionError("no")))
+    assert setup.update("192.0.2.1", None) == 1
+    assert "connection closed by amigentd" in capsys.readouterr().out
+    assert "C:amigentd.new" not in channel.files
+
+
+def test_a_fresh_install_with_an_unknown_cpu_says_why_it_takes_the_68000_build(capsys):
+    class Link:
+        def run(self, command):
+            return 20
+
+    assert setup.amigentd_build(Link()) == "amigentd.000"
+    out = capsys.readouterr().out
+    assert "68000 build" in out and "C:CPU" in out
 
 
 def test_each_cpu_gets_a_verified_compatible_daemon():
     present = available_names(BIN)
-    assert choose(Machine(CPU_68000, False), present).name == "amigentd.000"
-    assert choose(Machine(CPU_68010, False), present).name == "amigentd.000"
-    for cpu in (CPU_68020, CPU_68030, CPU_68040, CPU_68060):
-        assert choose(Machine(cpu, False), present).name == "amigentd"
-    assert choose(Machine(CPU_68080, False), present).name == "amigentd"
-    assert choose(Machine(CPU_68080, True), present).name == "amigentd.apollo"
-    assert choose(Machine(None, None), present).name == "amigentd.000"
+    assert choose(Machine(CPU_68000), present).name == "amigentd.000"
+    assert choose(Machine(CPU_68010), present).name == "amigentd.000"
+    for cpu in (CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080):
+        assert choose(Machine(cpu), present).name == "amigentd"
+    assert choose(Machine(None), present).name == "amigentd.000"
+    assert "amigentd.080" in present
     experimental = identify((BIN / "amigentd.080").read_bytes(), BIN)
     assert experimental is not None and experimental.status == EXPERIMENTAL
-    assert choose(Machine(CPU_68080, False), present).name != "amigentd.080"
+    assert choose(Machine(CPU_68080), present).name != "amigentd.080"
 
 
-def test_apolloos_without_core_evidence_keeps_the_general_daemon():
-    assert not cpu_is_68080({"os": "ApolloOS"})
-    assert cpu_is_68080({"cpu": "68080"})
-    assert cpu_is_68080({"attn_flags": hex(AFF_FPGA)})
-    assert cpu_is_68080({}, "ApolloOS\n68080\n")
-    assert not cpu_is_68080({}, "ApolloOS\n")
-    present = available_names(BIN)
-    assert choose(Machine(CPU_68020, True), present).name == "amigentd"
-    assert choose(Machine(CPU_68080, True), present).name == "amigentd.apollo"
+def test_a_missing_preferred_build_falls_back_and_an_empty_set_does_not():
+    assert choose(Machine(CPU_68020), {"amigentd.000"}).name == "amigentd.000"
+    assert choose(Machine(CPU_68000), {"amigentd"}) is None
+    assert choose(Machine(None), set()) is None
 
 
-def test_updates_keep_specialised_unknown_and_skip_identical(tmp_path, monkeypatch):
+def test_installer_falls_back_or_stops_when_files_are_missing(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    binary = package / "bin"
+    binary.mkdir(parents=True)
+    (binary / "amigentd.000").write_bytes(b"sixty-eight-thousand")
+    monkeypatch.setattr(setup, "AMIGA", package)
+    assert setup._chosen(Machine(CPU_68020)) == "amigentd.000"
+    assert setup._chosen(Machine(None)) == "amigentd.000"
+    (binary / "amigentd.000").unlink()
+    try:
+        setup._chosen(Machine(CPU_68020))
+    except SystemExit as stopped:
+        assert "no compatible" in str(stopped)
+    else:
+        raise AssertionError("a machine with no compatible daemon was given a build")
+
+
+def test_updates_keep_unknown_or_newer_and_skip_identical_bytes(tmp_path, monkeypatch):
     package = tmp_path / "amiga"
     binary = package / "bin"
     binary.mkdir(parents=True)
     classic = b"$VER: amigentd 1.4.0 (1.1.2026)\x00 classic"
-    apollo = b"$VER: amigentd 1.4.0 (1.1.2026)\x00 " + APOLLO_MARK
     older = b"$VER: amigentd 1.3.0 (1.1.2020)\x00 classic"
     same = b"$VER: amigentd 1.4.0 (1.1.2026)\x00 custom"
     newer = b"$VER: amigentd 1.5.0 (1.1.2027)\x00 classic"
     experimental = b"$VER: amigentd 1.4.0 (1.1.2026)\x00 experimental-080"
     (binary / "amigentd").write_bytes(classic)
-    (binary / "amigentd.apollo").write_bytes(apollo)
     (binary / "amigentd.080").write_bytes(experimental)
     monkeypatch.setattr(setup, "AMIGA", package)
 
-    assert consider_replacement(older, apollo, "amigentd.apollo", binary)[0]
-    keep, reason = consider_replacement(apollo, classic, "amigentd", binary)
-    assert not keep and "Apollo" in reason
+    replace, reason = consider_replacement(older, classic, "amigentd", binary)
+    assert replace and reason == ""
     keep, reason = consider_replacement(same, classic, "amigentd", binary)
     assert not keep and "same version" in reason
     keep, reason = consider_replacement(newer, classic, "amigentd", binary)
     assert not keep and "newer" in reason
     keep, reason = consider_replacement(classic, classic, "amigentd", binary)
     assert not keep and "same executable" in reason
-    assert consider_replacement(experimental, classic, "amigentd", binary)[0]
+    keep, reason = consider_replacement(None, classic, "amigentd", binary)
+    assert not keep and "no C:amigentd" in reason
+    replace, reason = consider_replacement(experimental, classic, "amigentd", binary)
+    assert replace and reason == ""
     assert embedded_version(older) == (1, 3, 0)
 
 
 class Channel:
-    protocol = 6
+    protocol = 4
 
-    def __init__(self, info, installed):
-        self.info = info
+    def __init__(self, installed, cpu_rc=0):
         self.files = {"C:amigentd": installed}
+        self.cpu_rc = cpu_rc
+        self.written = []
 
     def connect(self):
         pass
@@ -101,36 +174,37 @@ class Channel:
     def close(self):
         pass
 
-    def sysinfo(self):
-        return self.info
-
     def read_file(self, path):
         if path not in self.files:
             raise AmigaError("object not found")
         return self.files[path]
 
     def write_file(self, path, data):
+        self.written.append(path)
         self.files[path] = data
 
     def exec(self, command):
-        if command.startswith("CPU") or command.startswith("Version FULL"):
-            return ExecResult(0, "")
+        if command.startswith("CPU"):
+            return ExecResult(self.cpu_rc, "")
         if command.startswith("Version"):
             return ExecResult(0, "amigentd 1.4.0\n")
         return ExecResult(0, "")
 
 
-def test_update_keeps_installed_apollo_when_the_package_lacks_one(tmp_path, monkeypatch):
+def test_update_keeps_a_newer_unknown_daemon(tmp_path, monkeypatch):
     package = tmp_path / "amiga"
     binary = package / "bin"
     binary.mkdir(parents=True)
-    (binary / "amigentd").write_bytes((BIN / "amigentd").read_bytes())
-    (binary / "amigentd.000").write_bytes((BIN / "amigentd.000").read_bytes())
-    installed = (BIN / "amigentd.apollo").read_bytes()
+    (binary / "amigentd").write_bytes(b"$VER: amigentd 1.4.0 (1.1.2026)\x00 classic")
+    (binary / "amigentd.000").write_bytes(b"sixty-eight-thousand")
+    installed = b"$VER: amigentd 1.5.0 (1.1.2027)\x00 custom"
     monkeypatch.setattr(setup, "AMIGA", package)
     monkeypatch.setattr(setup.time, "sleep", lambda _seconds: None)
-    channel = Channel({"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"}, installed)
+    channel = Channel(installed)
     monkeypatch.setattr(setup, "AmigaChannel", lambda host, timeout=30: channel)
+    folders = []
+    monkeypatch.setattr(setup, "update_folders", lambda ch, home, spare, daemon: folders.append(daemon))
     assert setup.update("192.0.2.1", None) == 0
     assert channel.files["C:amigentd"] == installed
     assert "C:amigentd.new" not in channel.files
+    assert folders == [installed]  # the scripts are still renewed, next to the amigentd that runs

@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = ["mcp>=1.2,<2", "pillow>=10", "capstone>=5"]
 
+[project.optional-dependencies]
+serial = ["pyserial>=3.5"]  # amigent-serial: the Pi's debug output through a USB serial adapter
+
 [project.urls]
 Homepage = "https://github.com/akustikrausch/amigent"
 Documentation = "https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md"
@@ -34,6 +37,7 @@ amigent-doctor = "amigent.doctor:main"
 amigent-setup = "amigent.setup:main"
 amigent-viewer = "amigent.viewer:main"
 amigent-fleet = "amigent.fleet:main"
+amigent-serial = "amigent.serial_log:main"
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -42,7 +46,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["amigent*"]
-namespaces = false
 
 [tool.setuptools.dynamic]
 version = { attr = "amigent.__version__" }

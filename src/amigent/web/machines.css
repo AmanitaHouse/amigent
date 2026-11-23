@@ -1,0 +1,33 @@
+/* the machine menu and the Amiga manager; colours come from viewer.css's tokens */
+
+.machine-menu { width: 340px; }
+.machine-menu .machine-items { display: flex; flex-direction: column; }
+.machine-menu .machine-items [role="menuitemradio"] { min-height: 44px; }
+.machine-menu .machine-items [role="menuitemradio"][aria-checked="true"] { background: var(--control); }
+
+.machine-dialog { width: min(800px, calc(100vw - 32px)); max-height: calc(100vh - 40px); padding: 20px; }
+.machine-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.machine-dialog h2 { margin: 0; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text); }
+.machine-dialog h3 { margin: 8px 0; font-size: 15px; }
+.machine-dialog form { padding: 0; }
+.machine-list { display: grid; gap: 12px; margin: 20px 0; }
+.machine-row { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.machine-row strong, .machine-row .address { display: block; margin-bottom: 5px; overflow-wrap: anywhere; }
+.machine-row .badge { position: static; display: inline-block; width: auto; height: auto; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--accent-line); background: var(--banner); color: var(--accent-ink); font-size: 12px; font-weight: 600; }
+.machine-row .address { color: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.machine-row .connection { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.machine-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.machine-actions button { font-size: 13px; }
+.machine-error, .machine-row .conflict { margin: 8px 0 0; color: var(--bad-ink); white-space: pre-wrap; }
+.machine-connect { border-top: 1px solid var(--line); padding-top: 16px; gap: 0; }
+.machine-connect label { font-size: 13px; color: var(--text); }
+.machine-connect div { display: flex; gap: 8px; margin: 8px 0; }
+.machine-connect input { flex: 1; min-width: 0; }
+.machine-connect small { display: block; color: var(--muted); font-size: 12px; }
+.machine-editor { margin-top: 20px; }
+.machine-editor label { display: block; margin-bottom: 8px; }
+.machine-editor input { width: 100%; }
+.machine-editor p { margin: 8px 0; }
+.machine-editor > div { display: flex; justify-content: flex-end; gap: 8px; }
+.machine-dialog [hidden] { display: none !important; }
+.machine-dialog .empty { color: var(--muted); }

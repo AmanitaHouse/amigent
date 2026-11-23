@@ -204,11 +204,24 @@ def _install_mac(host: str) -> list[str]:
         subprocess.run(["ditto", "-x", "-k", str(MAC_RELEASE), str(MAC_APP.parent)], check=True)
     else:
         build_mac_app(MAC_APP.parent, host=host)
-    subprocess.run(["touch", str(MAC_APP)], check=False)  # poke Finder into showing the icon
+    if shutil.which("touch"):
+        subprocess.run(["touch", str(MAC_APP)], check=False)  # poke Finder into showing the icon
     if shutil.which("mdimport"):
         subprocess.run(["mdimport", str(MAC_APP)], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # for Spotlight
     return [str(MAC_APP)]
+
+
+def installed() -> bool:
+    """Is Amigent installed as a program here (Installed apps, ~/Applications)?"""
+    if sys.platform == "darwin":
+        return MAC_APP.exists()
+    if not (_wsl() or sys.platform == "win32"):
+        return False
+    try:
+        return _powershell(f"Test-Path '{REGISTRY}'") == "True"
+    except (OSError, subprocess.CalledProcessError):
+        return False
 
 
 def install(host: str) -> list[str]:

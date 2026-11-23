@@ -3,11 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
 <title>Amigent</title>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
 <link rel="stylesheet" href="viewer.css">
+<link rel="stylesheet" href="machines.css">
+<script src="ui.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -20,164 +22,263 @@
   <symbol id="i-restart" viewBox="0 0 20 20"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.5v3.2h-3.2"/></symbol>
   <symbol id="i-about" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></symbol>
   <symbol id="i-panel" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M12.5 3.5v13"/></symbol>
+  <symbol id="i-more" viewBox="0 0 20 20"><circle cx="4.5" cy="10" r=".9"/><circle cx="10" cy="10" r=".9"/><circle cx="15.5" cy="10" r=".9"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 20 20"><path d="M6 8l4 4 4-4"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="10.5" rx="1.5"/><path d="M7 17h6M10 14v3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 20 20"><rect x="5" y="4" width="3.2" height="12" rx="1"/><rect x="11.8" y="4" width="3.2" height="12" rx="1"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 20 20"><rect x="5" y="3.5" width="10" height="14" rx="1.5"/><path d="M8 3.5h4v2H8z"/></symbol>
+  <symbol id="i-lang" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15M10 2.5c2.2 2.2 2.2 12.8 0 15M10 2.5c-2.2 2.2-2.2 12.8 0 15"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 3a7 7 0 0 0 0 14z" fill="currentColor"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="10" rx="2"/><path d="M5.5 8.5h.01M8.5 8.5h.01M11.5 8.5h.01M14.5 8.5h.01M6.5 12h7"/></symbol>
+  <symbol id="i-close" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></symbol>
+  <symbol id="i-game" viewBox="0 0 20 20"><rect x="1.5" y="6" width="17" height="9" rx="4.5"/><path d="M6 9v3M4.5 10.5h3M13.5 10h.01M15.5 11.5h.01"/></symbol>
   <symbol id="a-solid" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" fill-rule="evenodd" d="M6.6 2h2.8l4.4 12h-2.9l-.9-2.6H6l-.9 2.6H2.2zM6.8 9.1h2.4L8 5.4z"/></symbol>
   <symbol id="a-outline" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" d="M6.6 2h2.8l4.4 12h-2.9l-.9-2.6H6l-.9 2.6H2.2zM6.8 9.1h2.4L8 5.4z"/></symbol>
 </svg>
 
 <header id="bar">
-  <div class="title">
-    <img src="icon.svg" alt="" width="20" height="20">
-    <b>Amiga</b>
-    <span id="state" class="state" role="status"><i></i><span id="state-text">…</span></span>
+  <button id="machine" class="machine" type="button">
+    <img src="icon.svg" alt="" width="28" height="28">
+    <span class="machine-text">
+      <span class="machine-line"><b id="machine-name">Amiga</b><i id="machine-dot" class="dot"></i></span>
+      <span id="machine-sub" class="machine-sub"></span>
+    </span>
+    <svg class="chev"><use href="#i-chevron"/></svg>
+  </button>
+
+  <div class="center">
+    <button id="screen-pick" class="picker" type="button" data-i18n-title="screen_select" hidden>
+      <svg><use href="#i-screen"/></svg><span id="screen-name"></span><svg class="chev"><use href="#i-chevron"/></svg>
+    </button>
   </div>
-  <select id="screen-select" class="screens" data-i18n-aria="screen_select" hidden></select>
+
   <div class="actions">
-    <button id="upload" class="primary" data-i18n-title="send_tip" title="Copy files from this PC to the Amiga">
-      <svg><use href="#i-upload"/></svg><span data-i18n="send_file">Send file</span>
+    <button id="upload" class="primary" data-i18n-aria="send_file" data-i18n-title="send_tip">
+      <svg><use href="#i-upload"/></svg><span class="label" data-i18n="send_file">Send file</span>
     </button>
-    <button id="download" data-i18n-title="get_tip" title="Copy files from the Amiga to this PC">
-      <svg><use href="#i-download"/></svg><span data-i18n="get_file">Get file</span>
+    <button id="download" class="narrow-hide" data-i18n-aria="get_file" data-i18n-title="get_tip">
+      <svg><use href="#i-download"/></svg><span class="label" data-i18n="get_file">Get file</span>
     </button>
-    <button id="type" data-i18n-title="type_tip" title="Type text on the Amiga">
-      <svg><use href="#i-type"/></svg><span data-i18n="type_text">Type text</span>
+    <button id="type" class="narrow-hide" data-i18n-aria="type_text" data-i18n-title="type_tip">
+      <svg><use href="#i-type"/></svg><span class="label" data-i18n="type_text">Type text</span>
     </button>
-  </div>
-  <div class="tools">
-    <!-- Hear stays hidden until an active Apollo connection reports audio=1 (protocol ≥ 6). -->
+    <span class="sep narrow-hide"></span>
+    <button id="fit" class="icon narrow-hide" aria-pressed="true" data-i18n-label="fit"><svg><use href="#i-fit"/></svg></button>
+    <!-- Hear stays hidden until an active Apollo connection reports audio=1 (protocol >= 6). -->
     <button id="hear" class="icon" type="button" hidden aria-pressed="false" aria-label="Hear the Amiga" title="Hear the Amiga">&#9834;</button>
-    <button id="fit" class="icon" aria-pressed="true" data-i18n-label="fit"><svg><use href="#i-fit"/></svg></button>
     <button id="fullscreen" class="icon" data-i18n-label="fullscreen"><svg><use href="#i-full"/></svg></button>
-    <button id="shot" class="icon" data-i18n-label="screenshot"><svg><use href="#i-shot"/></svg></button>
-    <button id="restart" class="icon" data-i18n-label="restart"><svg><use href="#i-restart"/></svg></button>
-    <span class="sep"></span>
-    <button id="about" class="icon" data-i18n-label="about"><svg><use href="#i-about"/></svg></button>
+    <button id="shot" class="icon narrow-hide" data-i18n-label="screenshot"><svg><use href="#i-shot"/></svg></button>
     <button id="panel-toggle" class="icon" aria-pressed="true" aria-controls="panel" data-i18n-label="panel"><svg><use href="#i-panel"/></svg></button>
+    <button id="more" class="icon more" data-i18n-label="more"><svg><use href="#i-more"/></svg><i id="more-dot" class="badge" hidden></i></button>
   </div>
 </header>
+
+<div id="update" class="update-banner" role="status" hidden>
+  <svg><use href="#i-download"/></svg>
+  <span class="update-text"><b id="update-title"></b> <a id="update-page" class="link" target="_blank" rel="noopener" data-i18n="update_whats_new">What's new</a></span>
+  <span class="grow"></span>
+  <button id="update-now" class="primary" data-i18n="update_now">Update now</button>
+  <button id="update-later" data-i18n="update_later">Later</button>
+  <button id="update-skip" class="icon" data-i18n-label="update_skip"><svg><use href="#i-close"/></svg></button>
+</div>
 
 <div id="body">
   <main id="stage">
     <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen" data-i18n-aria="screen_label"></canvas>
-    <canvas id="pip" aria-hidden="true"></canvas>
+    <div class="pills">
+      <div id="game-pill" class="pill game" role="status" hidden><i></i><span id="game-pill-text"></span><kbd data-i18n="esc_leaves">Esc leaves</kbd></div>
+      <div id="paused" class="pill" role="status" hidden>
+        <span id="paused-text"></span>
+        <button id="resume" data-i18n="resume">Resume</button>
+      </div>
+    </div>
     <div id="overlay" class="overlay"><div class="spinner"></div><p id="overlay-text"></p><p id="overlay-reason" class="reason"></p>
-      <form id="find" class="find" hidden>
-        <p data-i18n="find_hint">If the Amiga got a new address, Amigent finds it again by itself. Or enter it here:</p>
-        <div class="find-row">
-          <input id="find-address" autocomplete="off" spellcheck="false" data-i18n-placeholder="find_placeholder" placeholder="for example 192.168.1.20">
-          <button id="find-go" class="primary" type="submit" data-i18n="find_connect">Connect</button>
-        </div>
-      </form>
+      <div id="offline-actions" class="offline-actions" hidden>
+        <button id="try-other" class="primary" data-i18n="offline_try">Try another Amiga…</button>
+        <button id="try-address" data-i18n="machines_connect_address">Connect to an address…</button>
+        <button id="try-manage" data-i18n="machines_manage">Manage Amigas…</button>
+      </div>
     </div>
     <div id="drop" class="overlay drop"><p data-i18n="drop_here">Drop to send to the Amiga</p></div>
-    <div id="uploads" aria-live="polite"></div>
-    <div id="paused" class="paused" role="status" hidden>
-      <span id="paused-text"></span>
-      <button id="resume" data-i18n="resume">Resume</button>
-    </div>
   </main>
 
   <aside id="panel" aria-label="Amiga keyboard" data-i18n-aria="keyboard_panel">
-    <section>
-      <h2 data-i18n="screens">Screens</h2>
-      <div class="grid two">
-        <button data-combo="lamiga+n" data-i18n="wb_front">Workbench to front</button>
-        <button data-combo="lamiga+m" data-i18n="next_screen">Next screen</button>
+    <div id="panel-tabs" class="tabs" role="tablist">
+      <button role="tab" id="tab-keys" aria-controls="pane-keys" data-i18n="keys">Keys</button>
+      <button role="tab" id="tab-programs" aria-controls="pane-programs" data-i18n="programs">Programs</button>
+      <button role="tab" id="tab-mouse" aria-controls="pane-mouse" data-i18n="tab_mouse">Mouse &amp; games</button>
+      <button role="tab" id="tab-shell" aria-controls="pane-shell" data-i18n="tab_shell">Shell</button>
+    </div>
+    <div class="panes">
+      <div id="pane-keys" role="tabpanel" aria-labelledby="tab-keys">
+        <section>
+          <h2 data-i18n="next_key">Next key with</h2>
+          <div class="keys mods">
+            <button class="key led" data-mod="64" aria-pressed="false" data-name="lamiga" data-i18n="key_lamiga_short">L·A</button>
+            <button class="key led" data-mod="128" aria-pressed="false" data-name="ramiga" data-i18n="key_ramiga_short">R·A</button>
+            <button class="key led" data-mod="8" aria-pressed="false" data-name="key_ctrl" data-i18n="key_ctrl">Ctrl</button>
+            <button class="key led" data-mod="16" aria-pressed="false" data-name="key_alt" data-i18n="key_alt">Alt</button>
+            <button class="key led" data-mod="1" aria-pressed="false" data-name="key_shift" data-i18n="key_shift">Shift</button>
+          </div>
+          <p class="hint" data-i18n="mod_tip">Click: for the next key. Double-click: stays on.</p>
+        </section>
+        <section>
+          <h2 data-i18n="keys">Keys</h2>
+          <div class="keys">
+            <button class="key" data-key="esc" data-i18n="key_esc">Esc</button>
+            <button class="key" data-key="tab" data-i18n="key_tab">Tab</button>
+            <button class="key" data-key="delete" data-i18n="key_del">Del</button>
+            <button class="key" data-key="help" data-i18n="key_help">Help</button>
+            <button class="key" data-key="return" data-i18n="key_return">Return</button>
+          </div>
+          <div class="keys">
+            <button class="key f" data-key="f1">F1</button><button class="key f" data-key="f2">F2</button><button class="key f" data-key="f3">F3</button><button class="key f" data-key="f4">F4</button><button class="key f" data-key="f5">F5</button>
+            <button class="key f" data-key="f6">F6</button><button class="key f" data-key="f7">F7</button><button class="key f" data-key="f8">F8</button><button class="key f" data-key="f9">F9</button><button class="key f" data-key="f10">F10</button>
+          </div>
+        </section>
+        <section>
+          <h2 data-i18n="cursor">Cursor</h2>
+          <div class="cursor">
+            <button class="key up" data-key="up" data-i18n-label="key_up">↑</button>
+            <button class="key left" data-key="left" data-i18n-label="key_left">←</button>
+            <button class="key down" data-key="down" data-i18n-label="key_down">↓</button>
+            <button class="key right" data-key="right" data-i18n-label="key_right">→</button>
+          </div>
+        </section>
+        <p class="note" data-i18n="panel_hint">Your PC keyboard types on the Amiga while the picture has focus.</p>
       </div>
-    </section>
 
-    <section>
-      <h2 data-i18n="programs">Programs</h2>
-      <div class="grid three">
-        <button data-combo="ramiga+o" data-i18n="open">Open</button>
-        <button data-combo="ramiga+s" data-i18n="save">Save</button>
-        <button data-combo="ramiga+q" data-i18n="quit">Quit</button>
-        <button data-combo="ramiga+c" data-i18n="copy">Copy</button>
-        <button data-combo="ramiga+x" data-i18n="cut">Cut</button>
-        <button data-combo="ramiga+v" data-i18n="paste">Paste</button>
-        <button data-combo="ramiga+a" data-i18n="select_all">Select all</button>
-        <button data-combo="ramiga+z" data-i18n="undo">Undo</button>
+      <div id="pane-programs" role="tabpanel" aria-labelledby="tab-programs" hidden>
+        <section>
+          <h2 data-i18n="menu_shortcuts">Menu shortcuts</h2>
+          <div class="grid two shortcuts">
+            <button data-combo="ramiga+o"><span data-i18n="open">Open</span><kbd>O</kbd></button>
+            <button data-combo="ramiga+s"><span data-i18n="save">Save</span><kbd>S</kbd></button>
+            <button data-combo="ramiga+q"><span data-i18n="quit">Quit</span><kbd>Q</kbd></button>
+            <button data-combo="ramiga+c"><span data-i18n="copy">Copy</span><kbd>C</kbd></button>
+            <button data-combo="ramiga+x"><span data-i18n="cut">Cut</span><kbd>X</kbd></button>
+            <button data-combo="ramiga+v"><span data-i18n="paste">Paste</span><kbd>V</kbd></button>
+            <button data-combo="ramiga+a"><span data-i18n="select_all">Select all</span><kbd>A</kbd></button>
+            <button data-combo="ramiga+z"><span data-i18n="undo">Undo</span><kbd>Z</kbd></button>
+          </div>
+        </section>
+        <section>
+          <h2 data-i18n="clipboard">Clipboard</h2>
+          <div class="grid two">
+            <button data-clip="get" data-i18n="clip_get" data-i18n-title="clip_get_tip">Amiga → PC</button>
+            <button data-clip="put" data-i18n="clip_put" data-i18n-title="clip_put_tip">PC → Amiga</button>
+          </div>
+        </section>
       </div>
-    </section>
 
-    <section>
-      <h2 data-i18n="clipboard">Clipboard</h2>
-      <div class="grid two">
-        <button id="clip-get" data-i18n="clip_get" data-i18n-title="clip_get_tip" title="Copy the Amiga's clipboard to this PC">Amiga → PC</button>
-        <button id="clip-put" data-i18n="clip_put" data-i18n-title="clip_put_tip" title="Put this PC's clipboard on the Amiga's clipboard">PC → Amiga</button>
+      <div id="pane-mouse" role="tabpanel" aria-labelledby="tab-mouse" hidden>
+        <section>
+          <h2 data-i18n="games">Games</h2>
+          <button id="game-mode" class="switch big" role="switch" aria-checked="false">
+            <svg><use href="#i-game"/></svg>
+            <span class="switch-text"><b data-i18n="game_mode">Game mode</b><span data-i18n="game_mode_tip">Captures the mouse, sends keys directly</span></span>
+            <span class="sw" aria-hidden="true"><span></span></span>
+          </button>
+          <details class="advanced">
+            <summary data-i18n="advanced">Advanced</summary>
+            <button id="rel-mouse" class="switch" role="switch" aria-checked="false" data-i18n-title="rel_mouse_tip">
+              <span class="switch-text" data-i18n="rel_mouse">Capture the mouse</span><span class="sw" aria-hidden="true"><span></span></span>
+            </button>
+            <button id="kb-direct" class="switch" role="switch" aria-checked="false" data-i18n-title="kb_direct_tip">
+              <span class="switch-text" data-i18n="kb_direct">Keys directly (no typing)</span><span class="sw" aria-hidden="true"><span></span></span>
+            </button>
+          </details>
+        </section>
+        <section>
+          <h2 data-i18n="mouse_buttons">Mouse buttons</h2>
+          <div class="grid two">
+            <button id="hold-right" class="led" aria-pressed="false" data-i18n="hold_right">Hold right button</button>
+            <button id="middle" data-i18n="middle_click">Middle click</button>
+          </div>
+          <p class="hint" data-i18n="hold_right_hint">Hold right button keeps an Amiga menu open while you move the pointer.</p>
+        </section>
       </div>
-    </section>
 
-    <section>
-      <h2>Shell</h2>
-      <div class="grid three shell">
-        <button data-combo="ctrl+c" data-i18n="break">Break</button>
-        <button data-combo="ctrl+d">Ctrl-D</button>
-        <button data-combo="ctrl+\" data-i18n="end_input">End input</button>
+      <div id="pane-shell" role="tabpanel" aria-labelledby="tab-shell" hidden>
+        <section>
+          <h2 data-i18n="tab_shell">Shell</h2>
+          <div class="grid one shortcuts">
+            <button data-combo="ctrl+c"><span data-i18n="shell_break">Stop command</span><kbd data-ctrl="C">Ctrl-C</kbd></button>
+            <button data-combo="ctrl+d"><span data-i18n="shell_eof">End of file</span><kbd data-ctrl="D">Ctrl-D</kbd></button>
+            <button data-combo="ctrl+\"><span data-i18n="end_input">End input</span><kbd data-ctrl="\">Ctrl-\</kbd></button>
+          </div>
+          <p class="hint" data-i18n="shell_hint">These go to the active Shell window.</p>
+        </section>
       </div>
-    </section>
-
-    <section>
-      <h2 data-i18n="keys">Keys</h2>
-      <div class="keys">
-        <button class="key" data-combo="esc">Esc</button>
-        <button class="key" data-combo="tab">Tab</button>
-        <button class="key" data-combo="delete">Del</button>
-        <button class="key" data-combo="help">Help</button>
-        <button class="key wide" data-combo="return">Return</button>
-      </div>
-      <div class="keys fkeys">
-        <button class="key f" data-combo="f1">F1</button><button class="key f" data-combo="f2">F2</button><button class="key f" data-combo="f3">F3</button><button class="key f" data-combo="f4">F4</button><button class="key f" data-combo="f5">F5</button>
-        <button class="key f" data-combo="f6">F6</button><button class="key f" data-combo="f7">F7</button><button class="key f" data-combo="f8">F8</button><button class="key f" data-combo="f9">F9</button><button class="key f" data-combo="f10">F10</button>
-      </div>
-    </section>
-
-    <section>
-      <h2 data-i18n="modifiers">Hold for the next key</h2>
-      <div class="keys mods">
-        <button class="key led" data-mod="64" aria-pressed="false" data-i18n-label="lamiga"><svg class="a"><use href="#a-solid"/></svg></button>
-        <button class="key led" data-mod="128" aria-pressed="false" data-i18n-label="ramiga"><svg class="a"><use href="#a-outline"/></svg></button>
-        <button class="key led" data-mod="8" aria-pressed="false">Ctrl</button>
-        <button class="key led" data-mod="16" aria-pressed="false">Alt</button>
-        <button class="key led" data-mod="1" aria-pressed="false">Shift</button>
-      </div>
-    </section>
-
-    <section>
-      <h2 data-i18n="mouse">Mouse</h2>
-      <div class="grid two mouse">
-        <button id="hold-right" class="led" aria-pressed="false" data-i18n="hold_right">Hold right button</button>
-        <button id="middle" data-i18n="middle_click">Middle click</button>
-        <button id="rel-mouse" class="led wide-row" aria-pressed="false" data-i18n="rel_mouse" data-i18n-title="rel_mouse_tip">Mouse for games</button>
-      </div>
-    </section>
-
-    <section>
-      <h2 data-i18n="pause_title">Pause the picture</h2>
-      <p class="hint" data-i18n="pause_hint">The Amiga stops reading its screen, so a test or benchmark has the CPU to itself. Mouse, keys and files keep working.</p>
-      <div class="grid three">
-        <button data-pause="60" data-i18n="pause_1">1 min</button>
-        <button data-pause="300" data-i18n="pause_5">5 min</button>
-        <button data-pause="900" data-i18n="pause_15">15 min</button>
-      </div>
-    </section>
-
-    <section>
-      <h2 data-i18n="keyboard">Keyboard</h2>
-      <div class="segmented" role="radiogroup">
-        <button id="kb-text" role="radio" aria-checked="true" data-i18n="kb_text" data-i18n-title="kb_text_tip" title="Characters through the Amiga's keymap">Text</button>
-        <button id="kb-direct" role="radio" aria-checked="false" data-i18n="kb_direct" data-i18n-title="kb_direct_tip" title="Key positions, held keys stay held">Direct (games)</button>
-      </div>
-    </section>
+    </div>
   </aside>
 </div>
 
 <footer id="status">
-  <span id="st-size">–</span><span id="st-rate">–</span><span id="st-rtt">–</span><span id="st-graphics" hidden></span><span id="st-mem"></span><span id="st-version"></span>
+  <button id="status-link" class="status-link" data-i18n-title="status_open">
+    <span><span class="k" data-i18n="st_screen">Screen</span> <span id="st-size">–</span></span>
+    <span><span class="k" data-i18n="st_link">Link</span> <span id="st-rate">–</span></span>
+    <span><span class="k" data-i18n="st_ping">Ping</span> <span id="st-rtt">–</span></span>
+    <span id="st-free" hidden><span class="k" data-i18n="st_free">Free</span> <span id="st-mem"></span></span>
+  </button>
+  <button id="st-version" class="status-link version" data-i18n-title="about"></button>
 </footer>
+
+<div id="notices">
+  <div id="uploads" aria-live="polite"></div>
+  <div id="toasts" aria-live="polite"></div>
+</div>
+
+<div id="screen-menu" data-i18n-aria="screen_select">
+  <div id="screen-list" role="group"></div>
+  <div class="sep" role="separator"></div>
+  <button role="menuitem" data-combo="lamiga+n"><svg><use href="#i-screen"/></svg><span data-i18n="wb_front">Workbench to front</span></button>
+  <button role="menuitem" data-combo="lamiga+m"><svg><use href="#i-restart"/></svg><span data-i18n="next_screen">Next screen</span></button>
+</div>
+
+<div id="more-menu" data-i18n-aria="more">
+  <button role="menuitem" id="m-update" class="accent" hidden><svg><use href="#i-download"/></svg><span id="m-update-text"></span></button>
+  <div class="sep" role="separator" id="m-update-sep" hidden></div>
+  <button role="menuitem" id="m-get" class="narrow-only"><svg><use href="#i-download"/></svg><span data-i18n="get_file">Get file</span></button>
+  <button role="menuitem" id="m-type" class="narrow-only"><svg><use href="#i-type"/></svg><span data-i18n="type_text">Type text</span></button>
+  <button role="menuitemcheckbox" id="m-fit" class="narrow-only" aria-checked="true"><svg><use href="#i-fit"/></svg><span data-i18n="fit">Fit to window</span></button>
+  <button role="menuitem" id="m-shot" class="narrow-only"><svg><use href="#i-shot"/></svg><span data-i18n="screenshot">Save screenshot</span></button>
+  <div class="sep narrow-only" role="separator"></div>
+  <div class="lbl" role="presentation" data-i18n="about_amiga">Amiga</div>
+  <button role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-describedby="pause-hint"><svg><use href="#i-pause"/></svg><span data-i18n="pause_title">Pause the picture</span><span class="aside">›</span></button>
+  <div role="menu" class="sub" data-i18n-aria="pause_title" hidden>
+    <div class="note" id="pause-hint" role="none" data-i18n="pause_hint"></div>
+    <button role="menuitem" data-pause="60" data-i18n="pause_1">1 min</button>
+    <button role="menuitem" data-pause="300" data-i18n="pause_5">5 min</button>
+    <button role="menuitem" data-pause="900" data-i18n="pause_15">15 min</button>
+  </div>
+  <button role="menuitem" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-clip"/></svg><span data-i18n="clipboard">Clipboard</span><span class="aside">›</span></button>
+  <div role="menu" class="sub" data-i18n-aria="clipboard" hidden>
+    <button role="menuitem" data-clip="get" data-i18n="clip_get">Amiga → PC</button>
+    <button role="menuitem" data-clip="put" data-i18n="clip_put">PC → Amiga</button>
+  </div>
+  <button role="menuitem" id="m-restart" class="danger"><svg><use href="#i-restart"/></svg><span data-i18n="restart">Restart Amiga…</span></button>
+  <div class="sep" role="separator"></div>
+  <div class="lbl" role="presentation">Amigent</div>
+  <button role="menuitem" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-lang"/></svg><span data-i18n="about_language">Language</span><span class="aside" id="m-lang-now"></span></button>
+  <div role="menu" class="sub" id="lang-menu" data-i18n-aria="about_language" hidden></div>
+  <button role="menuitem" aria-haspopup="menu" aria-expanded="false"><svg><use href="#i-theme"/></svg><span data-i18n="appearance">Appearance</span><span class="aside" id="m-theme-now"></span></button>
+  <div role="menu" class="sub" id="theme-menu" data-i18n-aria="appearance" hidden>
+    <button role="menuitemradio" data-theme-value="auto" data-i18n="theme_auto">Like the system</button>
+    <button role="menuitemradio" data-theme-value="light" data-i18n="theme_light">Light</button>
+    <button role="menuitemradio" data-theme-value="dark" data-i18n="theme_dark">Dark</button>
+  </div>
+  <button role="menuitem" id="m-keys"><svg><use href="#i-keyboard"/></svg><span data-i18n="shortcuts">Keyboard shortcuts</span></button>
+  <button role="menuitem" id="m-about"><svg><use href="#i-about"/></svg><span data-i18n="about">About Amigent</span></button>
+</div>
 
 <input id="file" type="file" multiple hidden>
 
-<dialog id="send-dialog">
+<dialog id="send-dialog" aria-labelledby="send-title">
   <form method="dialog">
     <h3 id="send-title" data-i18n="send_title">Send to the Amiga</h3>
     <ul id="send-files"></ul>
@@ -187,28 +288,31 @@
     <div class="browser">
       <ul id="folders" aria-label="Folders" data-i18n-aria="folders_label"></ul>
     </div>
+    <p id="get-hint" class="hint" data-i18n="get_pick" hidden>Select a file, then Get.</p>
     <div class="buttons">
       <button id="send-cancel" value="cancel" data-i18n="cancel">Cancel</button>
       <button id="send-go" value="send" class="primary" data-i18n="send">Send</button>
+      <button id="get-go" type="button" class="primary" data-i18n="get_go" disabled hidden>Get</button>
     </div>
   </form>
 </dialog>
 
-<dialog id="type-dialog">
+<dialog id="type-dialog" aria-labelledby="type-title">
   <form method="dialog">
-    <h3 data-i18n="type_title">Type on the Amiga</h3>
+    <h3 id="type-title" data-i18n="type_title">Type on the Amiga</h3>
     <p data-i18n="type_hint">The text goes to the active window, line breaks press Return.</p>
-    <textarea id="type-text" rows="5" spellcheck="false"></textarea>
+    <textarea id="type-text" rows="5" spellcheck="false" aria-labelledby="type-title"></textarea>
     <div class="buttons">
+      <span class="kbd-hint" data-i18n="type_keys">Ctrl+Enter types</span>
       <button value="cancel" data-i18n="cancel">Cancel</button>
       <button value="type" class="primary" data-i18n="type_go">Type</button>
     </div>
   </form>
 </dialog>
 
-<dialog id="restart-dialog">
+<dialog id="restart-dialog" aria-labelledby="restart-title">
   <form method="dialog">
-    <h3 data-i18n="restart_title">Restart the Amiga?</h3>
+    <h3 id="restart-title" data-i18n="restart_title">Restart the Amiga?</h3>
     <p data-i18n="restart_text">Open files are written to disk first. Unsaved work in programs is lost.</p>
     <div class="buttons">
       <button value="cancel" data-i18n="cancel" autofocus>Cancel</button>
@@ -217,51 +321,97 @@
   </form>
 </dialog>
 
-<dialog id="about-dialog" class="about">
-  <form method="dialog">
-    <div class="about-head">
-      <img src="icon.svg" alt="" width="64" height="64">
-      <div>
-        <h3>Amigent</h3>
-        <p id="about-version">Version –</p>
+<dialog id="about-dialog" class="about" aria-labelledby="about-title">
+  <div class="about-head">
+    <img src="icon.svg" alt="" width="48" height="48">
+    <div>
+      <h2 id="about-title">Amigent <span id="about-version"></span></h2>
+      <p data-i18n="about_text">Your real Amiga, live on this computer, with mouse and keyboard.</p>
+    </div>
+    <button id="about-close" class="icon" data-i18n-label="close"><svg><use href="#i-close"/></svg></button>
+  </div>
+  <div id="about-tabs" class="tabs" role="tablist">
+    <button role="tab" id="ab-tab-amigent" aria-controls="ab-amigent">Amigent</button>
+    <button role="tab" id="ab-tab-amiga" aria-controls="ab-amiga" data-i18n="about_tab_amiga">This Amiga</button>
+    <button role="tab" id="ab-tab-link" aria-controls="ab-link" data-i18n="about_tab_link">Connection</button>
+    <button role="tab" id="ab-tab-keys" aria-controls="ab-keys" data-i18n="shortcuts">Keyboard shortcuts</button>
+  </div>
+  <div class="about-body">
+    <div id="ab-amigent" role="tabpanel" aria-labelledby="ab-tab-amigent">
+      <div id="about-update" class="update-box" hidden>
+        <svg><use href="#i-download"/></svg>
+        <span class="grow"><b id="about-update-text"></b> <a id="about-update-page" class="link" target="_blank" rel="noopener" data-i18n="update_whats_new">What's new</a></span>
+        <button id="about-update-now" class="primary" data-i18n="update_now">Update now</button>
+      </div>
+      <ul id="about-update-notes" class="notes"></ul>
+      <dl>
+        <dt data-i18n="about_version">Version</dt><dd id="about-versions">–</dd>
+        <dt data-i18n="about_project">Project page</dt><dd><a class="link" href="https://github.com/akustikrausch/amigent" target="_blank" rel="noopener">github.com/akustikrausch/amigent</a></dd>
+        <dt data-i18n="about_changes">What's new</dt><dd><a class="link" href="https://github.com/akustikrausch/amigent/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a></dd>
+        <dt data-i18n="about_by">Made by</dt><dd>Akustikrausch · Andreas Wendorf</dd>
+        <dt data-i18n="about_license">License</dt><dd>MIT</dd>
+        <dt data-i18n="about_thanks">Thanks</dt><dd data-i18n="thanks_text">tbdye for amigactld (GPLv3), Volker Barthelmann for vbcc</dd>
+      </dl>
+      <div class="about-settings">
+        <label for="language" data-i18n="about_language">Language</label>
+        <select id="language"></select>
+        <span class="grow"></span>
+        <label for="theme" data-i18n="appearance">Appearance</label>
+        <select id="theme">
+          <option value="auto" data-i18n="theme_auto">Like the system</option>
+          <option value="light" data-i18n="theme_light">Light</option>
+          <option value="dark" data-i18n="theme_dark">Dark</option>
+        </select>
       </div>
     </div>
-    <p data-i18n="about_text">Your real Amiga, live on this PC, with mouse and keyboard.</p>
-    <dl>
-      <dt data-i18n="about_amiga">Amiga</dt><dd id="about-host">–</dd>
-      <dt data-i18n="about_screen">Screen</dt><dd id="about-screen">–</dd>
-      <dt data-i18n="about_system">System</dt><dd id="about-system">–</dd>
-      <dt data-i18n="about_cpu">CPU</dt><dd id="about-cpu">–</dd>
-      <dt data-i18n="about_daemon">Daemon</dt><dd id="about-daemon">–</dd>
-      <dt data-i18n="about_protocol">Protocol</dt><dd id="about-protocol">–</dd>
-      <dt data-i18n="about_daemon_cpu">Daemon CPU</dt><dd id="about-daemon-cpu">–</dd>
-      <dt data-i18n="about_capabilities">Capabilities</dt><dd id="about-daemon-caps">–</dd>
-      <dt data-i18n="about_memory">Memory</dt><dd id="about-memory">–</dd>
-      <dt data-i18n="about_network">Network stack</dt><dd id="about-tcp">–</dd>
-      <dt data-i18n="about_volumes">Volumes</dt><dd id="about-volumes">–</dd>
-      <dt data-i18n="about_by">Made by</dt><dd>Akustikrausch · Andreas Wendorf</dd>
-      <dt data-i18n="about_license">License</dt><dd>MIT</dd>
-      <dt data-i18n="about_language">Language</dt><dd><select id="language" data-i18n-aria="about_language"></select></dd>
-      <dt data-i18n="about_thanks">Thanks</dt><dd data-i18n="thanks_text">tbdye for amigactld (GPLv3), Volker Barthelmann for vbcc</dd>
-    </dl>
-    <h4 data-i18n="about_tips">Good to know</h4>
-    <ul class="tips">
-      <li data-i18n="tip_paste">Ctrl+V types your PC's clipboard on the Amiga.</li>
-      <li data-i18n="tip_keys">In full screen the Windows keys are the Amiga keys.</li>
-      <li data-i18n="tip_lock">Double-click a modifier to lock it, its LED gets long.</li>
-      <li data-i18n="tip_drop">Drop files on the screen to send them.</li>
-    </ul>
-    <div class="buttons">
-      <span class="links">
-        <a class="link" href="https://github.com/akustikrausch/amigent" target="_blank" rel="noopener" data-i18n="about_project">Project page</a>
-        <a class="link" href="https://github.com/akustikrausch/amigent/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n="about_changes">What's new</a>
-      </span>
-      <button value="close" class="primary" data-i18n="close" autofocus>Close</button>
+    <div id="ab-amiga" role="tabpanel" aria-labelledby="ab-tab-amiga" hidden>
+      <dl>
+        <dt data-i18n="about_amiga">Amiga</dt><dd id="about-host">–</dd>
+        <dt data-i18n="about_screen">Screen</dt><dd id="about-screen">–</dd>
+        <dt data-i18n="about_system">System</dt><dd id="about-system">–</dd>
+        <dt data-i18n="about_cpu">CPU</dt><dd id="about-cpu">–</dd>
+        <dt data-i18n="about_daemon">Daemon</dt><dd id="about-daemon">–</dd>
+        <dt data-i18n="about_protocol">Protocol</dt><dd id="about-protocol">–</dd>
+        <dt data-i18n="about_daemon_cpu">Daemon CPU</dt><dd id="about-daemon-cpu">–</dd>
+        <dt data-i18n="about_capabilities">Capabilities</dt><dd id="about-daemon-caps">–</dd>
+        <dt data-i18n="about_memory">Memory</dt><dd id="about-memory">–</dd>
+        <dt data-i18n="about_network">Network stack</dt><dd id="about-tcp">–</dd>
+        <dt data-i18n="about_volumes">Volumes</dt><dd id="about-volumes">–</dd>
+      </dl>
     </div>
-  </form>
+    <div id="ab-link" role="tabpanel" aria-labelledby="ab-tab-link" hidden>
+      <p id="about-warn" class="warn" role="alert" hidden></p>
+      <dl>
+        <dt data-i18n="link_address">Address</dt><dd id="about-address">–</dd>
+        <dt data-i18n="link_port">Port</dt><dd id="about-port">–</dd>
+        <dt data-i18n="link_tls">Encryption</dt><dd id="about-tls">–</dd>
+        <dt data-i18n="link_protocol">Protocol</dt><dd id="about-protocol">–</dd>
+        <dt data-i18n="link_speed">Link speed</dt><dd id="about-speed">–</dd>
+        <dt data-i18n="st_ping">Ping</dt><dd id="about-ping">–</dd>
+        <dt data-i18n="link_picture">Picture</dt><dd id="about-picture">–</dd>
+      </dl>
+    </div>
+    <div id="ab-keys" role="tabpanel" aria-labelledby="ab-tab-keys" hidden>
+      <table class="keys-table">
+        <tbody>
+          <tr><th data-i18n="sck_paste">Ctrl+V</th><td data-i18n="sc_paste">Types your PC's clipboard on the Amiga</td></tr>
+          <tr><th data-i18n="sck_amiga">Windows keys</th><td data-i18n="sc_amiga">Left and Right Amiga</td></tr>
+          <tr><th data-i18n="fullscreen">Full screen</th><td data-i18n="sc_full">Takes the keyboard lock</td></tr>
+          <tr><th data-i18n="sck_pgup">PgUp PgDn Home End</th><td data-i18n="sc_pgup">Shift with the cursor keys</td></tr>
+          <tr><th data-i18n="sck_insert">Insert</th><td data-i18n="sc_insert">Help</td></tr>
+          <tr><th data-i18n="sck_altgr">AltGr</th><td data-i18n="sc_altgr">Types the character it makes on your PC</td></tr>
+          <tr><th data-i18n="key_esc">Esc</th><td data-i18n="sc_esc">Releases the mouse and leaves game mode</td></tr>
+          <tr><th data-i18n="sck_lock">Double-click a modifier</th><td data-i18n="sc_lock">Keeps it on</td></tr>
+          <tr><th data-i18n="sck_type">Ctrl+Enter</th><td data-i18n="sc_type">Types the text in Type text</td></tr>
+          <tr><th data-i18n="sck_drop">Drop files</th><td data-i18n="sc_drop">Sends them to the Amiga</td></tr>
+          <tr><th data-i18n="sck_wheel">Mouse wheel</th><td data-i18n="sc_wheel">Scrolls on the Amiga</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </dialog>
 
-<div id="toasts" aria-live="polite"></div>
 <script src="viewer.js"></script>
+<script src="machines.js"></script>
 </body>
 </html>

@@ -59,6 +59,20 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
+        self.info: dict[str, str] = {}  # more SYSINFO lines, such as attn_flags
+        self.answers: dict[str, tuple[int, str]] = {}  # EXEC: command -> (rc, output)
+        self.loaded: list[str] = []  # LOADED lines, answered from protocol 6 on
+        # EMU68 (48): None answers emu68=0; else the registers 0xea, 0xeb, 0x1e0 and more lines
+        self.emu68: dict[int, int] | None = None
+        self.emu68_lines: dict[str, str] = {}
+        self.emu68_sets: list[list[tuple[int, int, int]]] = []
+        # SCREENS beyond the one picture: dicts with handle, title, flags, picture.
+        # None: one Workbench screen of the picture, without the 1.5.0 display bits.
+        self.screen_list: list[dict] | None = None
+        self.volume_lines: list[str] | None = None  # VOLUMES: name, used, free, capacity, block size
+        self.corrupt: set[str] = set()  # paths whose writes land with one byte flipped
+        self.hello_flags = 0  # 4 (TLSONLY): the hello, then the line is closed, as amigentd does
+        self.received: list[bytes] = []  # every byte a client sent, per connection
         self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
         self.pause_for = 0  # seconds asked for, not mixed into the clock
         self.pause_started = 0.0
@@ -110,7 +124,15 @@ class FakeAmiga:
         self.listener.close()
 
     def _serve(self, conn):
-        conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, 0))
+        conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, self.hello_flags))
+        if self.hello_flags & 4:
+            conn.settimeout(0.5)
+            try:
+                self.received.append(conn.recv(4096))
+            except OSError:
+                self.received.append(b"")
+            conn.close()
+            return
         rd = conn.makefile("rb")
         channel, me = False, {"client": None}
         try:
@@ -156,8 +178,17 @@ class FakeAmiga:
             where = rd.read(y)
             if self.exec_delay:
                 time.sleep(self.exec_delay)
-            out = f"ran {path} in {where.decode() or '-'}".encode()
-            return self.ok(struct.pack(">iI", 0, len(out)) + out)
+            copy = re.fullmatch(r'Copy "([^"]+)" TO "([^"]+)" QUIET', path)
+            if copy and path not in self.answers:
+                src, dst = copy.groups()
+                if src not in self.files or not self._exists_dir(self.parent(dst)):
+                    return self.ok(struct.pack(">iI", 20, 0))
+                with self.lock:
+                    self.files[dst] = self.files[src]
+                return self.ok(struct.pack(">iI", 0, 0))
+            rc, text = self.answers.get(path, (0, f"ran {path} in {where.decode() or '-'}"))
+            out = text.encode("iso-8859-1")
+            return self.ok(struct.pack(">iI", rc, len(out)) + out)
         if cmd == 22:
             if path not in self.files:
                 return self.fail("Objekt nicht gefunden", 1)
@@ -168,6 +199,8 @@ class FakeAmiga:
             if not self._exists_dir(self.parent(path)) or path in self.dirs:
                 return self.fail("Objekt nicht gefunden")
             with self.lock:
+                if path in self.corrupt and data:
+                    data = bytes([data[0] ^ 0xFF]) + data[1:]
                 self.files[path] = (self.files.get(path, b"") if arg else b"") + data
                 self.stamps[path] = time.strftime("%Y-%m-%d %H:%M:%S")
             return self.ok()
@@ -181,6 +214,8 @@ class FakeAmiga:
             new = rd.read(y).decode("iso-8859-1")
             if path not in self.files:
                 return self.fail("Objekt nicht gefunden")
+            if new in self.files or new in self.dirs:
+                return self.fail("Objekt existiert bereits")
             self.files[new] = self.files.pop(path)
             return self.ok()
         if cmd == 28:
@@ -197,12 +232,36 @@ class FakeAmiga:
                 time.sleep(len(self.files[path]) / self.crc_rate)
             return self.ok(struct.pack(">I", zlib.crc32(self.files[path])))
         if cmd == 30:
-            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n")
+            extra = "".join(f"{k}={v}\n" for k, v in self.info.items())
+            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n{extra}")
+        if cmd == 48 and self.protocol >= 6:
+            return self._emu68(arg, path.encode("iso-8859-1"))
+        if cmd == 38 and self.protocol >= 6:
+            return self.text("".join(line + "\n" for line in self.loaded))
         if cmd == 31:
-            return self.text("RAM Disk:\t10\t20\t30\t512\n")
+            return self.text("".join(v + "\n" for v in self.volume_lines or ["RAM Disk:\t10\t20\t30\t512"]))
         if cmd == 6:
             return b"\0"
         return self.fail("not on a command channel")
+
+    def _emu68(self, arg: int, raw: bytes) -> bytes:
+        if self.emu68 is None:
+            return self.text("emu68=0\n")
+        if arg == 1:
+            items = [struct.unpack(">III", raw[i:i + 12]) for i in range(0, len(raw) - 11, 12)]
+            self.emu68_sets.append(items)
+            allowed = {0xEA: 0xFFFFFFFF, 0xEB: 0xFFFFFFF1, 0x1E0: 0x00000FFB}
+            for reg, value, mask in items:
+                if reg in allowed:
+                    mask &= allowed[reg]
+                    self.emu68[reg] = (self.emu68[reg] & ~mask) | (value & mask)
+        r = self.emu68
+        body = (f"emu68=1\ncntfrq=1000000\ncnt_hi=00000000\ncnt_lo=00100000\ninsn_hi=00000000\n"
+                f"insn_lo=10000000\njit_size=33554432\njit_free=16777216\njit_count=1200\n"
+                f"jit_sfthresh={r[0xEA]}\njitctrl={r[0xEB]:08x}\njit_cmiss=500\njitctrl2={r[0x1E0]:08x}\n")
+        if arg == 0:
+            body += "".join(f"{k}={v}\n" for k, v in self.emu68_lines.items())
+        return self.text(body)
 
     def _dir(self, path: str, stat: bool) -> bytes:
         clean = path.rstrip("/") if not path.endswith(":") else path
@@ -255,9 +314,35 @@ class FakeAmiga:
         if cmd == 2:
             self.owner = me["client"]
             return self._frame(bool(arg & 1), x, y, w or width, h or height)
+        if cmd == 11:
+            return self._screens()
+        if cmd == 12 and arg & 1 and self.screen_list is not None:  # aim, from 1.5.0
+            handle = x << 16 | y
+            me["aim"] = handle if any(s["handle"] == handle for s in self.screen_list) else 0
+            return b"\0" if me["aim"] or not handle else b"\1"
         if cmd == 13:
-            return self._rgb(arg, x, y, w or width - x, h or height - y)
+            picture = self._aimed(me.get("aim", 0))
+            width, height = picture.size
+            return self._rgb(arg, x, y, w or width - x, h or height - y, picture)
         return b"\0"
+
+    def _aimed(self, handle: int) -> Image.Image:
+        for s in self.screen_list or ():
+            if s["handle"] == handle and s.get("picture") is not None:
+                return s["picture"]
+        return self.picture
+
+    def _screens(self) -> bytes:
+        found = self.screen_list
+        if found is None:
+            w, h = self.picture.size
+            found = [{"handle": 0x1000, "title": "Workbench Screen", "flags": 1 | 2, "picture": self.picture}]
+        out = struct.pack(">H", len(found))
+        for s in found:
+            w, h = (s.get("picture") or self.picture).size
+            title = s["title"].encode("iso-8859-1")
+            out += struct.pack(">IHHHHH", s["handle"], w, h, s.get("depth", 8), s["flags"], len(title)) + title
+        return out
 
     def _frame(self, everything: bool, x, y, w, h) -> bytes:
         width, height = self.picture.size
@@ -277,12 +362,13 @@ class FakeAmiga:
                 tiles.append(struct.pack(">HHHHI", tx, ty, tw, th, len(packed)) + packed)
         return struct.pack(">I", len(tiles)) + b"".join(tiles)
 
-    def _rgb(self, arg, x, y, w, h) -> bytes:
-        width, height = self.picture.size
+    def _rgb(self, arg, x, y, w, h, picture: Image.Image | None = None) -> bytes:
+        picture = picture or self.picture
+        width, height = picture.size
         w, h = max(0, min(w, width - x)), max(0, min(h, height - y))
         if w * h > 512 * 512:
             return struct.pack(">HH", 0, 0) + (struct.pack(">I", 0) if arg else b"")
-        raw = self.picture.convert("RGB").crop((x, y, x + w, y + h)).tobytes()
+        raw = picture.convert("RGB").crop((x, y, x + w, y + h)).tobytes()
         if not arg:
             return struct.pack(">HH", w, h) + raw
         packed = pack_runs(raw, 3)

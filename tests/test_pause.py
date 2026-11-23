@@ -138,8 +138,8 @@ def test_the_tools_stand_in_a_note_for_the_picture(amiga, monkeypatch):
     amiga.clock = clock
     ctl = Commands("127.0.0.1", 1, amiga.port, timeout=5)
     screen = Amigentd("127.0.0.1", amiga.port, timeout=5, clock=clock)
-    monkeypatch.setattr(server, "ctl", ctl)
-    monkeypatch.setattr(server, "screen", screen)
+    monkeypatch.setattr(server._session(), 'ctl', ctl)
+    monkeypatch.setattr(server._session(), 'screen', screen)
     monkeypatch.setattr(server, "_exclusive", lambda name=None: threading.Lock())
     assert server.amiga_pause_screen(120).startswith("screen paused for 120 s")
     assert amiga.pause_left() == 120

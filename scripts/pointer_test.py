@@ -3,7 +3,7 @@
 Usage: pointer_test.py HOST [PORT] [TEST]
 
 TEST is tests/native/amiga/pointer-test built on the Amiga (with src/native/amiga/build-amigentd,
-SOURCE pointer-test.c TO pointer-test), default RAM:pointer-test. It opens a
+SOURCE ../../tests/native/amiga/pointer-test.c TO pointer-test), default RAM:pointer-test. It opens a
 screen in each mode, also dragged down, and writes where Intuition sees the
 pointer; amigentd on PORT moves it there. A point below a dragged-down
 screen's visible part stops at the display's last line, as it does by hand.

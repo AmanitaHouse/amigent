@@ -75,14 +75,16 @@ Or by hand:
 Afterwards restart the AI app and the remote desktop. Key, certificate and
 the start line in S:User-Startup stay; should the new amigentd not start,
 the old one starts again. One side alone keeps working as before, the new
-features need both. From 1.3.0 on the PC tells you when the Amiga is ahead.
+features need both. From 1.5.0 on Amigent tells you when a new release is
+out and offers the update.
 
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
 any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
 TCP/IP stack with bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
 
 Tool types of the icon: SETUP (accept the first install from the PC),
-KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
+KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY,
+ALLOWPOKE (let the agent write memory; off unless given).
 
 amigent-monitor opens a window that shows, line by line, what the agent
 does on this Amiga: the tools it calls, commands, files, clicks and keys,
@@ -155,41 +157,35 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-- After a crash the AI agent puts the guru in words and knows what it did
-  and what ran just before the Amiga went away.
-- It sees what really runs: libraries, devices and drivers in memory with
-  their versions, programs with their hunks, resident modules, every task
-  with priority and stack. It changes a priority or sends Ctrl-C to a task.
-- It reads memory (RAM and Kickstart ROM only, never the custom chips) as
-  hex, text or 68k code with library function names, and names any address:
-  program and hunk, library function, ROM module. Enforcer and MuForce hits
-  get those names too.
-- Tracepoints: when a program you test gets to an address, its registers and
-  the top of its stack are kept, and it runs on without stopping. Writing
-  memory works only when amigentd runs with ALLOWPOKE.
-- Several background jobs at once, with numbers and return codes; their
-  output can be read while they run.
-- Before and after a program: memory, open libraries, tasks and ports
-  compared, so leaks show. Screens compared with a saved picture.
-- New C programs set up and built on the Amiga with vbcc.
-- A hang or a stutter: what a task waits for with the calls on its stack,
-  who holds the layer locks, the CPU load per task measured on the Amiga,
-  and how closely a dragged window follows the mouse, in milliseconds.
-- A "Software Failure" requester is read, explained and answered with
-  Suspend, never Reboot.
-- From the PC, an Amiga in WinUAE 6.1 can be debugged from outside through
-  the emulator's GDB server, saved whole before an installation, and its
-  custom chips read (Paula, copper, sprites).
-- ZZ9000: the screen is read through the card's own encoder, not over the
-  Zorro bus. A look at a screen where little changed takes 55 ms instead
-  of 0.7 s on a 68060 (firmware 2.9.0, zz9k.library 2).
-- amigentd gives its screen memory back when nobody is watching (767 KB on
-  an A1200), amigent-monitor draws without flicker, and packing no longer
-  slows down a fast line.
-- Restart from the remote desktop also on Kickstart 2.x; updating a busy
-  amigentd no longer fails; amigentd builds with GCC as well as vbcc.
-- Thanks to kaffeine1, midwan, reinauer and AmanitaHouse for their pull
-  requests.
+- Amigent notices a new release by itself, at most once a day, and offers
+  it in the remote desktop and to the AI agent. Once you agree, one step
+  updates both halves: the PC and every saved Amiga.
+- Several Amigas: one AI agent drives every saved Amiga by its name, and
+  the remote desktop switches between them from its Amiga menu.
+- PiStorm and other Emu68 boards: what runs on the Raspberry Pi (Emu68
+  version, temperature, under-voltage, JIT counters); JIT settings tried
+  while the Amiga runs and kept per program; boot options and the Kickstart
+  on the SD card changed with a backup; Emu68 updated from a release, with
+  a way back and a rescue from the PC.
+- The Pi's own Ethernet or Wi-Fi as a second network interface, on
+  probation, and Emu68's serial debug output recorded on the PC.
+- Graphics boards: card, driver, Warp3D and MiniGL, and the Picasso96
+  screen modes with their colour depths, switched on and off with undo.
+- PowerPC boards (CyberStorm PPC, Blizzard PPC): card, kernel and ROM,
+  PowerPC crash windows in words, WarpOS programs built with vbcc. The
+  classic PiStorm emulator under Linux, managed over SSH.
+- The FPU is told from exec's own flags, and a program that needs an FPU
+  is not started on an Amiga without one.
+- The remote desktop has a new layout: an Amiga menu, a keyboard panel with
+  tabs, a game mode that captures the mouse, a dark appearance, and an
+  About page with the connection and the daemon. New languages: Russian,
+  Greek and Turkish.
+- amigentd turns graphics card screens into tiles faster and never packs
+  on a 68000; with TLSONLY it stays closed to plain connections even when
+  TLS fails. amigent-monitor runs on a 68000 again.
+- amigent-setup --update renews the repair scripts as well and can keep a
+  second Amigent folder on another disk.
+- Thanks to reinauer, midwan and AmanitaHouse for their pull requests.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
@@ -236,7 +232,8 @@ Amigent-Update in its drawer, then run pipx upgrade amigent on the PC.
 Afterwards restart the AI app and the remote desktop. Key, certificate and
 the start line in S:User-Startup stay. Should the new amigentd not start, the
 old one starts again. One side alone keeps working as before; the new
-features need both. From 1.3.0 on the PC tells you when the Amiga is ahead.
+features need both. From 1.5.0 on Amigent tells you when a new release is
+out and offers the update.
 
 
 REQUIREMENTS
@@ -341,6 +338,8 @@ start, the old one starts again; the update waits up to a minute and a
 half for the network port to become free.
 
 One side alone keeps working as before; the new features need both.
+From 1.5.0 on Amigent tells you when a new release is out and offers
+the update.
 """),
     ("AMIGENTD", "amigentd", """
 amigentd is the small service that does the work on the Amiga. Setup
@@ -409,15 +408,16 @@ programs on the Amiga.
 
 @{b}New in this version@{ub}
 
-- After a crash it puts the guru in words and knows what ran before.
-- It sees what really runs: libraries, devices and drivers in memory,
-  programs with their hunks, every task with priority and stack.
-- It reads memory as hex, text or 68k code and names any address.
-- Tracepoints in a program you test; several background jobs at once.
-- A hang or a stutter: what a task waits for, who holds the layer
-  locks, the CPU load per task, how a dragged window follows the mouse.
-- On a ZZ9000 the screen is read through the card's own encoder.
-- amigentd gives its screen memory back when nobody is watching.
+- Amigent notices a new release and offers to update both halves.
+- One AI agent drives several saved Amigas, each by its name.
+- PiStorm and other Emu68 boards: what runs on the Pi, JIT settings
+  while the Amiga runs, boot options and Kickstart on the SD card with a
+  backup, and Emu68 updates with a way back.
+- Graphics boards and their screen modes; PowerPC boards.
+- The FPU is told from exec's own flags.
+- The remote desktop has a new layout, a game mode, a dark appearance,
+  and Russian, Greek and Turkish.
+- amigent-monitor runs on a 68000 again.
 
 All tools are listed in the guide on the project page.
 """),

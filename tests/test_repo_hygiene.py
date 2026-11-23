@@ -247,11 +247,15 @@ def test_pycache_prefix_is_read_at_interpreter_startup(tmp_path):
 
 
 def git_dir(root: Path) -> Path:
-    """The worktree git dir, including a Windows gitdir: pointer read from WSL."""
+    """The worktree git dir. Keep Windows drive paths on Windows; map them for WSL."""
+    import sys
+
     pointer = root / ".git"
     if pointer.is_file() and pointer.read_text(encoding="utf-8").startswith("gitdir:"):
         raw = pointer.read_text(encoding="utf-8").split(":", 1)[1].strip()
         if len(raw) >= 3 and raw[1] == ":":
+            if sys.platform == "win32":
+                return Path(raw)
             return Path("/mnt") / raw[0].lower() / raw[2:].lstrip("\\/").replace("\\", "/")
         return Path(raw)
     return pointer

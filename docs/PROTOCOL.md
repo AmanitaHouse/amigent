@@ -8,14 +8,16 @@ keyboard; up to four more run commands and move files, see
 ## starting
 
     amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
+    amigentd FOLLOW <pipe> TO <file>         (job helper, see below)
+    amigentd EMU68JIT <reg:value:mask,...>   (JIT settings, see emu68)
 
 Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
-included. `TLSONLY` closes the plain port to other machines while the TLS port is
-open, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
+included. `TLSONLY` closes the plain port to other machines whether or not the TLS
+port opened, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
 programs draw and their debug output, see [hooks](#hooks). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
@@ -114,7 +116,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 9 | RUN | | x = command length | return code |
 | 10 | SETUP_END | | | ok |
 | 11 | SCREENS | | | screens |
-| 12 | SCREEN_FRONT | | x = handle high word, y = handle low word | ok |
+| 12 | SCREEN_FRONT | 1 = aim FRAME_RGB only (1.5.0) | x = handle high word, y = handle low word | ok |
 | 13 | FRAME_RGB | 1 = packed | region | rgb |
 | 14 | MOVE_REL | | x = dx, y = dy, signed | ok |
 | 15 | UITREE | | | text |
@@ -325,10 +327,28 @@ title is the screen's default title, or its current one if it has none. The
 handle is the screen's address; it means nothing but the screen, and only as
 long as that screen stays open.
 
+From 1.5.0 the flags also say what is on display. `0x8000` is set on every
+screen when these bits are filled in; an older amigentd never sets it.
+`0x4000`, on every screen: `GfxBase->ActiView` is not Intuition's `ViewLord`, so
+the chipset shows a view a program loaded itself (or none). `32`: a chipset
+screen whose ViewPort is in `ActiView` and not hidden. `16`: the frontmost of
+those, the screen the chipset output shows. A graphics card screen never has
+`16` or `32`; the card shows its own frontmost screen, which with a second
+monitor is visible next to the chipset output. A copper list written straight
+to the hardware leaves `ActiView` alone and does not show here.
+
 SCREEN_FRONT brings the screen with that handle to the front, after checking that
 it is still open. `1` if it isn't. The next FRAME then reads everything fresh.
 The answer comes at once; while a menu is open, Intuition only switches screens
 once it closes.
+
+SCREEN_FRONT with arg `1` (from 1.5.0, only where SCREENS sets `0x8000`) moves
+nothing: it aims FRAME_RGB at that screen, which then reads that screen's bitmap
+and clips to its size, whether it is in front or not. Handle `0` aims at the
+front screen again, as every new connection starts. `1` if the screen has
+closed; a screen that closes after the aim gives the front one. An older
+amigentd would take this for a plain SCREEN_FRONT, so a client checks `0x8000`
+first.
 
 ## rgb
 
@@ -480,8 +500,8 @@ else.
 | 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
-| 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. |
-| 49 | PIP | | | | Apollo build only. Status, `u16 x`, `u16 y`, `u16 w`, `u16 h`, `u32 length`, then `w*h*3` RGB bytes. `w` 0 means no picture. The handler does not read PIP registers. SYSINFO sends `pip=0` while no safe picture can be supplied. |
+| 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO). Not built on Apollo, where 48 is AUDIO |
+| 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only: there 48 is AUDIO and EMU68 is not built. A client takes the meaning from SYSINFO (`audio=1` or `emu68=1`), never from the opcode alone. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. Opcode 49 is reserved and is not assigned. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -538,7 +558,10 @@ separated by tabs.
   E clock), `daemon_uptime`, the seconds since amigentd started, and
   `last_alert`, exec's last alert in 8 hex digits, when it kept one from before
   the last reset. A client compares the uptimes with its last look to tell a
-  restart of the Amiga or of amigentd from a network fault.
+  restart of the Amiga or of amigentd from a network fault. `chip_free` is
+  available Chip RAM, `AvailMem(MEMF_CHIP)`, on a classic Amiga and on ApolloOS.
+  `0` is a real amount of free Chip RAM. A daemon that omits the field has not
+  reported it, and a client must not show that absence as zero.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 - From protocol 5 SYSINFO also has `deflate_fast`, `deflate_best` and
@@ -567,25 +590,14 @@ separated by tabs.
   `poke`, `1` when amigentd runs with `ALLOWPOKE`; `probe`, `1` when LOCKS,
   CPU, DRAG and QUIET are understood; `execbase`, exec's base in hex; and `self`, where this
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
-  The Apollo build also sends `os` (`ApolloOS` or `AmigaOS`), `board`, `board_name`,
-  `cpu` `68080`, `audio=1` and `pip=0`. It does not send `modules` or `tasklist`.
-  `pip=0` means opcode 49 is answered with an empty surface. It is not a claim
-  that a picture is available. A protocol 5 Apollo daemon used 38 for AUDIO and
-  39 for PIP, and 40 and 41 for LOADED and TASKS when it sent `modules=1` and
-  `tasklist=1`. Those numbers are LOADED and PEEK on protocol 6. The host
-  chooses from the protocol it was greeted with, and only sends an Apollo
-  extension when that daemon advertises it.
+- From amigentd 1.5.0 SYSINFO also has `emu68`: present when EMU68 is
+  understood, `1` when Emu68 runs on this Amiga, `0` otherwise.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.
   The vectors below $400 (with ExecBase at 4) can be read as well; Enforcer
   and MuForce may report that as a hit.
   Anything else gets status `1` and a text saying so. Packed after COMPRESS.
-  The Apollo build also refuses a request that shares any byte with a SAGA, PIP
-  or VREG window whose read can change the hardware, even when a memory header
-  covers that window. A request that only crosses the edge of such a window is
-  refused. POKE uses the same refusal, and still requires `ALLOWPOKE` first.
-  `APoke` is not command 42.
 
 ### loaded
 
@@ -667,6 +679,40 @@ and releases the button at the end. Zigzag goes 8 steps right and 8 left, jumps
 event_us is how long input.device took the event, frame_us from the event to
 the next frame, left and top the window's place then.
 
+### emu68
+
+EMU68 looks for Emu68 first: `devicetree.resource` with an `/emu68` node that
+has an `idstring`. Without it the answer is `emu68=0` and nothing else is
+touched (a build without Emu68 support adds `why=`); arg 1 then fails with
+`not Emu68`. With it, `key=value` lines:
+
+- always: `emu68=1`; `cntfrq` (Hz of the free running counter), `cnt_hi`,
+  `cnt_lo`, `insn_hi`, `insn_lo` (68k instructions), `arm_hi`, `arm_lo` (ARM
+  instructions), each half in 8 hex digits; `jit_size`, `jit_free`,
+  `jit_count`, `jit_cmiss`, `jit_sfthresh` in decimal; `jitctrl`, `jitctrl2`,
+  `cacr` in hex. These are Emu68's control registers $E0-$EC and $1E0, read
+  with MOVEC in supervisor mode, the 64 bit counters again until their high
+  half stands still.
+- with arg 0 also, when they are there: `idstring`, `version` (`1.0.4`),
+  `git`, `variant` (from `/emu68`), `model`, `compatible` (from `/`),
+  `bootargs` (from `/chosen`, up to 4 KB), `jit_size_mb`; from the Pi
+  firmware's mailbox `board_revision` (hex), `firmware`, `temp`, `temp_max`
+  (millidegrees Celsius), `arm_clock`, `arm_clock_measured`, `arm_clock_max`
+  (Hz), `core_volt` (microvolts), `throttled` (hex, the firmware's
+  get_throttled bits: 0-3 now, 16-19 since power on); and `mailbox`:
+  `resource` (through `mailbox.resource`), `direct` (at the address in the
+  device tree, under Forbid with a time limit, as EmuControl does) or `none`.
+
+Arg 1 sets JIT fields: for each register `$EA` (JITSCFTHRESH), `$EB`
+(JITCTRL) or `$1E0` (JITCTRL2) the bits of the mask take the value's bits.
+Masks are cut to the fields Emu68 documents: all of `$EA`, `$FFFFFFF1` of
+`$EB`, `$00000FFB` of `$1E0`; other registers are ignored. Read, change and
+write happen under Disable, then the caches are cleared so the JIT translates
+anew. The answer is that of arg 2. Nothing is written anywhere else.
+
+`amigentd EMU68JIT reg:value:mask,...` (hex) does the same from a Shell and
+quits; on an Amiga without Emu68 it changes nothing and returns 5.
+
 ### job helper
 
 `amigentd FOLLOW pipe TO file` does not start the service: it copies what
@@ -705,15 +751,21 @@ TEXT answers lines for the front screen:
 `I` tells for how long amigentd records (`-1`: not at all), how many older
 runs it dropped to make room, and its store. `W` lines come front to back as
 in UITREE, flags `a` active, `b` backdrop, `o` open before recording started
-(its text may be missing until it redraws). `L` lines are the rows of text
+(its text may be missing until it redraws), `m` amigent-monitor's window
+(from 1.5.0; its log repeats the agent's own calls, so WAIT for a text skips
+it). `L` lines are the rows of text
 of the window above them, in screen pixels, top to bottom: runs on one line
 close together are joined, ones further apart than twice the font height
 stay separate rows with boxes of their own. Rows of a window behind another
 are listed too; the client can tell from the `W` boxes which are covered.
 
 Only what goes through graphics.library's Text() is seen: not text drawn as
-pictures (many buttons, icons, games), not text a program renders into a
-bitmap of its own and copies over, and not windows on other screens.
+pictures (many buttons, icons, games) and not windows on other screens. From
+1.5.0 text a program draws into a bitmap of its own (a rastport without a
+layer, or with a layer alone in its Layer_Info) is kept for that bitmap and
+moves into the window with a plain ClipBlit or BltBitMapRastPort (minterm
+`0xC0`) from it, as programs that draw off-screen against flicker do; older
+amigentd miss such text.
 
 ### wait
 
@@ -793,13 +845,23 @@ Up to eight TLS connections at once.
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
 an ordinary connection there.
 
-With `TLSONLY`, while the TLS port is open and amigentd is not in SETUP mode, a
-new plain connection from any address but 127.0.0.1 gets the hello with flag `4`
-and is closed at once. Connections already open stay. Without a certificate, or
-without AmiSSL, there is no TLS port and the plain port works as usual, so a lost
-certificate never locks you out. In SETUP mode the plain port stays open, so
-`amigent-setup` can deliver the certificate; after SETUP_END new plain connections
-from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
+With `TLSONLY`, while amigentd is not in SETUP mode, a new plain connection from
+any address but 127.0.0.1 gets the hello with flag `4` and is closed at once,
+whether or not the TLS port is listening. Connections already open stay.
+127.0.0.1 stays open: the TLS pump connects there, and so can someone at the
+Amiga. In SETUP mode the plain port stays open, so `amigent-setup` can deliver
+the certificate; after SETUP_END new plain connections from outside are turned
+away. TLS 1.2 and 1.3, as AmiSSL offers them.
+
+So with `TLSONLY` a broken AmiSSL or a broken certificate locks every other
+computer out until it is mended at the Amiga itself. The hello still tells which:
+without flag `2` AmiSSL does not open; with it, the certificate is missing or
+doesn't load. A PC with the certificate pinned reads that hello on the plain
+port when PORT+1 refuses it, and sends nothing there, not even the key. To get
+back in: install AmiSSL again, or delete
+`S:amigent-tls.pem` and run `amigent-repair`, which copies the certificate back
+from the Amigent folder. Or start `amigentd SETUP` at the Amiga and run
+`amigent-setup` again from the PC.
 
 ## arexx
 

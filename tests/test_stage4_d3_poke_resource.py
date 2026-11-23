@@ -14,7 +14,7 @@ from amigent.paths import AMIGA
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
-MMIO = (ROOT / "src/native/amiga/platform/apollo/apollo_mmio.c").read_text(encoding="utf-8")
+MMIO = (ROOT / "src/native/amiga/apollo/apollo_mmio.c").read_text(encoding="utf-8")
 BIN = AMIGA / "bin"
 
 # Historical hardware-tested identity — preserved, not the new package.

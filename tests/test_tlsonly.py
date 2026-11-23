@@ -7,7 +7,7 @@ rule in Python; the C code itself does not run here.
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DAEMON = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
+DAEMON = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
 PROTOCOL = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
 
 

@@ -3,7 +3,7 @@
 # Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
 # `all` writes build/apollo/amigent-apollo-probe only.
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-ROOT := $(abspath $(HERE)/..)
+ROOT := $(abspath $(HERE)/../../..)
 BUILD := $(ROOT)/build/apollo
 APOLLO := $(HERE)/apollo
 

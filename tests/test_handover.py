@@ -1,4 +1,4 @@
-"""Screen pictures across a viewer handover, compiled from amiga/amigentd.c.
+"""Screen pictures across a viewer handover, compiled from src/native/amiga/daemon/amigentd.c.
 
 The harness is the daemon's own free_pictures() and lose_client(), plus the
 takeover block in serve(). It runs on the host compiler. It does not reset
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "amiga" / "amigentd.c"
+SOURCE = ROOT / "src/native/amiga/daemon/amigentd.c"
 
 
 def _slice(code: str, start: str, end: str) -> str:

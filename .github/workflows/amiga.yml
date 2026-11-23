@@ -4,9 +4,9 @@ name: amiga
 
 on:
   push:
-    paths: ["amiga/**", ".github/workflows/amiga.yml"]
+    paths: ["src/native/amiga/**", ".github/workflows/amiga.yml"]
   pull_request:
-    paths: ["amiga/**", ".github/workflows/amiga.yml"]
+    paths: ["src/native/amiga/**", ".github/workflows/amiga.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,10 +25,10 @@ jobs:
       - name: build
         run: |
           mkdir -p out
-          m68k-amigaos-gcc -O2 -m68020 -noixemul -s -o out/amigentd amiga/amigentd.c
-          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigentd.000 amiga/amigentd.c
-          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-status amiga/amigent-status.c
-          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-monitor amiga/amigent-monitor.c
+          m68k-amigaos-gcc -O2 -m68020 -noixemul -s -o out/amigentd src/native/amiga/daemon/amigentd.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigentd.000 src/native/amiga/daemon/amigentd.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-status src/native/amiga/tools/amigent-status.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-monitor src/native/amiga/tools/amigent-monitor.c
           ls -l out
       - uses: actions/upload-artifact@v4
         with:

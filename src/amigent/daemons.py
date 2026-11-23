@@ -5,9 +5,9 @@ with the CPU it requires and whether that build is supported. A larger CPU
 number is not treated as a better daemon: preference is the entry's own
 specialisation, and only among supported builds that can actually run.
 
-``amigentd.080`` remains in the tree as a historical artifact. Upstream retired
-it from the wheel and release archive: a Vampire runs the plain ``amigentd``.
-It is never selected automatically and never ranks above a supported build.
+``amigentd.080`` may exist in the source tree as a historical artifact. It is
+excluded from the Python package and is never selected automatically. A Vampire
+runs the plain ``amigentd``.
 
 amigactld is not one of these files. It is the older command transport used
 before protocol 3, fetched separately, and it does not change TLS.
@@ -23,19 +23,8 @@ from pathlib import Path
 # does not run a 68020 binary. The numbers are only compared that way.
 CPU_68000, CPU_68010 = 68000, 68010
 CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080 = 68020, 68030, 68040, 68060, 68080
-# exec attention bit for the Apollo core (Apollo NDK). Hardware evidence of a
-# 68080-class Vampire core; not the same as the OS calling itself ApolloOS.
-AFF_FPGA = 1 << 10
-APOLLO_MARK = b"arne.audio"  # present in the Apollo daemon, absent from the classic ones
 
-# Prior packaged Apollo builds that this package intentionally supersedes at the
-# same $VER. identify() no longer matches them once the packaged bytes change,
-# so without this list an --update would leave the old dump-bearing daemon in place.
-SUPERSEDED_APOLLO_SHA256 = frozenset({
-    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
-    # F-FORKSAFE / Stage 3B-D2 hardware-tested dump; superseded by D3 POKE resource harden.
-    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
-})
+HUNK_HEADER = b"\x00\x00\x03\xf3"  # an Amiga executable starts with HUNK_HEADER
 
 SUPPORTED, EXPERIMENTAL = "supported", "experimental"
 
@@ -44,61 +33,43 @@ SUPPORTED, EXPERIMENTAL = "supported", "experimental"
 class Spec:
     name: str
     min_cpu: int
-    os_name: str | None
     specialisation: int
     status: str
     family: str
     target: str
     label: str
+    system: str = ""  # an OS the build needs, such as ApolloOS; "" for any
 
     @property
     def verified(self) -> bool:
         return self.status == SUPPORTED
 
 
-# vbcc -cpu=68000, vbcc -cpu=68020, historical vbcc -cpu=68080 (retired from
-# packages), and the GCC -m68080 ApolloOS daemon. See docs/PROTOCOL.md.
+# vbcc -cpu=68000, vbcc -cpu=68020, and the historical vbcc -cpu=68080 build
+# (retired from packages). See docs/PROTOCOL.md.
 SPECS: tuple[Spec, ...] = (
-    Spec("amigentd.000", CPU_68000, None, 0, SUPPORTED, "68000", "68000", "68000"),
-    Spec("amigentd", CPU_68020, None, 1, SUPPORTED, "general", "68020", "general"),
-    Spec("amigentd.080", CPU_68080, None, 0, EXPERIMENTAL, "68080", "68080", "68080 experimental"),
-    Spec("amigentd.apollo", CPU_68080, "ApolloOS", 2, SUPPORTED, "apollo", "68080", "Apollo"),
+    Spec("amigentd.000", CPU_68000, 0, SUPPORTED, "68000", "68000", "68000"),
+    Spec("amigentd", CPU_68020, 1, SUPPORTED, "general", "68020", "general"),
+    Spec("amigentd.080", CPU_68080, 0, EXPERIMENTAL, "68080", "68080", "68080 experimental"),
+    # packaged since the AUDIO integration: picked only where ApolloOS is recognised,
+    # and never replaced by a less specialised build once installed
+    Spec("amigentd.apollo", CPU_68080, 2, SUPPORTED, "apollo", "68080", "ApolloOS", "ApolloOS"),
 )
 
 
 @dataclass(frozen=True)
 class Machine:
     cpu: int | None
-    apollo: bool | None
-
-
-def cpu_is_68080(info: dict | None = None, probe_text: str = "") -> bool:
-    """True when there is hardware evidence of a 68080-class Apollo core.
-
-    The OS name is not used. SYSINFO may report ``cpu=68080`` or the FPGA
-    attention bit. A newer Apollo probe may also print a ``68080`` line.
-    """
-    info = info or {}
-    if str(info.get("cpu") or "") == "68080":
-        return True
-    try:
-        flags = int(str(info.get("attn_flags", "0") or "0"), 0)
-    except ValueError:
-        flags = 0
-    if flags & AFF_FPGA:
-        return True
-    return any(line.strip() == "68080" for line in (probe_text or "").splitlines())
+    apollo: bool = False  # ApolloOS runs here
 
 
 def fits(spec: Spec, machine: Machine) -> bool:
-    """True when this build's instructions and OS requirement match the machine."""
-    if machine.cpu is None:
-        return spec.min_cpu <= CPU_68000 and spec.os_name is None
-    if machine.cpu < spec.min_cpu:
+    """True when this build's instructions can run on the machine."""
+    if spec.system == "ApolloOS" and not machine.apollo:
         return False
-    if spec.os_name == "ApolloOS":
-        return machine.apollo is True
-    return True
+    if machine.cpu is None:
+        return spec.min_cpu <= CPU_68000
+    return machine.cpu >= spec.min_cpu
 
 
 def choose(machine: Machine, present: set[str]) -> Spec | None:
@@ -117,23 +88,95 @@ def available_names(directory: Path) -> set[str]:
 
 
 def detect_cpu(run) -> int | None:
-    """CPU CHECK results: 0 means this CPU or better, 5 means less, anything else stops.
+    """CPU CHECK 68020: 0 means this CPU or better, 5 means less, anything else stops.
 
-    ``run`` returns the exit code. An unrecognised first answer is an unknown CPU.
-    There is no CPU CHECK 68080 step; that evidence comes from SYSINFO or the probe.
+    ``run`` returns the exit code. The supported builds only part at the 68020,
+    so one check is all a choice needs; a 68000 here stands for a 68010 too,
+    which runs the same build. A build that needs more adds its check here.
+    An unrecognised answer is an unknown CPU.
     """
     code = run("CPU CHECK 68020")
     if code == 5:
-        return CPU_68010 if run("CPU CHECK 68010") == 0 else CPU_68000
+        return CPU_68000
     if code != 0:
         return None
-    found = CPU_68020
-    for cpu in (CPU_68030, CPU_68040, CPU_68060):
-        got = run(f"CPU CHECK {cpu}")
-        if got != 0:
-            break
-        found = cpu
-    return found
+    return CPU_68020
+
+
+# An installed Apollo daemon is recognised without the packaged file: by the SHA-256 of a
+# packaged build, or by text that only the AMIGENT_APOLLO build of amigentd.c contains.
+# Both survive a package that has no amigentd.apollo, which is what makes an update
+# safe there. Markers recognise Apollo builds whose digest is not listed yet.
+#
+# Packaged release identity (this tree): ApolloCrossDev GCC-6.50-Stable, Makefile.apollo
+# flags (-m68080 -DAMIGENT_APOLLO -nostartfiles -nostdlib), sources under src/native/amiga,
+# $VER amigentd 1.5.0 (21.11.2026). Historical HW-smoke artifact 63db83ff… is amigentd 1.4.0
+# (18.11.2026) and does not implement this tree's 1.5.0 sources — kept only as SUPERSEDED.
+APOLLO_SHA256 = frozenset({
+    "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d",
+})
+# Prior packaged Apollo digests that a newer Apollo candidate may replace at the
+# same specialisation once package bytes change (identify no longer matches).
+SUPERSEDED_APOLLO_SHA256 = frozenset({
+    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
+    # F-FORKSAFE / Stage 3B-D2 hardware-tested dump; superseded by D3 POKE resource harden.
+    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+    # 1.4.0-era HW-smoke AUDIO package (128744); superseded by 1.5.0 source rebuild above.
+    "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
+})
+APOLLO_MARKERS = (
+    b"tracepoints are not supported on this Apollo build yet",
+    b"that range includes Apollo registers that a read can change",
+)
+
+
+def is_apollo_daemon(data: bytes) -> bool:
+    """True when ``data`` is an Apollo-family amigentd, whether or not it is packaged."""
+    if hashlib.sha256(data).hexdigest() in APOLLO_SHA256:
+        return True
+    return data.startswith(HUNK_HEADER) and any(mark in data for mark in APOLLO_MARKERS)
+
+
+def apollo_spec() -> Spec:
+    return next(spec for spec in SPECS if spec.family == "apollo")
+
+
+def installed_specialisation(data: bytes, directory: Path) -> tuple[int, str]:
+    """(specialisation, label) of a supported installed daemon, or (-1, "") when unknown.
+
+    The packaged bytes say it exactly. An Apollo daemon the package does not carry
+    (no amigentd.apollo, or another build of it) is still an Apollo daemon.
+    """
+    spec = identify(data, directory)
+    best = (spec.specialisation, spec.label) if spec and spec.verified else (-1, "")
+    if is_apollo_daemon(data):
+        apollo = apollo_spec()
+        if apollo.specialisation > best[0]:
+            best = (apollo.specialisation, apollo.label)
+    return best
+
+
+def specialisation_guard(installed: bytes | None, candidate_name: str, directory: Path) -> str:
+    """Why the installed daemon must stay, or "" when it may be replaced.
+
+    A more specialised installed daemon (ApolloOS) is not replaced by a less
+    specialised candidate (classic amigentd) on a normal update, whatever the version
+    numbers say. This keeps an installed Apollo daemon when the package has no
+    amigentd.apollo, or selection falls back to classic because detection failed.
+    ``setup.update`` consults it only through ``consider_replacement``; ``--force``
+    skips that comparison, as the maintainer's ``apollo_without_build`` policy
+    documents ("--force puts the classic amigentd on all the same").
+    """
+    if installed is None:
+        return ""
+    candidate = next((spec for spec in SPECS if spec.name == candidate_name), None)
+    if candidate is None or not candidate.verified:
+        return ""
+    level, label = installed_specialisation(installed, directory)
+    if level > candidate.specialisation:
+        return (f"the installed {label} daemon was left in place. "
+                f"{candidate.label} would replace it with a less specialised build.")
+    return ""
 
 
 def identify(data: bytes, directory: Path) -> Spec | None:
@@ -145,19 +188,66 @@ def identify(data: bytes, directory: Path) -> Spec | None:
     return None
 
 
-def embedded_version(data: bytes) -> tuple[int, ...] | None:
-    """The ``$VER: amigentd`` number in a binary, when it has one."""
+def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
+                       info: dict, directory: Path) -> dict:
+    """Identity of the connected session, separate from the computer it runs on.
+
+    Protocol and capabilities come from the live daemon. Family and CPU target
+    come only from the file SYSINFO named in ``self=``. That path is where the
+    process started; after an in-place update the bytes on disk may already be
+    the replacement, so ``daemon_identity`` says "named file" and never claims
+    a proven running image. The machine's OS and CPU are never used for the
+    family. What the daemon did not tell is "" (a page shows its own localised
+    "not reported"); this module only reports and never selects or installs.
+    """
+    spec = identify(file_bytes, directory) if file_bytes else None
+    capabilities = [name for key, name in (("audio", "AUDIO"), ("loaded", "loaded"), ("probe", "probe"),
+                                           ("poke", "POKE"), ("trace", "TRACE"))
+                    if info.get(key) == "1"]
+    return {
+        "daemon_protocol": protocol if protocol else None,
+        "daemon_version": (version or "").strip(),
+        "daemon_family": spec.label if spec else "",
+        "daemon_target": spec.target if spec else "",
+        "daemon_identity": "named file" if file_bytes is not None else "",
+        "daemon_capabilities": capabilities,
+    }
+
+
+
+def _ver_text(data: bytes) -> bytes | None:
     mark = b"$VER: amigentd "
     at = data.find(mark)
     if at < 0:
         return None
-    raw = data[at + len(mark):at + len(mark) + 24].split(b" ", 1)[0].split(b"\x00", 1)[0]
+    return data[at + len(mark):at + len(mark) + 40].split(b"\x00", 1)[0]
+
+
+def embedded_version(data: bytes) -> tuple[int, ...] | None:
+    """The ``$VER: amigentd`` number in a binary, when it has one."""
+    raw = _ver_text(data)
+    if raw is None:
+        return None
+    raw = raw.split(b" ", 1)[0]
     parts: list[int] = []
     for piece in raw.decode("ascii", "replace").split("."):
         if not piece.isdigit():
             break
         parts.append(int(piece))
     return tuple(parts) if parts else None
+
+
+def embedded_date(data: bytes) -> tuple[int, int, int] | None:
+    """The date in ``$VER: amigentd 1.4.0 (18.11.2026)`` as (year, month, day)."""
+    raw = _ver_text(data)
+    if raw is None or b"(" not in raw:
+        return None
+    inside = raw.split(b"(", 1)[1].split(b")", 1)[0].decode("ascii", "replace")
+    parts = inside.split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return None
+    day, month, year = (int(p) for p in parts)
+    return year, month, day
 
 
 def consider_replacement(installed: bytes | None, candidate: bytes, candidate_name: str,
@@ -169,76 +259,37 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
     supported candidate solely by its CPU target.
     """
     if installed is None:
-        return False, "C:amigentd could not be read, so the installed daemon was left in place."
+        return False, ("there is no C:amigentd on the Amiga to compare with (amigentd runs from "
+                       "elsewhere), so nothing was replaced; --force puts this one there.")
     if installed == candidate:
         return False, "already the same executable"
     installed_spec = identify(installed, directory)
     candidate_spec = next((spec for spec in SPECS if spec.name == candidate_name), None)
     if candidate_spec is None or not candidate_spec.verified:
         return False, "the selected daemon is not a supported build, so nothing was replaced."
-    if (installed_spec and installed_spec.verified
-            and installed_spec.specialisation > candidate_spec.specialisation):
-        return False, (f"the installed {installed_spec.label} daemon was left in place. "
-                       f"{candidate_spec.label} would replace it with a less specialised build.")
+    kept = specialisation_guard(installed, candidate_name, directory)
+    if kept:
+        return False, kept
     installed_version = embedded_version(installed)
     candidate_version = embedded_version(candidate)
-    specialised = (installed_spec is not None and installed_spec.family == "apollo") or APOLLO_MARK in installed
-    if specialised and candidate_spec.family != "apollo":
-        return False, ("the installed executable is an Apollo build this package does not "
-                       "replace with a classic daemon.")
     if installed_version and candidate_version and installed_version > candidate_version:
-        return False, "the installed amigentd reports a newer version, so it was left in place."
+        return False, ("the installed amigentd reports a newer version, so it was left in place; "
+                       "--force replaces it anyway.")
+    if installed_version and candidate_version and installed_version == candidate_version:
+        # the same number: the date of the build decides, so a rebuilt one gets in
+        installed_date, candidate_date = embedded_date(installed), embedded_date(candidate)
+        if installed_date and candidate_date and installed_date != candidate_date:
+            if installed_date > candidate_date:
+                return False, ("the installed amigentd reports the same version from a later date, "
+                               "so it was left in place; --force replaces it anyway.")
+            return True, ""
     # Known prior packaged Apollo digests may be replaced at the same $VER once the
     # package bytes change (identify no longer matches). Checked before the generic
     # unknown-same-version guard.
-    if (specialised and candidate_spec.family == "apollo" and installed_spec is None
+    if (is_apollo_daemon(installed) and candidate_spec.family == "apollo" and installed_spec is None
             and hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256):
         return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
-                       "reports the same version, so it was left in place.")
-    if specialised and candidate_spec.family == "apollo" and installed_spec is None:
-        if (not installed_version or not candidate_version
-                or installed_version == candidate_version):
-            return False, ("the installed Apollo build is not the one in this package, so it "
-                           "was left in place.")
+                       "reports the same version, so it was left in place; --force replaces it anyway.")
     return True, ""
-
-
-def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
-                       info: dict, directory: Path) -> dict:
-    """Identity of the connected session, separate from the computer it runs on.
-
-    Protocol and capabilities come from the live daemon. Family and CPU target
-    come only from the file SYSINFO named in ``self=``. That path is where the
-    process started; after an in-place update the bytes on disk may already be
-    the replacement, so the UI must not treat them as the guaranteed running
-    image. The machine's OS and CPU are never used for the family.
-    """
-    spec = identify(file_bytes, directory) if file_bytes else None
-    capabilities = []
-    if info.get("audio") == "1":
-        capabilities.append("AUDIO")
-    if info.get("loaded") == "1":
-        capabilities.append("loaded")
-    if info.get("probe") == "1":
-        capabilities.append("probe")
-    if info.get("poke") == "1":
-        capabilities.append("POKE")
-    reported = (version or "").strip()
-    if file_bytes is None:
-        identity = "Not reported"
-        family = "Not reported"
-        target = "Not reported"
-    else:
-        identity = "named file"
-        family = spec.label if spec else "Not reported"
-        target = spec.target if spec else "Not reported"
-    return {
-        "daemon_protocol": protocol if protocol else None,
-        "daemon_version": reported or "Not reported",
-        "daemon_family": family,
-        "daemon_target": target,
-        "daemon_identity": identity,
-        "daemon_capabilities": capabilities,
-    }

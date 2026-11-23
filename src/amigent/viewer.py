@@ -29,16 +29,14 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines
+from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import (LOADED_PROTOCOL, PLAIN_CLOSED_TEXT, Commands, apollo_commands,
-                      audio_uses_tls, pc_outdated)
-from .daemons import describe_connected
+from .channel import LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
+from .daemons import SPECS, describe_connected
 from .paths import AMIGA
-from .system import (OS_NAMES, describe_system, exec_before_os3, exec_coldreboot,  # noqa: F401
-                     native_ppc, ppc_software)
-from . import tls
+from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
+                     exec_before_os3, exec_coldreboot, native_ppc, ppc_software, wants_loaded)
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -46,6 +44,75 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
                         _Handler, _Server)
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
+
+# Why the Amiga does not answer, as a key the page translates (locales/*.json).
+# Anything not recognised becomes no reason on the page, so a greeting, a path or
+# an address never reaches it; the terminal that started the viewer gets the raw text.
+CONNECTION_REASONS = {
+    "reason_key_wanted": "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY.",
+    "reason_key_refused": ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+                           "must match S:amigent.key on the Amiga."),
+    "reason_closed_by_daemon": "amigentd closed the connection.",
+    "reason_stopped_answering": "amigentd stopped answering.",
+    "reason_unexpected_greeting": "The Amiga sent an unexpected greeting.",
+    "reason_timeout": "The Amiga did not answer in time.",
+    "reason_refused": "The Amiga refused the connection.",
+    "reason_unreachable": "The Amiga cannot be reached on the network.",
+    "reason_closed": "The connection to the Amiga was closed.",
+    "reason_unresolved": "The Amiga's address could not be resolved.",
+    "reason_plain_closed": tls.PLAIN_CLOSED_TEXT,
+    "reason_no_tls": tls.NO_TLS_TEXT,
+    "reason_no_certificate": tls.NO_CERT_TEXT,
+    "reason_tls_mismatch": "The Amiga's TLS certificate does not match the saved one; run amigent-setup again.",
+    "reason_pin_ambiguous": ("Two saved Amigas share this address and their TLS certificates differ; "
+                             "fix the address in Your Amigas or run amigent-setup again."),
+    "reason_machine_changed": "Machine changed; select it again in Your Amigas.",
+}
+
+
+def connection_reason(text: str) -> str:
+    """The key of a known connection failure in text, or '' when there is none."""
+    raw = text or ""
+    low = raw.lower()
+    if "only encrypted connections" in raw:
+        return "reason_plain_closed"
+    if "amissl does not open" in low:
+        return "reason_no_tls"
+    if "amigent-tls.pem does not load" in low:
+        return "reason_no_certificate"
+    if "certificate_verify_failed" in low or "certificate verify failed" in low:
+        return "reason_tls_mismatch"
+    if "ambiguous tls pin" in low:
+        return "reason_pin_ambiguous"
+    if "wants a key" in raw:
+        return "reason_key_wanted"
+    if "refused the key" in raw:
+        return "reason_key_refused"
+    if "connection closed by amigentd" in raw:
+        return "reason_closed_by_daemon"
+    if "stopped answering" in raw:
+        return "reason_stopped_answering"
+    if "unexpected greeting" in raw:
+        return "reason_unexpected_greeting"
+    if "not answering" not in raw:
+        return ""
+    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
+                                    "semaphore timeout")):
+        return "reason_timeout"
+    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
+        return "reason_refused"
+    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
+                                    "winerror 10065", "winerror 10051")):
+        return "reason_unreachable"
+    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
+                                    "broken pipe", "winerror 10054", "winerror 10053")):
+        return "reason_closed"
+    if any(part in low for part in ("name or service not known", "nodename nor servname",
+                                    "getaddrinfo", "no such host", "winerror 11001")):
+        return "reason_unresolved"
+    return ""
+
+
 
 # Hear streaming safeguards (product defaults — not the 10 s HW test cap).
 AUDIO_DRAIN_MAX = 64  # bounded end-marker / stop drain reads
@@ -78,100 +145,6 @@ def hear_eligible(info: dict | None, *, connected: bool = True) -> bool:
     if protocol < LOADED_PROTOCOL:
         return False
     return info.get("audio") == "1"
-
-# Shown as themselves. Anything else that fails the link stays the generic
-# "not answering" line, so a greeting, a path or an OS detail is not printed.
-KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
-KEY_REFUSED = ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
-               "must match S:amigent.key on the Amiga")
-CLOSED_BY_DAEMON = "connection closed by amigentd"
-STOPPED_ANSWERING = "amigentd stopped answering."
-UNEXPECTED_GREETING = "The Amiga sent an unexpected greeting."
-DID_NOT_ANSWER = "The Amiga did not answer in time."
-CONNECTION_REFUSED = "The Amiga refused the connection."
-CANNOT_BE_REACHED = "The Amiga cannot be reached on the network."
-CONNECTION_CLOSED = "The connection to the Amiga was closed."
-ADDRESS_UNRESOLVED = "The Amiga's address could not be resolved."
-
-
-def connection_reason(text: str) -> str:
-    """A connection or disconnection reason safe to show, or '' when it is not.
-
-    TLS sentences pass through unchanged so the page can keep its translations.
-    A known failure becomes one fixed sentence. An empty or unrecognised text,
-    including a greeting or an error that names a path, becomes no reason.
-    """
-    raw = text or ""
-    if "not retried in the clear" in raw:
-        return tls.TLS_HANDSHAKE_TEXT
-    if "TLS port is not available" in raw:
-        return tls.TLS_UNAVAILABLE_TEXT
-    if "only encrypted connections" in raw:
-        return PLAIN_CLOSED_TEXT
-    if "wants a key" in raw:
-        return KEY_WANTED
-    if "refused the key" in raw:
-        return KEY_REFUSED
-    if CLOSED_BY_DAEMON in raw:
-        return CLOSED_BY_DAEMON
-    if "stopped answering" in raw:
-        return STOPPED_ANSWERING
-    if "unexpected greeting" in raw:
-        return UNEXPECTED_GREETING
-    if "not answering" not in raw:
-        return ""
-    low = raw.lower()
-    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
-                                    "semaphore timeout")):
-        return DID_NOT_ANSWER
-    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
-        return CONNECTION_REFUSED
-    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
-                                    "winerror 10065", "winerror 10051")):
-        return CANNOT_BE_REACHED
-    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
-                                    "broken pipe", "winerror 10054", "winerror 10053")):
-        return CONNECTION_CLOSED
-    if any(part in low for part in ("name or service not known", "nodename nor servname",
-                                    "getaddrinfo", "no such host", "winerror 11001")):
-        return ADDRESS_UNRESOLVED
-    return ""
-
-
-def reported_bytes(info: dict, key: str) -> int | None:
-    """One SYSINFO byte count, or None when the daemon did not send it.
-
-    ``0`` and ``"0"`` are real readings. A missing key and a blank value are not.
-    """
-    if key not in info:
-        return None
-    raw = info[key]
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return None
-    return int(raw)
-
-
-def counted_bytes(info: dict, key: str) -> int:
-    """``reported_bytes``, with a missing field read as ``0``."""
-    value = reported_bytes(info, key)
-    return 0 if value is None else value
-
-
-def status_free_bytes(chip_free, fast_free) -> int:
-    """Available Chip RAM plus available Fast RAM. A missing Chip figure adds nothing."""
-    return counted_bytes({"chip_free": chip_free}, "chip_free") + counted_bytes(
-        {"fast_free": fast_free}, "fast_free")
-
-
-def pip_message(x: int, y: int, w: int, h: int, rgb: bytes) -> bytes:
-    """Binary message 4: the SAGA picture-in-picture surface, drawn over the screen."""
-    return struct.pack(">BHHHH", 4, x, y, w, h) + rgb
-
-
-def pcm_message(rate: int, pcm: bytes) -> bytes:
-    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
-    return struct.pack(">BI", 5, rate) + pcm
-
 
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
@@ -229,6 +202,47 @@ def ftxt_text(data: bytes) -> str:
     return b"".join(out).decode("iso-8859-1")
 
 
+def reported_bytes(info: dict, key: str) -> int | None:
+    """One SYSINFO byte count, or None when the daemon did not send it.
+
+    ``0`` and ``"0"`` are real readings. A missing key, a blank value and a
+    value that is not an integer are not.
+    """
+    if key not in info:
+        return None
+    raw = info[key]
+    if raw is None or isinstance(raw, bool) or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if not isinstance(raw, str) or not raw.strip().isdigit():
+        return None
+    return int(raw.strip(), 10)
+
+
+def counted_bytes(info: dict, key: str) -> int:
+    """``reported_bytes``, with a missing field read as ``0``.
+
+    Fast RAM and the totals still use this, so an older reply keeps its number.
+    """
+    value = reported_bytes(info, key)
+    return 0 if value is None else value
+
+
+def status_free_bytes(chip_free, fast_free) -> int:
+    """Available Chip RAM plus available Fast RAM.
+
+    An unreported Chip RAM reading adds nothing. A reported zero still does.
+    """
+    return counted_bytes({"chip_free": chip_free}, "chip_free") + counted_bytes(
+        {"fast_free": fast_free}, "fast_free")
+
+
+def pcm_message(rate: int, pcm: bytes) -> bytes:
+    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
+    return struct.pack(">BI", 5, rate) + pcm
+
+
 class Viewer:
     """Streams the screen to every open page and plays their input on the Amiga.
 
@@ -240,7 +254,10 @@ class Viewer:
     def __init__(self, host: str, screen: Amigentd | None = None, lock=None,
                  ctl_port: int = 6800, screen_port: int = 6801, restart=None,
                  flush_volumes=("SYS:",), remember: bool = False):
+        host = machines.identity(host)
         self.host = host
+        self.manager = None
+        self.enabled = True
         self.screen = screen or Amigentd(host, screen_port)
         self._thread_lock = threading.Lock()
         self.lock = lock or (lambda: self._thread_lock)
@@ -249,6 +266,7 @@ class Viewer:
         self.restart = restart
         self.flush_volumes = list(flush_volumes)
         self.remember = remember
+        self.update_done: dict | None = None  # what the last update from this page said, shown once
         self.token = secrets.token_urlsafe(18)
         self.url = ""
         self.httpd: _Server | None = None
@@ -261,12 +279,15 @@ class Viewer:
                          alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
-        self.reason = ""  # why the Amiga does not answer, for the page and the terminal
+        self.reason = ""  # why the Amiga does not answer: a CONNECTION_REASONS key or ""
         self.ever_joined = False
         self.amiga: dict = {}
         self.hear = False  # the page asks; opening the window does not start the mix
+        self._audio_idle = threading.Event()  # set while no Hear stream is open on this machine
+        self._audio_idle.set()
         self.screen_list: list = []
         self._system: dict = {}
+        self._forget_daemon()
         self._daemon_path = ""
         self._daemon_bytes: bytes | None = None
         self._daemon_version = ""
@@ -295,12 +316,16 @@ class Viewer:
             STATE.parent.mkdir(parents=True, exist_ok=True)
             handle = os.open(STATE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(handle, "w") as out:
-                out.write(json.dumps({"url": self.url, "host": self.host}))
+                out.write(json.dumps({"url": self.url, "host": self.host,
+                                      "direct": isinstance(self.host, roster.DirectAddress)}))
         except OSError:
             pass
         for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats,
                        self._media):
             threading.Thread(target=target, daemon=True).start()
+        if self.remember:  # the program, not a viewer an agent or the fleet opened
+            self.update_done = update.last_run()
+            update.refresh_in_background(then=self._update_found)
         return self.url
 
     # pages
@@ -312,6 +337,7 @@ class Viewer:
                                 "address": machines.address(self.host), "online": self.online,
                                 "reason": self.reason,
                                 "version": __version__, "amiga": self.amiga,
+                                "update": update.offer(), "update_done": self.update_done,
                                 "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
@@ -321,18 +347,25 @@ class Viewer:
             with self.clients_lock:
                 self.clients.add(ws)
                 self.ever_joined = True
+                n = len(self.clients)
+        print(f"{time.strftime('%H:%M:%S')} viewer page joined ({n} open)",
+              file=sys.stderr, flush=True)
         self.feed.ring()
 
     def leave(self, ws: WebSocket) -> None:
         with self.clients_lock:
             self.clients.discard(ws)
+            n = len(self.clients)
             if not self.clients:
                 self.alone_since = time.monotonic()
                 self.hear = False
+        print(f"{time.strftime('%H:%M:%S')} viewer page left ({n} open)",
+              file=sys.stderr, flush=True)
+        self.feed.ring()  # let the feed release a stale Amiga socket after WATCH_RELEASE
 
     def _watching(self) -> bool:
         with self.clients_lock:
-            return bool(self.clients)
+            return self.enabled and bool(self.clients)
 
     def unused_for(self) -> float:
         """Seconds without an open page, or 0 while one is open."""
@@ -347,6 +380,31 @@ class Viewer:
                 ws.send(data)
             except OSError:
                 self.leave(ws)
+
+    # a newer Amigent
+
+    def _update_found(self, found: dict | None) -> None:
+        if found:
+            self.event("update", update=found)
+
+    def update_action(self, action: str) -> dict:
+        """The page's answer to "Amigent x is out": later, skip or now."""
+        found = update.offer()
+        if action == "later":
+            return {}
+        if not found:
+            raise ValueError("no newer Amigent to act on")
+        if action == "skip":
+            update.skip(found["version"])
+            return {}
+        if action != "now":
+            raise ValueError("later, skip or now")
+        if update.how_installed() == "source":
+            raise ValueError("this Amigent runs from a source checkout: update it with git pull")
+        update.start_for_viewer(self.host)
+        # the helper waits for this process to go: close the window's link, then quit
+        threading.Timer(1.5, lambda: os._exit(0)).start()
+        return {"restarting": True}
 
     def event(self, kind: str, **fields) -> None:
         self.broadcast(json.dumps({"type": kind, **fields}))
@@ -363,6 +421,8 @@ class Viewer:
     # input: queued here, played by the feed on its pipeline
 
     def submit(self, op: dict) -> None:
+        if not self.enabled:
+            return
         if op.get("t") == "restart":
             threading.Thread(target=self._restart, daemon=True).start()
             return
@@ -384,28 +444,42 @@ class Viewer:
         self.inputs.put(op)
         self.feed.ring()
 
-    def set_address(self, new: str) -> None:
-        """The user says where the Amiga is now."""
-        new = new.strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
-            raise ValueError("not an address")
-        machines.move(self.host, new)
-        self.hear = False
+    def machine_manager(self):
+        if self.manager is None:
+            from .fleet import Fleet
+            with self.clients_lock:
+                if self.manager is None:
+                    self.manager = Fleet(machines.load(), existing=self)
+                    self.manager.start(0)
+        return self.manager
+
+    def set_address(self, new: str) -> str:
+        """Connect elsewhere without rewriting the current saved machine."""
+        return self.machine_manager().connect(new)
+
+    def retire(self):
+        """An address edit or removal invalidates this connection, not its jobs' target."""
+        self.enabled = False
+        self.reason = "reason_machine_changed"
+        self._forget_daemon()
+        self.hear = False  # a retired machine never keeps the mix running
         self.amiga = {}
+        self.event("online", online=False, reason=self.reason)
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
             self.ctl.close()
-        self.event("address", address=new)
-        self.feed.ring()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
-        if online != self.online:
+        shown = "" if online else connection_reason(reason)
+        if online != self.online or shown != self.reason:
             if not online:
+                # the next daemon to answer may be another file, or another Amiga
                 self.hear = False
                 self.amiga = {}
+                self._forget_daemon()
             self.online = online
-            self.reason = "" if online else connection_reason(reason)
+            self.reason = shown
             self.event("online", online=online, reason=self.reason)
             # stderr: the terminal that started amigent-viewer (stdout is the MCP server's protocol)
             stamp = time.strftime("%H:%M:%S")
@@ -474,6 +548,13 @@ class Viewer:
         clears ``hear`` so ``_media`` cannot silently call ``audio_start`` again.
         The user must click Hear to resume.
         """
+        self._audio_idle.clear()
+        try:
+            self._stream_audio(link, between)
+        finally:
+            self._audio_idle.set()
+
+    def _stream_audio(self, link: Commands, between=None) -> None:
         if not link.connected:
             link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
         link.audio_start()
@@ -503,6 +584,22 @@ class Viewer:
             self.hear = False
             self._release_audio(link)
 
+    def stop_hear(self, wait: float = 2.0) -> bool:
+        """Stop Hear on this machine without retiring it (the updater is about to take the Amiga).
+
+        ``hear=False`` is the stop signal the streaming thread watches; that thread releases
+        its own audio link. The machine stays enabled and keeps its connection state.
+        Returns whether Hear was on. Waits up to ``wait`` seconds for an open stream to release.
+        """
+        streaming = not self._audio_idle.is_set()
+        was_on = bool(self.hear) or streaming
+        self.hear = False
+        if was_on and not streaming:
+            self.event("audio", on=False)  # a streaming thread says so itself when it releases
+        if streaming:
+            self._audio_idle.wait(wait)
+        return was_on
+
     def _drop_audio(self, link: Commands) -> None:
         self.hear = False
         try:
@@ -522,18 +619,14 @@ class Viewer:
             self.event("audio", on=False)
 
     def _media(self) -> None:
-        """ARNE audio, only after the page asks, and the SAGA PIP, while a page is open.
+        """ARNE audio only after the page asks, while a page is open.
 
-        AUDIO is opcode 48 and PIP is opcode 49, each on its own command channel.
-        The screen connection is not this socket. When the daemon has closed the
-        plain port, this socket is TLS. A failed TLS handshake is not retried in
-        the clear. Opening the window never starts the mix.
+        AUDIO is opcode 48 on its own command channel. The screen connection is
+        not this socket. When the daemon has closed the plain port, this socket
+        is TLS. A failed TLS handshake is not retried in the clear. Opening the
+        window never starts the mix.
         """
         link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
-        pip = [False, 0.0]  # quiet, next poll
-
-        def poll() -> None:
-            pip[0], pip[1] = self._poll_pip(apollo_commands(self.amiga or {}), pip[0], pip[1])
 
         while True:
             if not self._watching():
@@ -544,25 +637,14 @@ class Viewer:
                 continue
             if self._hearing() and self._audio_ready():
                 try:
-                    self._play_audio(link, poll)
+                    self._play_audio(link)
                 except (AmigaError, AttributeError, OSError):
                     self._drop_audio(link)
                     time.sleep(0.05)
                 continue
             if link.connected:
                 self._release_audio(link)
-            poll()
             time.sleep(0.05)
-
-    def _poll_pip(self, offered: set, quiet_pip: bool, pip_at: float) -> tuple[bool, float]:
-        if "PIP" not in offered or quiet_pip or time.monotonic() < pip_at:
-            return quiet_pip, pip_at
-        try:
-            x, y, w, h, rgb = self._ctl(self.ctl.pip)
-        except (AmigaError, AttributeError, OSError):
-            return True, pip_at
-        self.broadcast(pip_message(x, y, w, h, rgb))
-        return False, time.monotonic() + 0.5
 
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""
@@ -577,6 +659,18 @@ class Viewer:
             self.screen_list = listing
             self.event("screens", screens=listing)
 
+    def _graphics(self) -> str:
+        """The card's driver, and on a Zorro II card a gentler screen loop (#22)."""
+        from . import graphics
+        try:
+            loaded = memory.parse(self._ctl(self.ctl.loaded))
+            info = graphics.detect(loaded, lambda a, n: self._ctl(lambda: self.ctl.peek(a, n)))
+        except (AmigaError, AttributeError, TypeError, ValueError):
+            return ""  # amigentd before 1.4.0: the loop stays as it was
+        if feed := getattr(self, "feed", None):  # a half-built viewer in tests has none
+            feed.planner.slow_bus = info.slow_bus
+        return ", ".join(f"{c[0]} {c[1]}" for c in info.cards)
+
     def read_amiga(self) -> dict:
         """Facts about the Amiga that cost it well under a second to tell."""
         if not self._system:
@@ -586,7 +680,23 @@ class Viewer:
                 ppc = ppc_software(lambda c: self._ctl(lambda: _rc_out(self.ctl.exec(c))))
                 if ppc:
                     self._system["ppc"] = ppc
+            daemon = re.search(r"amigentd (\d[\w.]*)", self._ctl(lambda: self.ctl.exec("Version C:amigentd").output) or "")
+            if daemon:
+                self._system["amigentd"] = daemon.group(1)
         info = self._ctl(self.ctl.sysinfo)
+        if not native_ppc(self._system) and "processor" not in self._system:
+            # exec's AttnFlags tell the FPU better than C:CPU's text; amiga_status adds the library check
+            fpu = describe_fpu(attn_flags(info), self._system.get("cpu", ""), self._system.get("fpu", ""))
+            if fpu.support_missing or (fpu.present is False and wants_loaded(fpu)):
+                try:  # Emu68 runs the FPU itself; only its resource in LOADED tells
+                    apply_loaded(fpu, memory.parse(self._ctl(self.ctl.loaded)).libraries)
+                except (AmigaError, AttributeError):
+                    pass
+            self._system.update(fpu=fpu.short(), processor=fpu.line(), fpu_state=fpu.state(),
+                                fpu_cpu=fpu.cpu, fpu_chip=fpu.kind if fpu.state() == "chip" else "",
+                                fpu_library=fpu.library)
+        if "graphics" not in self._system:
+            self._system["graphics"] = self._graphics()
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
         facts = dict(self._system)
@@ -594,36 +704,70 @@ class Viewer:
             facts["os"] = info["os"]
         if str(info.get("cpu") or "") == "68080" or info.get("os") == "ApolloOS":
             facts["cpu"] = "68080"
-        # chip_free stays None when SYSINFO omits it, so the page can tell a
-        # real zero from an older daemon. The other counts keep "missing means 0".
+        # chip_free stays None when SYSINFO omits it, so a page can tell a real
+        # zero from an older daemon. The other counts keep "missing means 0".
         protocol = getattr(getattr(self.ctl, "backend", None), "protocol", 0) or self.screen.protocol
-        return {**facts, **self._connected_daemon(info, protocol), "tcp": info.get("bsdsocket", ""),
+        return {**facts,
+                **self._connected_daemon(info, protocol),
+                "tcp": info.get("bsdsocket", ""),
                 "board": info.get("board", ""), "board_name": info.get("board_name", ""),
-                "audio": info.get("audio", ""), "pip": info.get("pip", ""),
+                "audio": info.get("audio", ""),
                 "chip_free": reported_bytes(info, "chip_free"),
                 "chip_total": counted_bytes(info, "chip_total"),
                 "fast_free": counted_bytes(info, "fast_free"),
                 "fast_total": counted_bytes(info, "fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
-                "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
+                "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0))),
+                "link": self.link()}
+
+
+    def _forget_daemon(self) -> None:
+        """Drop the connected daemon's file: it belongs to this session, not to the next one."""
+        self._daemon_path = ""
+        self._daemon_bytes: bytes | None = None
+        self._daemon_version = ""
+
+    def _daemon_file(self, path: str) -> bytes:
+        """The named file's bytes, found among the packaged builds by size and CRC on the
+        Amiga, so nothing crosses a slow link; b"" when it is none of them. Only a daemon
+        or a test without those requests sends the file itself."""
+        try:
+            size = int(self._ctl(lambda: self.ctl.stat(path))["size"])
+            crc = self._ctl(lambda: self.ctl.checksum(path, size))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return self._ctl(lambda: self.ctl.read_file(path))
+        for spec in SPECS:
+            packaged = AMIGA / "bin" / spec.name
+            if packaged.is_file() and packaged.stat().st_size == size:
+                data = packaged.read_bytes()
+                if zlib.crc32(data) == crc:
+                    return data
+        return b""
 
     def _connected_daemon(self, info: dict, protocol: int) -> dict:
-        """Protocol from the handshake; family only from the file SYSINFO named."""
+        """Protocol from the handshake; family only from the file SYSINFO named (``self=``)."""
         path = str(info.get("self") or "")
-        # Quote the path for Version so spaces cannot split the Shell command.
-        blob = None
-        version = ""
-        if path and path == self._daemon_path and self._daemon_bytes is not None:
+        blob, version = None, ""
+        if path and path == getattr(self, "_daemon_path", "") and getattr(self, "_daemon_bytes", None) is not None:
             blob, version = self._daemon_bytes, self._daemon_version
-        elif path and "\n" not in path and "\"" not in path:
+        elif path and "\n" not in path and '"' not in path:  # quoted for Version: no spaces split it
             try:
-                blob = self._ctl(lambda: self.ctl.read_file(path))
+                blob = self._daemon_file(path)
                 reported = self._ctl(lambda: self.ctl.exec(f'Version "{path}"'))
                 version = reported.output.strip().split("\n", 1)[0]
                 self._daemon_path, self._daemon_bytes, self._daemon_version = path, blob, version
             except (AmigaError, OSError, AttributeError):
                 blob, version = None, ""
         return describe_connected(protocol, version, blob, info, AMIGA / "bin")
+
+    def link(self) -> dict:
+        """How the picture travels, for the page's Connection tab: no round trip needed."""
+        screen = getattr(self, "screen", None)  # a half-built viewer in tests has none
+        protocol = int(getattr(screen, "protocol", 0) or 0)
+        return {"port": getattr(screen, "port", 0), "protocol": protocol,
+                "tls": hasattr(getattr(screen, "_sock", None), "version"),
+                "amiga_outdated": 0 < protocol < NEWEST_PROTOCOL}
+
 
     def _answers(self) -> bool:
         """Is the Amiga there? Asked on the command line, which leaves the screen alone."""
@@ -637,6 +781,8 @@ class Viewer:
 
     def _ctl(self, fn):
         with self.ctl_lock:
+            if not self.enabled:
+                raise AmigaError("Machine changed; select it again in Your Amigas.")
             if not self.ctl.connected:
                 self.ctl.connect()
             try:
@@ -859,7 +1005,12 @@ def running_viewer(host: str) -> str | None:
     """The address of a viewer for host that already runs on this PC, if any."""
     try:
         state = json.loads(STATE.read_text())
-        if machines.name_of(state.get("host", "")) != machines.name_of(host):
+        saved_host = state.get("host", "")
+        if state.get("direct"):
+            saved_host = roster.DirectAddress(saved_host)
+        if isinstance(saved_host, roster.DirectAddress) != isinstance(host, roster.DirectAddress):
+            return None
+        if machines.identity(saved_host) != machines.identity(host):
             return None
         with urllib.request.urlopen(state["url"], timeout=2) as reply:
             return state["url"] if reply.status == 200 else None
@@ -867,7 +1018,7 @@ def running_viewer(host: str) -> str | None:
         return None
 
 
-def main() -> None:
+def _main() -> None:
     parser = argparse.ArgumentParser(prog="amigent-viewer", description="Watch and drive the Amiga.")
     parser.add_argument("host", nargs="?", default="",
                         help="the Amiga's name or address (default: AMIGENT_HOST, else the known Amiga)")
@@ -885,14 +1036,32 @@ def main() -> None:
         for path in uninstall():
             print(f"removed {path}")
         return
-    host = machines.pick(args.host)
-    if not host:
-        parser.error("no Amiga known yet: run amigent-setup, or give the Amiga's address")
+    explicit = args.host or os.environ.get("AMIGENT_HOST", "")
     if args.install:
         from .desktop import install
-        for path in install(machines.name_of(host)):
+        for path in install(machines.identity(explicit) if explicit else ""):
             print(f"created {path}")
         return
+    known = machines.load()
+    if not explicit and len(known) != 1:
+        from .fleet import Fleet
+        overview = Fleet(known)
+        url = overview.start(args.port)
+        print(f"Your Amigas: {url}\nCtrl+C to stop.", flush=True)
+        if not args.no_window:
+            open_window(url)
+        try:
+            while True:
+                time.sleep(1)
+                if args.exit_when_closed and overview.unused_for() > (15 if overview.ever_joined else 90):
+                    break
+        except KeyboardInterrupt:
+            pass
+        return
+    host = machines.identity(machines.pick(explicit))
+    selected = machines.find(explicit) if explicit else None
+    if explicit and (not selected or explicit.casefold() == selected["host"].casefold()):
+        host = roster.DirectAddress(machines.validate_address(explicit))
     if url := running_viewer(host):
         if not args.no_window:
             show(url, host)
@@ -915,11 +1084,22 @@ def main() -> None:
         while True:
             time.sleep(1)
             if args.exit_when_closed:
-                idle = viewer.unused_for()
-                if idle > (15 if viewer.ever_joined else 90):
+                owner = viewer.manager or viewer
+                idle = owner.unused_for()
+                if idle > (15 if owner.ever_joined else 90):
                     break  # the window is gone; a reload comes back within seconds
     except KeyboardInterrupt:
         pass
+
+
+
+
+def main() -> None:
+    from .roster import RegistryError
+    try:
+        _main()
+    except RegistryError as e:  # a damaged amigas.json: say what is wrong, not a traceback
+        raise SystemExit(f"amigent-viewer: {e}") from None
 
 
 if __name__ == "__main__":

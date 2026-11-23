@@ -4,7 +4,8 @@ amigentd (protocol 5) keeps what programs draw with Text(), per window, and
 answers TEXT with lines:
 
     I  seconds_recorded  evicted  used  size
-    W  window  x  y  w  h  flags  title      flags: a active, b backdrop, o older
+    W  window  x  y  w  h  flags  title      flags: a active, b backdrop, o older,
+                                             m amigent-monitor (1.5.0)
     L  window  x  y  w  h  text
 
 This module turns them into windows with their rows, leaves out rows that a
@@ -53,6 +54,11 @@ class Window:
     @property
     def backdrop(self) -> bool:
         return "b" in self.flags
+
+    @property
+    def monitor(self) -> bool:
+        """amigent-monitor's window: its log repeats the agent's own calls."""
+        return "m" in self.flags
 
     def covers(self, x: int, y: int) -> bool:
         return self.x <= x < self.x + self.w and self.y <= y < self.y + self.h
@@ -118,6 +124,8 @@ def render(st: ScreenText, window: str = "", find: str = "", region=None,
     if window and not windows:
         return f"no window on the front screen matches {window!r}; amiga_ui_tree lists them"
     needle = find.lower()
+    if needle and not window:  # the monitor's log would echo the search itself
+        windows = [w for w in windows if not w.monitor]
     for w in windows:
         rows = [r for r in w.rows if _in_region(r, region) and (hidden or not r.hidden)]
         if needle:
@@ -135,7 +143,8 @@ def render(st: ScreenText, window: str = "", find: str = "", region=None,
                 empty.append(label)
             continue
         out.append(f"window {w.title!r} {w.id} {w.box()}{' active' if w.active else ''}"
-                   f"{' (open before recording: rows may be missing)' if w.older else ''}")
+                   f"{' (open before recording: rows may be missing)' if w.older else ''}"
+                   f"{' (amigent-monitor: a log of the tool calls)' if w.monitor else ''}")
         for r in rows:
             where = f"({r.x},{r.y}) " if positions else ""
             out.append(f"  {where}{r.text}{'  [behind another window]' if r.hidden else ''}")
@@ -169,10 +178,11 @@ def _shot(w: Window) -> str:
 
 
 def find_row(st: ScreenText, text: str, window: str = "") -> tuple[Window, Row] | None:
-    """The first visible row containing text, exact rows first; for clicking on it."""
+    """The first visible row containing text, exact rows first; for clicking on it.
+    amigent-monitor's window only when named: its log holds the text asked for."""
     needle = text.strip().lower()
-    hits = [(w, r) for w in st.windows if _matches(w, window) for r in w.rows
-            if not r.hidden and needle in r.text.lower()]
+    hits = [(w, r) for w in st.windows if _matches(w, window) and (window or not w.monitor)
+            for r in w.rows if not r.hidden and needle in r.text.lower()]
     exact = [(w, r) for w, r in hits if r.text.strip().lower() == needle]
     return (exact or hits or [None])[0]
 

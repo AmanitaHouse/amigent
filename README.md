@@ -21,9 +21,12 @@ over (`amigentd.000` on a 68000) and start it with `amigentd SETUP` in a Shell.
 
 **2. On the PC or Mac:** paste this into your AI agent:
 
-    Install Amigent for me: run "pipx install amigent", then amigent-setup,
-    register the MCP server "amigent" with the command amigent-server, and
-    run amigent-viewer --install.
+    Install Amigent for me: run "pipx install amigent" (if pipx or Python 3.10
+    or newer is missing, install them first: Windows winget, macOS Homebrew,
+    Linux the package manager). Then run amigent-setup; it finds my Amiga on
+    the network by itself. Register the MCP server "amigent" with the command
+    amigent-server, and run amigent-viewer --install so the remote desktop
+    shows up as a program. Tell me if you need to be restarted.
 
 **3. Ask for something:** "Open the remote desktop", or "Install the newest
 HippoPlayer from Aminet".
@@ -48,13 +51,13 @@ Once connected, you can:
 Both at the same time: you see every click the agent makes and can take over at
 any moment.
 
-![Amigent with a Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
+![The remote desktop with a Shell on the Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
 
 Programs that open their own screen, such as SysInfo on the chipset next to a
-graphics-card Workbench, show up as they are. The list at the top brings any
-screen to the front, from the PC.
+graphics-card Workbench, show up as they are. The screen menu at the top brings
+any screen to the front, from the PC.
 
-![SysInfo on its own chipset screen in the remote desktop, with the screen list at the top](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/screens.png)
+![SysInfo on its own chipset screen in the remote desktop, dark appearance, with the screen menu open](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/screens.png)
 
 ## How it fits together
 
@@ -89,15 +92,7 @@ screen to you. Both can work at once.
 
 ### On the PC or Mac
 
-**3.** Paste this into your AI agent:
-
-    Install Amigent for me: run "pipx install amigent" (if pipx or Python 3.10
-    or newer is missing, install them first: Windows winget, macOS Homebrew,
-    Linux the package manager). Then run amigent-setup; it finds my Amiga on
-    the network by itself. Register the MCP server "amigent" with the command
-    amigent-server, and run amigent-viewer --install so the remote desktop
-    shows up as a program. Tell me if you need to be restarted.
-
+**3.** Give your AI agent the prompt from [step 2 above](#set-up-in-three-steps).
 The agent sets up the Amiga over the network; from then on amigentd starts
 with it.
 
@@ -131,11 +126,13 @@ Or in a terminal:
 
 Then restart your AI app and the remote desktop, so they run the new version.
 
-Updated the Amiga first, at the Amiga? Unpack the new archive from the
+At the Amiga instead: unpack the new archive from the
 [releases](https://github.com/akustikrausch/amigent/releases) or Aminet and
-double-click *Amigent-Update* in its drawer. Then give your agent the same
-prompt as above, or run `pipx upgrade amigent` on the PC and restart the AI app. From 1.3.0 on, the PC notices a newer
-amigentd and says so, in the agent's answers and in the remote desktop.
+double-click *Amigent-Update* in its drawer, then update the PC as above.
+
+Amigent tells you itself when a new release is out, at most once a day, and
+updates both halves once you agree. It only asks PyPI for the version list;
+`AMIGENT_NO_UPDATE_CHECK=1` switches it off.
 
 Key, encryption and the start line stay as they are. One side alone keeps
 working as before; the new features need both.
@@ -158,6 +155,7 @@ working as before; the new features need both.
     "Which AHI driver is really loaded?"
     "Find out whether my program leaks memory."
     "Windows stutter when I drag them. Find out what holds things up."
+    "Is the Pi in my PiStorm too hot, and which Emu68 does it run?"
 
 ## Made for slow machines and slow wires
 
@@ -202,7 +200,9 @@ All numbers, how they were taken and how to repeat them are in
 
 - **New address after a restart?** Amigent finds the Amiga again by itself. It
   takes only the one that proves to be yours.
-- **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
+- **Several Amigas?** `amigent-viewer` opens **Your Amigas**, with a machine
+  selector, connection status and controls to rename or manage each machine.
+  One MCP server can control them all: name the targets in your request.
 - **Watching from the Amiga?** `amigent-monitor` in the Amigent folder opens a
   window there that lists, line by line, what the agent is doing.
 - **Trying out software?** The agent can record an installation and take it
@@ -215,6 +215,10 @@ All numbers, how they were taken and how to repeat them are in
 - **Running a test or a benchmark?** *Pause the picture* in the remote desktop
   (or `PAUSE` by ARexx) gives the Amiga's CPU back to it for a while; mouse,
   keys and files keep working.
+- **PiStorm with Emu68?** The agent tells what runs on the Raspberry Pi, tries
+  JIT settings while the Amiga runs, and changes boot options or updates Emu68
+  on the SD card with a backup and a way back. See
+  [docs/EMU68.md](https://github.com/akustikrausch/amigent/blob/main/docs/EMU68.md).
 - **After a big OS update**, `amigent-repair` puts back what the update removed.
 - **Safe at home.** A key keeps other computers on the network out, and the
   connection can be encrypted. Don't open the Amiga to the internet.

@@ -18,6 +18,10 @@
  * fits itself to the screen and leaves out what has no room; it can be sized,
  * WIDTH and HEIGHT give the size it opens with. It draws only
  * what changed, five times a second at most. MIT licence, see LICENSE.
+ *
+ * One build serves every Amiga, so it is built for the 68000:
+ *   vc +aos68k -c99 -O2 -cpu=68000 -o amigent-monitor amigent-monitor.c -lamiga
+ * (a 68020 build stops a 68000 with an illegal instruction, guru 80000004).
  */
 
 #include <exec/types.h>
@@ -46,7 +50,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char version[] = "$VER: amigent-monitor 1.4.0 (18.11.2026)";
+const char version[] = "$VER: amigent-monitor 1.5.0 (21.11.2026)";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
@@ -360,17 +364,22 @@ static LONG back_w, back_h;
 static BOOL dirty;
 static struct Rectangle damage;
 
-/* Finish any outstanding blit before releasing its source storage. */
+/* The blitter must be done with the bitmap before it goes: DeleteLayer itself
+ * clears the layer's area with the blitter and returns before it is through.
+ * Freed too early, the chip memory gets written after it went back to the
+ * system and its free list breaks: on a chipset Amiga another task then
+ * crashes with an address error a moment later (#41). RTG blits are done when
+ * they return, so only chipset machines showed it. */
 static void free_backing(void)
 {
     LONG i;
 
-    if (back_bitmap)
-        WaitBlit();
     if (back_layer)
         DeleteLayer(0, back_layer);
     if (back_info)
         DisposeLayerInfo(back_info);
+    if (back_bitmap)
+        WaitBlit();
     if (back_bitmap == &old_bitmap) {
         for (i = 0; i < old_bitmap.Depth; i++)
             if (old_bitmap.Planes[i])
@@ -495,7 +504,7 @@ static void draw_head(void)
     SetFont(rp, font);
     text_at(x, y, mid, black, "agent link monitor", 18);
     x += 19 * fw;
-    strcpy(buf, "coded by " AUTHOR "  1.4.0");
+    strcpy(buf, "coded by " AUTHOR "  1.5.0");
     n = strlen(buf);
     if (W - 8 - n * fw < x)
         n = strlen(strcpy(buf, AUTHOR));
@@ -823,21 +832,23 @@ static void draw_all(void)
 static void tool_types(struct WBStartup *wb)
 {
     struct DiskObject *dob;
-    char *v;
+    UBYTE *v;
     BPTR old;
 
     if (!(IconBase = OpenLibrary("icon.library", 36)))
         return;
     old = CurrentDir(wb->sm_ArgList[0].wa_Lock);
     if ((dob = GetDiskObject(wb->sm_ArgList[0].wa_Name))) {
-        if ((v = FindToolType(dob->do_ToolTypes, "LEFT"))) StrToLong(v, &opt_left);
-        if ((v = FindToolType(dob->do_ToolTypes, "TOP"))) StrToLong(v, &opt_top);
-        if ((v = FindToolType(dob->do_ToolTypes, "WIDTH"))) StrToLong(v, &opt_w);
-        if ((v = FindToolType(dob->do_ToolTypes, "HEIGHT"))) StrToLong(v, &opt_h);
-        if ((v = FindToolType(dob->do_ToolTypes, "SIZE"))) StrToLong(v, &opt_size);
-        if ((v = FindToolType(dob->do_ToolTypes, "NAME")))
+        /* NDK FindToolType takes CONST_STRPTR *; DiskObject still exposes STRPTR *. */
+        CONST_STRPTR *types = (CONST_STRPTR *)dob->do_ToolTypes;
+        if ((v = FindToolType(types, "LEFT"))) StrToLong(v, &opt_left);
+        if ((v = FindToolType(types, "TOP"))) StrToLong(v, &opt_top);
+        if ((v = FindToolType(types, "WIDTH"))) StrToLong(v, &opt_w);
+        if ((v = FindToolType(types, "HEIGHT"))) StrToLong(v, &opt_h);
+        if ((v = FindToolType(types, "SIZE"))) StrToLong(v, &opt_size);
+        if ((v = FindToolType(types, "NAME")))
             strncpy(opt_name, v, sizeof(opt_name) - 1);
-        if ((v = FindToolType(dob->do_ToolTypes, "FONT")))
+        if ((v = FindToolType(types, "FONT")))
             strncpy(opt_font, v, sizeof(opt_font) - 1);
         FreeDiskObject(dob);
     }

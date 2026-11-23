@@ -3,6 +3,329 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.5.0 (2026-11-23)
+
+### Updates
+
+- Amigent notices a new release by itself: at most once a day it asks PyPI
+  which versions there are, in the background and with a short timeout, so an
+  offline PC notices nothing. It sends nothing else.
+- The AI agent hears of a new version once per session, in `amiga_status`.
+  `amiga_update()` tells what is new and what an update would do;
+  `amiga_update(apply=True)`, once the user agrees, runs `pipx upgrade amigent`
+  and then `amigent-setup --update` for every saved Amiga, each in a process of
+  its own, and says what to restart. A pip installation works the same way; a
+  source checkout is told to `git pull`.
+- The remote desktop shows a slim banner with the new version, *Update now*,
+  *Later* and *Skip this version*; after *Later* the offer waits in the ⋯ menu
+  and in *About*, with a few lines of what is new. *Update now* closes it,
+  updates the PC and the Amigas, renews the Start menu entry or the app on the
+  Mac, and opens the remote desktop again, which then says how it went.
+- `python -m amigent.update check|on|off|apply`; `AMIGENT_NO_UPDATE_CHECK=1`
+  switches the check off
+  ([#15](https://github.com/akustikrausch/amigent/issues/15)).
+
+### Remote desktop
+
+- A new layout. The Amiga menu at the left of the toolbar shows the machine,
+  its state, OS and CPU, and switches between saved Amigas, the overview, a
+  one-off address and the manager; the overview has the same menu. The screen
+  list sits in the middle; rarer actions moved into a ⋯ menu.
+- The keyboard panel has tabs: Keys (now with cursor keys), Programs (menu
+  shortcuts with their keys, clipboard), Mouse & games and Shell. The modifier
+  keys also apply to the panel's own keys. In a narrow window the panel becomes
+  a sheet at the bottom.
+- *Game mode* captures the mouse and sends keys by position in one switch; a
+  note over the picture says so, and Esc leaves it.
+- *About* has tabs for Amigent, this Amiga, the connection (port, TLS,
+  protocol, link speed, ping, amigentd version) and the keyboard shortcuts. The
+  status bar is labelled and opens the connection details.
+- *About* also names the connected daemon: which build the file it started
+  from is, its target CPU, the protocol and what it can do, apart from the
+  Amiga's own OS and CPU. The file is recognised by size and CRC on the Amiga,
+  so nothing is sent over the link (#51).
+- A dark appearance, following the system or chosen in the ⋯ menu.
+- Questions such as replacing a file or restarting from the overview are
+  dialogs in the page's style. *Get file* selects a file first, then gets it.
+- Every text in the pages is translatable; the machine manager and the
+  overview use the same language as the remote desktop.
+
+### Repair
+
+- `amigent-setup --update` renews `amigent-repair` and its helper scripts in
+  the Amigent folder. They used to stay as the first installation left them,
+  so a repair after a system update could run a script from many versions ago.
+- `amigent-setup --update --spare FOLDER` keeps a second Amigent folder on
+  another disk: the scripts (repairing from that folder), this amigentd, the
+  key, the certificate and the repair modules. The Amiga remembers it, and
+  every later update renews it too.
+
+### Several Amigas
+
+- Saved Amigas now keep credentials, settings and history under a stable ID.
+  Migration keeps the original files. After a downgrade, older versions see
+  the pre-migration history. Later writes remain under the machine ID.
+- One MCP server drives every saved Amiga; each tool takes `machine` (a saved
+  name or ID). Without it a tool uses `AMIGENT_HOST`, then the saved default,
+  then the only saved Amiga. With several saved and none of these, the tool
+  refuses and says to name one; `amigent-fleet --default NAME` or *Set default*
+  in **Manage Amigas…** sets the default. (#12, #13)
+- `AMIGENT_POWER_CMD` and `AMIGENT_GDB` belong to the Amiga named by
+  `AMIGENT_HOST`. With several saved and no `AMIGENT_HOST`, `amiga_power`
+  refuses, even for the default, and `amiga_restart` no longer cycles the
+  power; put the power command into an MCP entry with `AMIGENT_HOST`, and the
+  debugger address into the Amiga's `"gdb"` in `amigas.json`. (#40)
+- `amigent-viewer` without an address opens **Your Amigas** unless exactly one
+  Amiga is saved, also when none is (it used to stop with a message). Give a
+  name to open one directly. (#40)
+- Addresses an Amiga had earlier no longer find it; only its name, ID, current
+  address or an earlier name do. A tool call with an unknown name or address
+  is refused; an address given to `amigent-viewer` opens a one-off connection
+  that is not searched for when the Amiga moves. Use the name in
+  `AMIGENT_HOST` and in shortcuts. (#40)
+- `amigas.json` is checked strictly. A damaged file is reported with its path
+  and what is wrong, and tools refuse until it is mended, instead of acting as
+  if no Amiga were saved. (#40)
+- Key and certificate are read from `key-<id>` and `tls-<id>.pem` in
+  `~/.config/amigent/`. The files named after the name or address, the common
+  `key`, and `amigas.pre-id.json` (the registry before the IDs) stay where they
+  were. The common `key` now only serves an address that is not saved; on
+  migration it is copied to the Amiga only when just one was saved. (#40)
+- `amiga_follow` copies into `follow/<id>/` in `~/.config/amigent/` by default,
+  one folder per Amiga, instead of `follow/` itself. (#40)
+
+### Classic PiStorm
+
+- `amiga_pistorm` manages the original PiStorm emulator under Linux on the
+  Raspberry Pi over SSH, with your own key and the system's `ssh`; Amigent
+  stores no passwords. It shows how the emulator is started (systemd unit or
+  by hand) and which `.cfg` it reads, shows and changes that file with a copy
+  on the Pi and a one-call undo, restarts the emulator, reads its log, and
+  tells the Pi's temperature and under-voltage state. Read-only unless
+  `confirm=True`. `amigent-fleet --pi NAME ADDRESS` keeps the Pi with the
+  Amiga's entry
+  ([#25](https://github.com/akustikrausch/amigent/issues/25)).
+
+### Installing and updating
+
+- `amigent-setup` picks the amigentd build from a catalogue: the 68000 build
+  where the 68020 one is missing, and it tells why when C:CPU gives no answer.
+  `--update` never replaces a newer amigentd or a build of its own; with the
+  same version the build date decides, and `--force` replaces it anyway. (#38)
+- ApolloOS is told from AmigaOS on the same Vampire (exec 51 and the 68080
+  bit), for an Apollo build of amigentd once there is one; until then nothing
+  changes there. ApolloOS and AROS are no longer called AmigaOS 4. (#31)
+- `amiga_install_begin` no longer copies the whole system by default. It
+  records the system folders (name, size, date) and copies the named
+  folders, S:Startup-Sequence, S:User-Startup, the files given in `touch`,
+  and what `amiga_aminet_install` or `amiga_put` overwrite while the
+  installation is open; `full=True` copies everything as before. First comes
+  an estimate (files, bytes, time) and a check of the free space, and above a
+  limit it asks for `confirm=True`. The copying runs as a job that
+  `amiga_break` can stop, and a backup without its completion marker is never
+  used. `amiga_install_end` and `amiga_install_undo` name the system files
+  that changed without a copy. Older records still undo. (#39)
+
+### Security
+
+- With `TLSONLY`, amigentd now turns away plain connections from other
+  computers even when its TLS port did not open, instead of falling back to
+  plain. A broken AmiSSL or certificate therefore locks remote PCs out until it
+  is mended at the Amiga; Amigent says which of the two it is and how to
+  recover. (#27)
+
+### Emu68
+
+- `amiga_emu68` tells what runs on the Raspberry Pi of a PiStorm or another
+  Emu68 board: Emu68's version and variant, the Pi's model and memory, the
+  boot options from `cmdline.txt`, temperature, ARM clock and core voltage,
+  whether the Pi reported under-voltage or throttling since power on, and the
+  JIT cache and counters. It names PiStormBoot and Emu68PWM when they are there.
+  `amiga_status` mentions under-voltage and throttling by itself, and
+  `amiga_cpu` adds the real MIPS and JIT cache misses. Read only; on an Amiga
+  without Emu68 it says so and touches nothing
+  ([#16](https://github.com/akustikrausch/amigent/issues/16)).
+- `amiga_emu68_jit` shows and changes the JIT settings Emu68 documents as
+  changeable at run time (chip and DBF slowdown, blitter wait, CCR scan depth,
+  instruction depth, inlining, loop count, soft flush), with no restart and
+  nothing written to the SD card. `restore=True` puts back the values from
+  before the first change, which the PC keeps. `program=` runs a program with
+  settings and the Amiga puts the old ones back when it ends; `remember=True`
+  keeps them as a note for the next start
+  ([#17](https://github.com/akustikrausch/amigent/issues/17)).
+- amigentd 1.5.0: new command EMU68 (48), `emu68` in SYSINFO, and
+  `amigentd EMU68JIT reg:value:mask,...` for job scripts. See
+  [docs/EMU68.md](docs/EMU68.md).
+
+### FPU
+
+- Amigent tells the FPU from exec's AttnFlags instead of the text of `C:CPU`:
+  68881, 68882, the FPU of a 68040, 68060 or 68080, or none (such as a
+  68EC020 or 68LC040). On a 68040/060 it also checks that
+  `68040.library` or `68060.library` is loaded. Emu68 on a PiStorm, known by
+  its `devicetree.resource`, runs every FPU instruction itself and needs no
+  such library; started with `nofpu` it has no FPU. `amiga_status`, the inventory
+  and the remote desktop's About show it, such as "68040 with FPU
+  (68040.library loaded)" or "68LC040, no FPU".
+- A line-F guru or Software Failure says whether the Amiga has no FPU (the
+  program needs one) or has one without its support library. The FPU
+  exceptions of the 68040/060 have names too.
+- `amiga_build(fpu="auto")` builds FPU code for the FPU the Amiga has (vbcc
+  `-fpu=68881` with `m881.lib`, or `-fpu=68040` with `m040.lib`) and is
+  refused on an Amiga without one. The default stays without FPU code.
+- `amiga_run` looks for FPU instructions in a program's code before starting
+  it on an Amiga without an FPU, and does not start one that has them
+  (`check_fpu=False` runs it anyway); on a 68040/060 without its library it
+  warns. The check is a heuristic.
+  ([#42](https://github.com/akustikrausch/amigent/issues/42))
+
+### Emu68 on the SD card
+
+- `amiga_emu68_card` reads Emu68's boot partition: the kernel with its Emu68
+  version and board variant, the Kickstart file (size, header, checksum), FPGA
+  files named in `config.txt` (shown, never written), every `cmdline.txt`
+  option explained, overlays, free space and problems such as a file
+  `config.txt` names that is missing; `check=True` reads every file once and
+  measures the speed. It says what `sd.unit0=rw` means.
+- `amiga_emu68_option` sets, changes or removes one option in `cmdline.txt`,
+  only an option Emu68 knows with a valid value (`force=True` for an unknown
+  one); `amiga_emu68_kickstart` boots another Kickstart after checking it, and
+  the old ROM stays on the card; `amiga_emu68_undo` takes a change back
+  ([#18](https://github.com/akustikrausch/amigent/issues/18)).
+- `amiga_emu68_update` updates Emu68 from a release zip on the PC: it checks
+  the version, the board variant and whether VideoCore.card fits (Emu68 1.1
+  needs 1.5), backs up the whole boot partition on the card, with a README on
+  how to go back, and on the PC, with checksums; it writes the new files next
+  to the old ones and swaps them in only once all are verified, and confirms
+  after the restart that the new Emu68 runs. If it does not start, the rescue
+  is the card in a PC: `python -m amigent.emu68card restore <backup> <card>`
+  on Windows, macOS or Linux
+  ([#19](https://github.com/akustikrausch/amigent/issues/19)).
+- A `config.txt` with one kernel per board, as AmiKit ships it (`[gpio24=0]`
+  for PiStorm32-lite, `[gpio24=1]` for the CPLD PiStorm), is read and changed:
+  the update replaces only the kernel for the board of the release, a new
+  Kickstart goes into every `initramfs` line, and comment lines stay.
+- Every writing call is a dry run until `confirm=True`, writes only on a card
+  where the user created `amigent-write-ok.txt`, refuses when the backup
+  fails, reads back what it wrote, and touches only the files its plan names.
+  A second SD card with a copy of the system is the place for a first try.
+
+### PowerPC boards
+
+- `amiga_ppc` reads a CyberStorm PPC or Blizzard PPC: the card from
+  expansion.library, the 68k CPU beside it, the kernel in memory (WarpOS or
+  PowerUP, with versions, ppclibemu and `powerpc.library` V7 told apart), the
+  flash ROM's version, 68040/68060.library, PPC patches at boot, and
+  combinations known not to work. With WarpOS running, the PowerPC and its
+  clock from WarpOS's `showinfo`. Read only: nothing is loaded that was not
+  active. ([#23](https://github.com/akustikrausch/amigent/issues/23))
+- A WarpOS or PowerUP crash window is read by `amiga_software_failure`,
+  `amiga_ppc("crash")` and `amiga_run`: the exception in words, the task,
+  SRR0 and LR named like a 68k crash address; `dismiss` closes the window.
+  ([#23](https://github.com/akustikrausch/amigent/issues/23))
+- `amiga_build(target="warpos")` builds a PowerPC program with vbcc's WarpOS
+  target; `amiga_tasks` lists the PowerPC tasks with their load (WarpOS's
+  `stat`); `amiga_run` warns when a WarpOS program meets an Amiga without
+  WarpOS. ([#24](https://github.com/akustikrausch/amigent/issues/24))
+
+### Building
+
+- A GitHub workflow builds amigentd, amigent-status and amigent-monitor with
+  GCC 16 whenever `amiga/` changes. (#26)
+
+### Fixes
+
+- A viewer that takes over from another one keeps the screen picture instead
+  of starting from black. (#29)
+- On ApolloOS, `amiga_status` takes the system from amigentd's own report when
+  the version text alone looks like AmigaOS 4, so the FPU is described again.
+  (#49, thanks to AmanitaHouse)
+- `amigent-setup --update` leaves the amigentd on an ApolloOS machine in place
+  when the package has no Apollo build; `--force` replaces it all the same.
+- Jobs no longer pipe through amigentd's FOLLOW helper when the path amigentd
+  reports for itself does not exist; they run as before 1.4.0 then.
+- A screen pause of 120 s is reported as 120 s, not 121. (#32)
+- `amigent-doctor --help` exits with 0. (#34)
+- The remote desktop no longer sends the reset chord to Kickstart 1.3 and
+  older, which cannot reset that way and kept the keys down. (#28)
+- Auto packing waits for a real measurement of the line on a fast CPU instead
+  of a guess that never ended. (#30)
+- An amigentd that does not report free Chip RAM shows it as unknown, not as
+  0 bytes. (#33)
+- When the remote desktop cannot reach the Amiga it gives one of a few fixed
+  reasons in the page's language, including a TLS certificate that does not
+  match; the full text goes to the terminal only. (#36)
+- Auto packing never has a 68000 or 68010 deflate its screens or replies, not
+  even as a try now and then: there it cost more time than it saved bytes. A
+  packing level chosen by hand still applies. (#43)
+- amigentd turns screens into tiles faster: RGB888 to RGB332 through lookup
+  tables, a tighter PackBits and colour index pass, and no try of a method
+  that cannot beat the best one so far. The tiles on the wire stay the same.
+  (#43)
+- amigentd's tile buffers were 14 bytes short for PackBits of noise in a full
+  64×64 chunky or 8-plane tile; the last bytes ran past them. (#43)
+- `amiga_screen_text` reads `amigent-monitor` again, and other programs that
+  draw text into a bitmap of their own and copy it to their window against
+  flicker. The monitor's window is marked; `amiga_wait_text`,
+  `amiga_click_text` and a search with `find` leave it out unless it is named,
+  since its log repeats the agent's own calls. (#41)
+- `amigent-monitor` runs on a 68000 again: 1.4.0 shipped a 68020 build, which
+  stopped an A500 with an illegal instruction. On chipset Amigas, closing the
+  monitor or resizing its window could also crash the Amiga a moment later,
+  because the monitor freed its drawing buffer while the blitter was still
+  clearing it. (#41)
+
+### Tools and languages
+
+- `amiga_hrtmon` loads the HRTmon debugger from Aminet for the user at the
+  Amiga. The agent never enters it: that halts the system. (#37)
+- `amiga_screenshot` says when the display shows something other than the
+  front Intuition screen: a chipset screen on the chipset output next to a
+  graphics card Workbench, the card's screen next to a chipset one, or a view
+  a program loaded itself. `screen=` takes a screen from `amiga_screens` and
+  reads it from its bitmap, in front or not, without moving it. Needs the new
+  amigentd; older ones picture the front screen as before. (#44)
+- `amiga_memory` reads a running program's memory by hunk:
+  `ProTracker:hunk1+$120`, or `task=`, `hunk=` and `offset=`. The read stays
+  inside the hunk. (#44)
+- `amiga_wait_task` waits until a task or program runs, or until it has
+  ended, for programs a script started with `Run`. (#45)
+- `amiga_amigus_status` tells whether an AmiGUS card is there, whether
+  amigus.library and the AHI driver are loaded, and who holds PCM, wavetable
+  and codec. It reads amigus.library's records and reserves nothing. (#45)
+- `amiga_audio_levels` reads an AmiGUS card's left and right output level for
+  a few seconds, with the small program `amigent-levels` on the Amiga. (#45)
+- `amiga_pi_network` tells, on a PiStorm with Emu68, which of the Pi's
+  network drivers are there (`genet.device` for the Ethernet of a Pi 4 or
+  CM4, `wifipi.device` for Wi-Fi; a missing one is named with where it comes
+  from), the TCP/IP stack, Roadshow's interfaces and the link speed. With
+  `confirm=True` it adds the Pi's Ethernet or Wi-Fi as a second Roadshow
+  interface next to the existing one, on probation: a script on the Amiga
+  takes it down again unless the PC reaches the Amiga through the new address
+  in time, and a restart forgets it. Once reached, it is kept, the speed
+  before and after is measured, and Amigent moves to the new address;
+  `undo` takes it back. The Pi's boot partition is never touched. (#20)
+- The Pi's serial debug output (Emu68) can be recorded on the PC through a
+  USB serial adapter, with time stamps: `amiga_serial_log('start')` or
+  `amigent-serial`, with the optional `amigent[serial]` (pyserial).
+  `amiga_debug_log` includes it, also while the Amiga is frozen, and
+  `amiga_status` gives the last lines when the Amiga does not answer.
+  `amiga_serial_log('narrow', low=..., high=...)` limits Emu68's JIT debug
+  output to an address range at run time. Without an adapter nothing
+  changes. (#21)
+- `amiga_graphics` tells the graphics board: Picasso96 or CyberGraphX, the
+  card and chip driver with versions, the board's Zorro bus, and Warp3D and
+  MiniGL. `amiga_screen_modes` lists the Picasso96 screen modes with the colour
+  depths switched on, explains a missing mode, and switches single depths on or
+  off with a copy first and undo in one call. On a Zorro II card the remote
+  desktop asks for smaller pieces and looks less often. (#22)
+- The remote desktop in Russian. (#35)
+- Greek and Turkish for the remote desktop and the overview.
+
+### Thanks
+
+To reinauer, midwan and AmanitaHouse for the pull requests in this release.
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

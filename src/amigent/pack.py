@@ -9,17 +9,21 @@ line; a 7 MHz 68000 on a fast emulated network does not, and stays unpacked.
 
 AMIGENT_COMPRESS, or "compress" for an Amiga in amigas.json, decides it by
 hand: auto (the default), off, fast or best.
+
+A 68000 or 68010 (SYSINFO cpu) never packs in auto mode: deflate there costs
+more time than it saves bytes, on any line. Chosen by hand, it still packs.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
 import time
 from pathlib import Path
 
-from . import secret
+from . import locks, secret
 
 MODES = ("auto", "off", "fast", "best")
 FAST_FACTOR = 2.0  # level 1 when the Amiga packs this many times faster than the line
@@ -32,6 +36,7 @@ EXPLORE = 30  # screens between tries of the way that lost, in case it pays now
 # deflate_fast at this rate is not a 68000. Packing before a real sample would
 # stick: the line is only timed while replies are raw.
 FAST_CPU = 1500.0
+SLOW_CPUS = (68000, 68010)  # auto mode never has these deflate
 
 
 def _file() -> Path:
@@ -53,6 +58,7 @@ class Policy:
         if self.mode not in MODES:
             self.mode = "auto"
         self.rates: dict[str, int] = {}
+        self.cpu = 0  # 68000, 68020 ... from SYSINFO; 0 while unknown
         try:
             self.line_kbs: float | None = float(stored["kbs"]) if stored.get("kbs") else None
         except (TypeError, ValueError):
@@ -78,6 +84,15 @@ class Policy:
                 self.rates[key] = int(sysinfo.get(key, 0))
             except ValueError:
                 self.rates[key] = 0
+        try:
+            self.cpu = int(sysinfo.get("cpu", 0))
+        except (TypeError, ValueError):
+            self.cpu = 0
+
+    @property
+    def slow_cpu(self) -> bool:
+        """A 68000 or 68010: deflate costs it more time than it saves bytes."""
+        return self.cpu in SLOW_CPUS
 
     def _needs_probe(self) -> bool:
         """Auto mode, fast CPU, line not timed yet: stay raw so the wire can show its speed."""
@@ -126,7 +141,7 @@ class Policy:
             return 1 if self.rates.get("deflate_fast") else 0
         if self.mode == "best":
             return 2 if self.rates.get("deflate_best") else 0
-        if self._needs_probe():
+        if self._needs_probe() or self.slow_cpu:
             return 0
         line = self.line()
         if self.rates.get("deflate_best", 0) >= BEST_FACTOR * line:
@@ -146,6 +161,8 @@ class Policy:
         model = self.level()
         if self.mode != "auto" or not self.known:
             return model
+        if self.slow_cpu:  # not even a try now and then: one costs a 68000 seconds
+            return 0
         packed = model or (1 if self.rates.get("deflate_fast") else 0)
         if not packed:
             return 0
@@ -204,7 +221,8 @@ class Policy:
             return {}
 
     def _save(self, chose: bool = False) -> None:
-        with _saving:  # the screen and command connections note from different threads
+        key = hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()[:20]
+        with _saving, locks.exclusive(f"amigent-link-{key}.lock"):
             try:
                 try:
                     everything = json.loads(self.path.read_text())

@@ -6,7 +6,8 @@
  *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
- * TLSONLY: once the TLS port is up, the plain one talks to localhost only.
+ * TLSONLY: remote plaintext is refused whether or not the TLS port opened.
+ * Loopback stays open for the TLS pump, and SETUP keeps the plain port open.
  * NOTEXT, NODEBUG: don't record the text programs draw, or their debug output.
  * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
  * TLSONLY.
@@ -53,26 +54,51 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
-/* vbcc has the CGX inline stubs but no clib or cybergraphx headers; the
- * values below are from cybergraphx/cybergraphics.h. The Apollo GCC build
- * declares the same calls and implements them in gcc_support.c. */
-#ifndef __VBCC__
-#include <inline/macros.h>
-#endif
-extern struct Library *CyberGfxBase;
+/* The SDK vbcc builds with here has the CGX inline stubs but no clib or
+ * cybergraphx headers; the values below are from cybergraphx/cybergraphics.h.
+ * GCC takes the headers that come with its toolchain, and the inline macros
+ * it uses for the library calls declared in this file. */
 #ifdef __VBCC__
+extern struct Library *CyberGfxBase;
 #include <inline/cybergraphics_protos.h>
+
+#define RECTFMT_RGB 0
+#define CYBRMATTR_BPPIX 0x80000002
+#define CYBRMATTR_ISCYBERGFX 0x80000008
+#elif !defined(AMIGENT_APOLLO)
+/* Classic and Emu68 GCC builds take the toolchain's own cybergraphics
+ * headers and inline stubs. */
+#include <proto/cybergraphics.h>
+#include <cybergraphx/cybergraphics.h>
+#include <inline/macros.h>
 #else
+/* ApolloCrossDev's GCC 6.50 Stable ships no cybergraphics headers. The four
+ * calls below are the ones this file makes, implemented in gcc_support.c at
+ * the same offsets as the vbcc stubs. Apollo builds only. */
+#include <inline/macros.h>
+#include <utility/tagitem.h>
 ULONG GetCyberMapAttr(struct BitMap *bm, ULONG attr);
 void ReadPixelArray(APTR dest, ULONG destx, ULONG desty, ULONG destmod, struct RastPort *rp,
                     ULONG srcx, ULONG srcy, ULONG sizex, ULONG sizey, ULONG format);
 APTR LockBitMapTagList(APTR bitmap, struct TagItem *tags);
 void UnLockBitMap(APTR handle);
-#endif
-
 #define RECTFMT_RGB 0
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
+#endif
+
+#ifdef AMIGENT_APOLLO
+/* The 68000 probe and this daemon share the identification. AUDIO is opcode
+ * 48 on this build. Opcode 49 is reserved for PIP and is not implemented. */
+#include "apollo_audio.h"
+BOOL apollo_os_here(void);
+UWORD apollo_board(void);
+const char *apollo_board_name(UWORD board);
+BOOL apollo_mmio_hit(ULONG at, ULONG n);
+static volatile LONG audio_hold;
+static volatile LONG audio_wait;
+static struct Task *volatile audio_task;
+#endif
 
 #define PROTOCOL_VERSION 6
 #define NAMES_MAX 4096  /* SYSINFO ports= and tasks= */
@@ -90,29 +116,14 @@ void UnLockBitMap(APTR handle);
 #define SETTLE_MS 250
 #define IO_SECONDS 30
 #define PAUSE_MAX 65535  /* seconds, about 18 hours: what INFO's u16 can tell */
-#ifdef AMIGENT_APOLLO
-/* V4 and A6000 have the RAM and a real Ethernet, but AROSTCP does not survive
- * a 1 MB window. 32 KB is what the command channel already used without the
- * "memory header not located" failure. The classic build stays at the size
- * an old stack promised. */
-#define OUT_SIZE (64 * 1024)
-#define SEND_BUFFER (32 * 1024)
-#define RECV_BUFFER (32 * 1024)
-#define SEND_STEP 2048
-#define SEND_MAX (32 * 1024)
-#define SEND_EARLY (16 * 1024)
-#define CHUNK (32 * 1024)
-#else
 #define OUT_SIZE 16384
 #define SEND_BUFFER 16384  /* little queued, so a takeover is not stuck behind it */
 #define SEND_STEP 2048  /* send low water mark: writable means this much room */
-#define SEND_MAX SEND_STEP  /* and all flush() hands over: an old stack promised this */
 /* A frame starts going out once this much is packed: early enough that the
  * line works while the CPU packs, late enough for full packets. Plipbox and
  * serial pay per packet, not per byte. */
 #define SEND_EARLY 8192
 #define CHUNK 32768
-#endif
 #define PENDING 4  /* connections that have not said yet what they are */
 #define CHANNELS 4  /* command channels next to the screen client */
 #ifndef INADDR_LOOPBACK
@@ -122,6 +133,18 @@ void UnLockBitMap(APTR handle);
 
 #ifndef UNIQUE_ID
 #define UNIQUE_ID (-1)
+#endif
+
+/* GCC's bsdsocket inline takes socklen_t *, which is not LONG *. vbcc's
+ * prototype takes the length as this file already passes it. __saveds is
+ * vbcc's base-register reload; GCC ignores it unless -fbaserel, which this
+ * daemon does not use. */
+#ifndef __VBCC__
+#define AMIGENT_SOCKLEN(p) ((socklen_t *)(p))
+#define AMIGENT_SAVEDS
+#else
+#define AMIGENT_SOCKLEN(p) (p)
+#define AMIGENT_SAVEDS __saveds
 #endif
 
 enum {
@@ -134,19 +157,17 @@ enum {
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
-    CMD_AUDIO = 48, CMD_PIP  /* ApolloOS only: ARNE mix and the SAGA PIP surface */
+#ifdef AMIGENT_APOLLO
+    CMD_AUDIO = 48  /* ARNE mix. Apollo builds only; there it replaces EMU68. 49 is reserved for PIP. */
+#else
+    CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
+#endif
 };
 
-#ifdef AMIGENT_APOLLO
-#include "apollo.h"
-static volatile LONG audio_hold;
-static volatile LONG audio_wait;
-static struct Task *volatile audio_task;
-#endif
-
-const char version[] = "$VER: amigentd 1.4.0 (18.11.2026)";
+const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
+static BOOL emu68_present(void);
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -268,7 +289,7 @@ static BOOL flush(void)
         if (!ready(TRUE))
             return FALSE;
         /* No more than the stack promised room for, so send() never blocks. */
-        n = out_len - done < SEND_MAX ? out_len - done : SEND_MAX;
+        n = out_len - done < SEND_STEP ? out_len - done : SEND_STEP;
         n = send(client, out + done, n, 0);
         if (n < 0 && Errno() == EWOULDBLOCK)
             continue;
@@ -636,22 +657,6 @@ static struct Screen *front(ULONG *lock)
 
     *lock = LockIBase(0);
     scr = IntuitionBase->FirstScreen;
-#ifdef AMIGENT_APOLLO
-    {
-        UWORD sw, sh;
-        if (apollo_size(scr, &sw, &sh)) {
-            if (!fit_frame(sw, sh)) {
-                UnlockIBase(*lock);
-                return NULL;
-            }
-            if (scr != seen) {
-                memset(stamp, 0, cols * rows * sizeof(ULONG));
-                seen = scr;
-            }
-            return scr;
-        }
-    }
-#endif
     if (!fit_frame(scr->Width, scr->Height)) {
         UnlockIBase(*lock);
         return NULL;
@@ -664,6 +669,38 @@ static struct Screen *front(ULONG *lock)
 }
 
 #define rgb332(r, g, b) ((UBYTE)(((r) >> 5) | ((g) >> 5 << 3) | ((b) & 0xC0)))
+
+/* rgb332() through lookups for red and green, 256 bytes each; blue is a mask
+ * anyway (#43). The tables reach rgb_to_332() through a pointer, so the
+ * compiler keeps them in a register instead of loading the address a pixel. */
+static UBYTE to332[2 * 256];
+static UBYTE *to332_at;
+static UBYTE islot[256];  /* index_tile(): colour to index, 0xFF for none, so again after each tile */
+
+static void tables_init(void)
+{
+    LONG i;
+
+    for (i = 0; i < 256; i++) {
+        islot[i] = 0xFF;
+        to332[i] = (UBYTE)(i >> 5);
+        to332[256 + i] = (UBYTE)(i >> 5 << 3);
+    }
+    to332_at = to332;
+}
+
+/* n RGB888 pixels to RGB332. */
+static void rgb_to_332(const UBYTE *src, UBYTE *dst, LONG n)
+{
+    const UBYTE *r = to332_at, *g = r + 256;
+    UBYTE *end = dst + n, c;
+
+    while (dst < end) {
+        c = r[*src++];
+        c |= g[*src++];
+        *dst++ = c | (*src++ & 0xC0);
+    }
+}
 
 /* One row of HAM6 or HAM8 pens from the left edge; RGB888 out from pixel skip on.
  * Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits replace the
@@ -839,6 +876,7 @@ static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYT
     UBYTE *pens = AllocVec(pw * h, MEMF_ANY);
     struct BitMap *line = AllocBitMap(pw, 1, 8, 0, NULL);
     struct RastPort temp;
+    UBYTE pal[3 * 256];
     BOOL ok = table && pens && line;
 
     if (ok) {
@@ -850,14 +888,16 @@ static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYT
         temp.Layer = NULL;
         temp.BitMap = line;
         ReadPixelArray8(&scr->RastPort, x0, y0, x0 + w - 1, y0 + h - 1, pens, &temp);
+        for (x = 0; x < 3 * 256; x++)  /* the palette as bytes once, not three shifts a pixel */
+            pal[x] = table[x] >> 24;
         for (y = 0; y < h; y++) {
             const UBYTE *p = pens + y * pw;
             UBYTE *o = out + 3 * y * w;
             for (x = 0; x < w; x++, o += 3) {
-                const ULONG *c = table + 3 * p[x];
-                o[0] = c[0] >> 24;
-                o[1] = c[1] >> 24;
-                o[2] = c[2] >> 24;
+                const UBYTE *c = pal + 3 * p[x];
+                o[0] = c[0];
+                o[1] = c[1];
+                o[2] = c[2];
             }
         }
     }
@@ -871,10 +911,6 @@ static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYT
 /* Any screen, as RGB888 rows of w pixels. Callers hold LockIBase. */
 static void read_rgb(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
 {
-#ifdef AMIGENT_APOLLO
-    if (apollo_read(scr, x0, y0, w, h, out))
-        return;
-#endif
     if (is_rtg(scr) || !read_planar(scr, x0, y0, w, h, out)) {
         if (!CyberGfxBase)
             memset(out, 0, w * h * 3);  /* deeper than 8 planes, nothing to read it with */
@@ -1484,13 +1520,6 @@ static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
     LONG at = y * ref_w + x, n, i;
 
     for (n = 0; n < th; n++, at += ref_w) {
-#ifdef AMIGENT_APOLLO
-        if (!(tw & 7)) {
-            if (ammx_differs(ref + at, cur + at, tw))
-                return TRUE;
-            continue;
-        }
-#endif
         if (!(ref_w & 3) && !(tw & 3)) {
             const ULONG *a = (const ULONG *)(ref + at), *b = (const ULONG *)(cur + at);
             for (i = 0; i < tw / 4; i++)
@@ -1509,7 +1538,7 @@ static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
  * through the card, zz_sync() has put them there already. */
 static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 {
-    LONG y0 = ty * TILE, x, n, i, t0;
+    LONG y0 = ty * TILE, x, n, t0;
     LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
     ULONG ms = now_ms();
 
@@ -1520,22 +1549,8 @@ static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 
         read_rgb(scr, x0, y0, cw, th, rgb);
         zz.cur = NULL;  /* cur holds what the card's mirror doesn't */
-        for (n = 0; n < th; n++) {
-            UBYTE *dst = cur + (y0 + n) * ref_w + x0;
-#ifdef AMIGENT_APOLLO
-            {
-                LONG fast = cw & ~3L;
-                if (fast)
-                    ammx_rgb332(src, dst, fast);
-                for (i = fast; i < cw; i++)
-                    dst[i] = rgb332(src[i * 3], src[i * 3 + 1], src[i * 3 + 2]);
-                src += cw * 3;
-            }
-#else
-            for (i = 0; i < cw; i++, src += 3)
-                dst[i] = rgb332(src[0], src[1], src[2]);
-#endif
-        }
+        for (n = 0; n < th; n++, src += 3 * cw)
+            rgb_to_332(src, cur + (y0 + n) * ref_w + x0, cw);
     }
     for (x = tx0; x <= tx1; x++) {
         UBYTE *v = valid + ty * cols + x;
@@ -1624,7 +1639,7 @@ static void refresh(void)
 }
 
 /* Reads ahead at priority -1, a few tiles at a time, whenever a frame asks for it. */
-static void __saveds reader_main(void)
+static void AMIGENT_SAVEDS reader_main(void)
 {
     struct Task *me = FindTask(NULL);
     BOOL more;
@@ -1789,8 +1804,9 @@ static UBYTE ppal[3 * 256];
 static LONG pcolours = -1;
 static ULONG prgb[3 * 256];
 /* ULONG backed: the XOR and the row copies go a long at a time, and a 68000
- * takes an odd address as a personal insult. */
-#define PENC_LONGS ((8 * 8 * TILE + 8 * TILE / 128 + 16) / 4)
+ * takes an odd address as a personal insult. PackBits of noise is a byte in
+ * 128 longer than the tile, and a scrolled delta two more. */
+#define PENC_LONGS ((8 * 8 * TILE + 8 * 8 * TILE / 128 + 16) / 4)
 static ULONG penc_mem[2][PENC_LONGS], ptile_mem[8 * 8 * TILE / 4];
 static ULONG pwork_mem[8 * 8 * TILE / 4], pold_mem[8 * 8 * TILE / 4];
 #define penc(i) ((UBYTE *)penc_mem[i])
@@ -1946,32 +1962,58 @@ static void grab_tile(struct BitMap *bm, LONG tx, LONG ty)
 }
 
 /* PackBits: n < 128 then n+1 literals, n > 128 then the next byte 257-n times.
- * A literal byte costs two compares, the bookkeeping only happens at a run:
- * the 68000 has no time for second looks. */
+ * The search for a run keeps to a few registers and one load a byte; the
+ * bookkeeping only happens at a run: the 68000 has no time for second looks. */
 static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
 {
-    const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *lim;
-    UBYTE *start = d, c;
+    const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *q, *lim;
+    UBYTE *start = d, c, n;
     LONG k;
 
-    while (s < stop) {
-        c = *s;
-        if (s[1] != c || s[2] != c) {  /* no run of three here: literal */
-            s++;
-            continue;
+    if (len >= 3) {
+        c = *s++;  /* s is one past the byte a run might start at, c */
+        for (;;) {
+            while (s <= stop) {
+                if ((n = *s++) != c) {
+                    c = n;
+                    continue;
+                }
+                if (*s == c)  /* three alike */
+                    goto run;
+                c = *s++;  /* two alike, then another: look on from there */
+            }
+            break;
+run:
+            s -= 2;
+            while (lit < s) {  /* literals waiting in front of the run */
+                k = s - lit > 128 ? 128 : s - lit;
+                *d++ = (UBYTE)(k - 1);
+                memcpy(d, lit, k);
+                d += k, lit += k;
+            }
+            q = end - s > 16 ? s + 16 : end;
+            for (r = s + 3; r < q && *r == c; r++)
+                ;
+            if (r == q && r < end) {  /* a long run: four bytes a compare once aligned */
+                ULONG four = c;
+                lim = end - s > 128 ? s + 128 : end;
+                for (; r < lim && ((ULONG)r & 3) && *r == c; r++)
+                    ;
+                four |= four << 8;
+                four |= four << 16;
+                if (!((ULONG)r & 3))
+                    while (lim - r >= 4 && *(const ULONG *)r == four)
+                        r += 4;
+                for (; r < lim && *r == c; r++)
+                    ;
+            }
+            *d++ = (UBYTE)(257 - (r - s));
+            *d++ = c;
+            s = lit = r;
+            if (s >= stop)
+                break;
+            c = *s++;
         }
-        while (lit < s) {  /* literals waiting in front of the run */
-            k = s - lit > 128 ? 128 : s - lit;
-            *d++ = (UBYTE)(k - 1);
-            memcpy(d, lit, k);
-            d += k, lit += k;
-        }
-        lim = end - s > 128 ? s + 128 : end;
-        for (r = s + 3; r < lim && *r == c; r++)
-            ;
-        *d++ = (UBYTE)(257 - (r - s));
-        *d++ = c;
-        s = lit = r;
     }
     while (lit < end) {
         k = end - lit > 128 ? 128 : end - lit;
@@ -1981,6 +2023,11 @@ static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
     }
     return d - start;
 }
+
+/* No PackBits of n bytes is shorter than this: every code covers 128 bytes at
+ * most and takes two at least. A method that cannot beat the best so far is
+ * not tried, and the tile comes out the same, only sooner. */
+#define PB_MIN(n) ((((n) + 127) >> 7) << 1)
 
 /* A tile's bytes, plane after plane, row after row, bw bytes a row. */
 static LONG tile_bytes(const UBYTE *planes, LONG tx, LONG ty, LONG bw, LONG th, UBYTE *dst)
@@ -2152,6 +2199,50 @@ static UBYTE *pack_tile(UBYTE *data, LONG *len, LONG *method)
     return zpack_out(frame_z);
 }
 
+/* Every way we know for planar tile ttx, tty, the shortest wins, as
+ * chunky_tile() does it. ext: row XOR too. */
+static LONG planar_tile(LONG ttx, LONG tty, LONG bw, LONG th, BOOL ext, BOOL had, LONG dy,
+                        LONG *pmethod, LONG *pb)
+{
+    LONG size, raw, best, method, k, b = 0;
+
+    raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
+    best = packbits(ptile, raw, penc(0));
+    method = 1;
+    if (ext && best > raw / 4) {  /* rows against rows: text, borders, patterns.
+         * Not for tiles PackBits already squeezed: a 68000 pays a second
+         * pass for a percent or two. */
+        row_xor(ptile, pwork, bw, th);
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 1 | 4, b = 1 - b;
+    }
+    if (had && PB_MIN(raw) < best) {  /* the client has the old tile: send the difference */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        tile_bytes(pref, ttx, tty, bw, th, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 2, b = 1 - b;
+    }
+    if (dy && PB_MIN(raw) + 2 < best) {  /* scrolled: the old rows, moved */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        shifted_bytes(ttx, tty, bw, th, dy, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+            be16(penc(1 - b), (UWORD)dy);
+            best = size, method = 2 | 8, b = 1 - b;
+        }
+    }
+    if (best >= raw) {  /* noise beats every trick: raw then */
+        memcpy(penc(b), ptile, raw);
+        best = raw, method = 0;
+    }
+    *pmethod = method;
+    *pb = b;
+    return best;
+}
+
 static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2162,26 +2253,6 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
 
     lock = LockIBase(0);
     scr = IntuitionBase->FirstScreen;
-#ifdef AMIGENT_APOLLO
-    /* SAGA video registers are write-only, so a direct scanout is not read.
-     * CyberGraphX continues on the path below. apollo_showing stays false
-     * until a reader exists that does not touch those registers. */
-    if (apollo_showing(scr)) {
-        BOOL ok;
-        UnlockIBase(lock);
-        ObtainSemaphore(&picture);
-        if (ext)
-            ok = frame_chunky(force, x, y, w, h);
-        else {
-            head[0] = 0;
-            ok = put(head, 1) && frame_locked(force, x, y, w, h);
-        }
-        ReleaseSemaphore(&picture);
-        if (wanted)
-            Signal(reader, SIGBREAKF_CTRL_F);
-        return ok;
-    }
-#endif
     if (!planar_ok(scr) || !fit_planar(scr)) {
         UnlockIBase(lock);
         ObtainSemaphore(&picture);
@@ -2262,46 +2333,15 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         return FALSE;
     dy = ext && !force ? find_dy(n) : 0;
     for (i = 0; i < n; i++) {
-        LONG t = ((UWORD *)porder)[i], size, raw, best, method, p, k, b = 0;
+        LONG t = ((UWORD *)porder)[i], best, method, p, b;
         LONG ttx = t % pcols, tty = t / pcols, px = ttx * TILE, py = tty * TILE;
         LONG tw = px + TILE < pw ? TILE : pw - px, th = py + TILE < ph ? TILE : ph - py;
         LONG bw = (tw + 7) >> 3;
         BOOL had = !force && (pvalid[t] & 1);
         UBYTE *data;
 
-        /* Every way we know, the shortest wins; penc(b) holds it. */
-        raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
-        best = packbits(ptile, raw, penc(0));
-        method = 1;
-        if (ext && best > raw / 4) {  /* rows against rows: text, borders, patterns.
-             * Not for tiles PackBits already squeezed: a 68000 pays a second
-             * pass for a percent or two. */
-            row_xor(ptile, pwork, bw, th);
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 1 | 4, b = 1 - b;
-        }
-        if (had) {  /* the client has the old tile: send the difference */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            tile_bytes(pref, ttx, tty, bw, th, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 2, b = 1 - b;
-        }
-        if (had && dy && shift_ok(ttx, tty, th, dy)) {  /* scrolled: the old rows, moved */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            shifted_bytes(ttx, tty, bw, th, dy, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
-                be16(penc(1 - b), (UWORD)dy);
-                best = size, method = 2 | 8, b = 1 - b;
-            }
-        }
-        if (best >= raw) {  /* noise beats every trick: raw then */
-            memcpy(penc(b), ptile, raw);
-            best = raw, method = 0;
-        }
+        best = planar_tile(ttx, tty, bw, th, ext, had, had && dy && shift_ok(ttx, tty, th, dy) ? dy : 0,
+                           &method, &b);
         data = ext ? pack_tile(penc(b), &best, &method) : penc(b);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
@@ -2358,35 +2398,134 @@ static LONG chunky_bytes(const UBYTE *pic, LONG px, LONG py, LONG tw, LONG th, U
 
 /* Up to 16 colours: u8 k, k colours, then rows of indices, 1/2/4 bits, top
  * bits first, each row on a byte. Returns the index rows' size, 0 if the tile
- * has too many colours; *head gets 1 + k. */
+ * has too many colours; *head gets 1 + k. A pixel like the one before costs a
+ * compare; the rows go through idx_row1/2/4(), with the shifts fixed and the
+ * lookup table in a register. */
+
+/* n pixels of a row as 1 bit indices through slot, top bits first. */
+static UBYTE *idx_row1(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    UBYTE a;
+
+    for (; n >= 8; n -= 8) {
+        a = slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        a = (a + a) | slot[*p++];
+        *o++ = (a + a) | slot[*p++];
+    }
+    if (n > 0) {
+        LONG i;
+        for (a = 0, i = 0; i < 8; i++)
+            a = (a + a) | (i < n ? slot[p[i]] : 0);
+        *o++ = a;
+    }
+    return o;
+}
+
+static UBYTE *idx_row2(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    UBYTE a;
+
+    for (; n >= 4; n -= 4) {
+        a = slot[*p++] << 2;
+        a = (a | slot[*p++]) << 2;
+        a = (a | slot[*p++]) << 2;
+        *o++ = a | slot[*p++];
+    }
+    if (n > 0) {
+        LONG i;
+        for (a = 0, i = 0; i < 4; i++)
+            a = a << 2 | (i < n ? slot[p[i]] : 0);
+        *o++ = a;
+    }
+    return o;
+}
+
+static UBYTE *idx_row4(const UBYTE *p, LONG n, UBYTE *o, const UBYTE *slot)
+{
+    for (; n >= 2; n -= 2, p += 2)
+        *o++ = slot[p[0]] << 4 | slot[p[1]];
+    if (n > 0)
+        *o++ = slot[p[0]] << 4;
+    return o;
+}
+
+/* The colours of n pixels into col, in the order they come, k known so far,
+ * through slot; the new k, or 17 at the 17th. px is long aligned: four pixels
+ * like the last one cost one compare. */
+#define IDX_PIXEL(v)                            \
+    if ((c = (v)) != last && slot[last = c] == 0xFF) { \
+        if (k == 16)                            \
+            return 17;                          \
+        slot[c] = (UBYTE)k;                     \
+        col[k++] = c;                           \
+    }
+
+static LONG idx_colours(const UBYTE *px, LONG n, UBYTE *col, LONG k, UBYTE *slot)
+{
+    const ULONG *q = (const ULONG *)px, *qend = q + (n >> 2);
+    const UBYTE *p, *end;
+    UBYTE last = col[k - 1], c;
+    ULONG four = last;
+
+    four |= four << 8;
+    four |= four << 16;
+    for (;;) {
+        while (q < qend && *q == four)
+            q++;
+        if (q == qend)
+            break;
+        p = (const UBYTE *)q++;
+        IDX_PIXEL(p[0])
+        IDX_PIXEL(p[1])
+        IDX_PIXEL(p[2])
+        IDX_PIXEL(p[3])
+        four = last;
+        four |= four << 8;
+        four |= four << 16;
+    }
+    for (p = (const UBYTE *)q, end = px + n; p < end; p++)  /* the odd few at the end */
+        IDX_PIXEL(*p)
+    return k;
+}
+
 static LONG index_tile(const UBYTE *px, LONG tw, LONG th, UBYTE *dst, LONG *head)
 {
-    UBYTE slot[256], *rows;
-    LONG k = 0, i, y, bits, rb;
+    UBYTE *rows, *col = dst + 1;
+    LONG k, i, y, rb;
 
-    memset(slot, 0xFF, sizeof(slot));
-    for (i = 0; i < tw * th; i++)
-        if (slot[px[i]] == 0xFF) {
-            if (k == 16)
-                return 0;
-            slot[px[i]] = k;
-            dst[1 + k++] = px[i];
-        }
-    dst[0] = k;
-    *head = 1 + k;
-    bits = k <= 2 ? 1 : k <= 4 ? 2 : 4;
-    rb = (tw * bits + 7) >> 3;
-    rows = dst + *head;
-    memset(rows, 0, rb * th);
-    for (y = 0; y < th; y++, px += tw, rows += rb) {
-        LONG x, shift = 8 - bits;
-        UBYTE *o = rows;
-        for (x = 0; x < tw; x++) {
-            *o |= slot[px[x]] << shift;
-            if ((shift -= bits) < 0)
-                shift = 8 - bits, o++;
-        }
+    col[0] = *px;
+    islot[*px] = 0;
+    if ((k = idx_colours(px, tw * th, col, 1, islot)) > 16) {
+        for (i = 0; i < 16; i++)
+            islot[col[i]] = 0xFF;
+        return 0;
     }
+    dst[0] = (UBYTE)k;
+    *head = 1 + k;
+    rows = dst + *head;
+    if (k == 1) {  /* one colour: nothing but zeros */
+        rb = (tw + 7) >> 3;
+        memset(rows, 0, rb * th);
+    } else if (k == 2) {
+        rb = (tw + 7) >> 3;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row1(px, tw, rows, islot);
+    } else if (k <= 4) {
+        rb = (tw + 3) >> 2;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row2(px, tw, rows, islot);
+    } else {
+        rb = (tw + 1) >> 1;
+        for (y = 0; y < th; y++, px += tw)
+            rows = idx_row4(px, tw, rows, islot);
+    }
+    for (i = 0; i < k; i++)
+        islot[col[i]] = 0xFF;
     return rb * th;
 }
 
@@ -2441,6 +2580,73 @@ static LONG chunky_find_dy(const UWORD *order, LONG n)
     return 0;
 }
 
+/* Every way we know for the tile at px, py, the shortest wins: its size, and
+ * in *pmethod and *pb how it went and which penc() holds it. had: the client
+ * has the old tile in ref; dy: it scrolled by that much, 0 for not. A way that
+ * cannot beat the best so far (PB_MIN) is not tried. */
+static LONG chunky_tile(LONG px, LONG py, LONG tw, LONG th, BOOL had, LONG dy, LONG *pmethod, LONG *pb)
+{
+    LONG raw, best, size, method, k, b = 0, ihead, irows;
+
+    raw = chunky_bytes(cur, px, py, tw, th, ptile);
+    if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
+        /* A few colours: indices win nine times out of ten, so the full
+         * bytes don't even get a PackBits pass. Saves the slow CPUs half. */
+        UBYTE *o = penc(0);
+        memcpy(o, pold, ihead);
+        best = ihead + packbits(pold + ihead, irows, o + ihead);
+        method = 1 | 16;
+        if (ihead + PB_MIN(irows) < best) {
+            o = penc(1 - b);
+            memcpy(o, pold, ihead);
+            xor_rows(pold + ihead, pwork, irows / th, th);
+            if ((size = ihead + packbits(pwork, irows, o + ihead)) < best)
+                best = size, method = 1 | 4 | 16, b = 1 - b;
+        }
+    } else {
+        best = packbits(ptile, raw, penc(0));
+        method = 1;
+        if (best > raw / 4) {  /* as for planar: only where there is room to win */
+            xor_rows(ptile, pwork, tw, th);
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 1 | 4, b = 1 - b;
+        }
+    }
+    if (had && PB_MIN(raw) < best) {  /* the client has the old tile */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+        chunky_bytes(ref, px, py, tw, th, pold);
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *o++;
+        if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+            best = size, method = 2, b = 1 - b;
+    }
+    if (dy && PB_MIN(raw) + 2 < best) {  /* scrolled */
+        ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *ol = (ULONG *)pold;
+        UBYTE *o = pold;
+        LONG yy;
+        for (yy = 0; yy < th; yy++, o += tw) {
+            LONG sy = py + yy + dy;
+            if (sy < 0 || sy >= ref_h)
+                memset(o, 0, tw);
+            else
+                memcpy(o, ref + sy * ref_w + px, tw);
+        }
+        for (k = (raw + 3) >> 2; k > 0; k--)
+            *a++ = *c++ ^ *ol++;
+        if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+            be16(penc(1 - b), (UWORD)dy);
+            best = size, method = 2 | 8, b = 1 - b;
+        }
+    }
+    if (best >= raw) {
+        memcpy(penc(b), ptile, raw);
+        best = raw, method = 0;
+    }
+    *pmethod = method;
+    *pb = b;
+    return best;
+}
+
 static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2483,65 +2689,12 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
     for (i = 0; i < n; i++) {
         LONG t = order[i], ttx = t % cols, px = ttx * TILE, py = (t / cols) * TILE;
         LONG tw = px + TILE < sw ? TILE : sw - px, th = py + TILE < sh ? TILE : sh - py;
-        LONG raw, best, size, method, k, b = 0, ihead, irows;
+        LONG best, method, b;
         BOOL had = !force && (valid[t] & 1);
         UBYTE *data;
 
-        raw = chunky_bytes(cur, px, py, tw, th, ptile);
-        if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
-            /* A few colours: indices win nine times out of ten, so the full
-             * bytes don't even get a PackBits pass. Saves the slow CPUs half. */
-            UBYTE *o = penc(0);
-            memcpy(o, pold, ihead);
-            best = ihead + packbits(pold + ihead, irows, o + ihead);
-            method = 1 | 16;
-            o = penc(1 - b);
-            memcpy(o, pold, ihead);
-            xor_rows(pold + ihead, pwork, irows / th, th);
-            if ((size = ihead + packbits(pwork, irows, o + ihead)) < best)
-                best = size, method = 1 | 4 | 16, b = 1 - b;
-        } else {
-            best = packbits(ptile, raw, penc(0));
-            method = 1;
-            if (best > raw / 4) {  /* as for planar: only where there is room to win */
-                xor_rows(ptile, pwork, tw, th);
-                if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                    best = size, method = 1 | 4, b = 1 - b;
-            }
-        }
-        if (had) {  /* the client has the old tile */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
-            chunky_bytes(ref, px, py, tw, th, pold);
-            for (k = (raw + 3) >> 2; k > 0; k--)
-                *a++ = *c++ ^ *o++;
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 2, b = 1 - b;
-        }
-        if (had && dy && chunky_shift_ok(ttx, py, th, dy)) {  /* scrolled */
-            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile;
-            UBYTE *o = pold;
-            LONG yy;
-            for (yy = 0; yy < th; yy++, o += tw) {
-                LONG sy = py + yy + dy;
-                if (sy < 0 || sy >= sh)
-                    memset(o, 0, tw);
-                else
-                    memcpy(o, ref + sy * ref_w + px, tw);
-            }
-            {
-                ULONG *ol = (ULONG *)pold;
-                for (k = (raw + 3) >> 2; k > 0; k--)
-                    *a++ = *c++ ^ *ol++;
-            }
-            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
-                be16(penc(1 - b), (UWORD)dy);
-                best = size, method = 2 | 8, b = 1 - b;
-            }
-        }
-        if (best >= raw) {
-            memcpy(penc(b), ptile, raw);
-            best = raw, method = 0;
-        }
+        best = chunky_tile(px, py, tw, th, had, had && dy && chunky_shift_ok(ttx, py, th, dy) ? dy : 0,
+                           &method, &b);
         data = pack_tile(penc(b), &best, &method);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
@@ -2581,15 +2734,6 @@ static BOOL info(void)
     lock = LockIBase(0);
     be16(msg, IntuitionBase->FirstScreen->Width);
     be16(msg + 2, IntuitionBase->FirstScreen->Height);
-#ifdef AMIGENT_APOLLO
-    {
-        UWORD sw, sh;
-        if (apollo_size(IntuitionBase->FirstScreen, &sw, &sh)) {
-            be16(msg, sw);
-            be16(msg + 2, sh);
-        }
-    }
-#endif
     UnlockIBase(lock);
     be16(msg + 4, TILE);
     be16(msg + 6, pause_left());  /* protocol 4; was always 0 before */
@@ -2693,24 +2837,49 @@ static const UBYTE *screen_title(struct Screen *s)
     return s->DefaultTitle ? s->DefaultTitle : s->Title;
 }
 
+/* Whether vp is one of the view's viewports and not hidden; under LockIBase. */
+static BOOL in_view(struct View *v, struct ViewPort *vp)
+{
+    struct ViewPort *p;
+    WORD n = 0;
+
+    for (p = v ? v->ViewPort : NULL; p && n < 256; p = p->Next, n++)
+        if (p == vp)
+            return !(vp->Modes & VP_HIDE);
+    return FALSE;
+}
+
 static BOOL screens(void)
 {
     struct text t = {0};
     struct Screen *s;
+    struct View *shown;
     ULONG lock;
     UBYTE b[16] = {0};
-    UWORD count = 0;
-    BOOL ok;
+    UWORD count = 0, all;
+    BOOL ok, chip = FALSE;
 
     t_add(&t, b, 2);  /* count, filled in below */
     lock = LockIBase(0);
+    /* What the chipset puts out is GfxBase->ActiView. Intuition's own is ViewLord;
+     * anything else is a program's LoadView. A copper list poked straight into
+     * the hardware leaves ActiView alone and can't be seen from here. */
+    shown = GfxBase->ActiView;
+    all = 0x8000;  /* these display bits are filled in */
+    if (shown != &IntuitionBase->ViewLord) all |= 0x4000;
     for (s = IntuitionBase->FirstScreen; s; s = s->NextScreen) {
         const UBYTE *title = screen_title(s);
-        UWORD flags = 0, n = title ? strlen((const char *)title) : 0;
+        UWORD flags = all, n = title ? strlen((const char *)title) : 0;
+        BOOL rtg = is_rtg(s);
         if (s == IntuitionBase->FirstScreen) flags |= 1;
         if ((s->Flags & SCREENTYPE) == WBENCHSCREEN) flags |= 2;
-        if (is_rtg(s)) flags |= 4;
+        if (rtg) flags |= 4;
         if (GetVPModeID(&s->ViewPort) & HAM_KEY) flags |= 8;
+        if (!rtg && in_view(shown, &s->ViewPort)) {
+            flags |= 32;  /* its ViewPort is in the view on display */
+            if (!chip) flags |= 16;  /* the frontmost of those: what the chipset shows */
+            chip = TRUE;
+        }
         be32(b, (ULONG)s);
         be16(b + 4, s->Width);
         be16(b + 6, s->Height);
@@ -2747,7 +2916,7 @@ static struct Screen *open_screen(ULONG handle)
 
 /* ScreenToFront waits for Intuition, which holds it back while a menu is open,
  * for as long as that may be. So a helper process waits instead of us. */
-static void __saveds front_main(void)
+static void AMIGENT_SAVEDS front_main(void)
 {
     struct Screen *s;
 
@@ -2809,7 +2978,7 @@ static void helper_done(volatile BOOL *flag)
 
 /* A ScreenToFront of the screen in front changes nothing, and comes back at
  * once unless Intuition holds back new windows and screens. */
-static void __saveds held_main(void)
+static void AMIGENT_SAVEDS held_main(void)
 {
     struct Screen *s;
 
@@ -2901,6 +3070,11 @@ static ULONG pack_rgb(const UBYTE *p, ULONG len, UBYTE *out)
     return n;
 }
 
+/* The screen FRAME_RGB reads: a handle from SCREENS, set by SCREEN_FRONT with
+ * arg 1; 0 for the front one. Ends with the connection. A screen that has
+ * closed meanwhile gives the front one. */
+static ULONG aim;
+
 static BOOL frame_rgb(BOOL packed, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -2909,7 +3083,10 @@ static BOOL frame_rgb(BOOL packed, LONG x, LONG y, LONG w, LONG h)
     BOOL ok;
 
     lock = LockIBase(0);
-    scr = IntuitionBase->FirstScreen;
+    for (scr = IntuitionBase->FirstScreen; aim && scr && (ULONG)scr != aim; scr = scr->NextScreen)
+        ;
+    if (!scr)
+        scr = IntuitionBase->FirstScreen;
     if (!w || x + w > scr->Width) w = scr->Width - x;
     if (!h || y + h > scr->Height) h = scr->Height - y;
     if (w <= 0 || h <= 0 || w * h > RGB_MAX || !(buf = AllocVec(w * h * 3, MEMF_ANY)))
@@ -3256,6 +3433,7 @@ static void drop_client(void)
     }
     out_len = 0;
     in_have = nacks = 0;
+    aim = 0;
     set_buttons(0);
     ObtainSemaphore(&picture);
     if (want)
@@ -3285,11 +3463,12 @@ static void free_pictures(void)
     cconn = pconn = 0;
 }
 
-/* The screen client went away of itself (closed, broke off or fell silent)
- * and no newcomer took its place. ready() also returns failure when a
- * newcomer has already asked for the screen, and that must not throw away
- * the picture the newcomer still needs. The ZZ9000 mirror still goes with
- * free_pictures() when nobody is waiting. */
+/* The screen client went away of itself (closed, broke off or fell silent).
+ * serve() may already be holding a newcomer that asked for the screen, and
+ * the failure of its first command is one way this is reached. Freeing here
+ * would drop the picture that newcomer still uses. With nobody waiting,
+ * free_pictures() releases both pictures and, unless the ZZ9000 has been
+ * given up, its mirror. */
 static void lose_client(void)
 {
     LONG i;
@@ -3449,7 +3628,7 @@ static BOOL l_skip(struct link *l, ULONG len, LONG secs)
 }
 
 /* POKE payload phase: one wall-clock deadline from now_ms(), not reset by
- * receiving another fragment. IO_SECONDS in l_wait alone restarts each select. */
+ * each fragment the way l_recv(..., IO_SECONDS) would be. */
 #define POKE_DEADLINE_MS (IO_SECONDS * 1000UL)
 
 static BOOL l_wait_until(struct link *l, BOOL writing, ULONG deadline_ms)
@@ -3535,7 +3714,7 @@ static void accept_pending(void)
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
 
-    fd = accept(listener, (struct sockaddr *)&addr, &len);
+    fd = accept(listener, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len));
     if (fd < 0)
         return;
     for (i = 0; i < PENDING && pend[i].fd >= 0; i++)
@@ -3549,12 +3728,6 @@ static void accept_pending(void)
     IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through WaitSelect */
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
-#ifdef AMIGENT_APOLLO
-    {
-        LONG rcv = RECV_BUFFER;
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-    }
-#endif
     load_key();
     /* Operational TLSONLY closes remote plaintext whether or not the TLS
      * port is listening. SETUP is only the operator's SETUP argument. */
@@ -3563,8 +3736,7 @@ static void accept_pending(void)
     l.base = SocketBase;
     l.fd = fd;
     /* Strangers get the hello, so they know where the door is, then out.
-     * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga.
-     * The socket is closed before AUTH, CHANNEL or AUDIO is read. */
+     * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga. */
     if (!l_send(&l, hello, 8, HELLO_SECONDS) ||
         (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK))) {
         close_fd(fd);
@@ -3744,9 +3916,9 @@ struct monmsg {
     char text[2];
 };
 
-/* The monitor's task, so its own lines don't count as text on the screen
- * (amiga_wait_text would find them). Refreshed by every mon_say, the
- * statistics among them once a second. */
+/* The monitor's task, so waiting for a text skips its window (its log would
+ * match what amiga_wait_text looks for) and TEXT marks it. Refreshed by every
+ * mon_say, the statistics among them once a second. */
 static struct Task *volatile mon_task;
 static volatile ULONG mon_quiet_until;  /* now_ms(): the monitor gets nothing before, see QUIET */
 
@@ -4395,6 +4567,7 @@ static BOOL c_sysinfo(struct link *l)
 #ifdef AMIGENT_APOLLO
         {
             UWORD board = apollo_board();
+
             t_str(&t, (const UBYTE *)"os=", FALSE);
             t_str(&t, (const UBYTE *)(apollo_os_here() ? "ApolloOS" : "AmigaOS"), FALSE);
             t_chr(&t, '\n');
@@ -4404,8 +4577,7 @@ static BOOL c_sysinfo(struct link *l)
             t_str(&t, (const UBYTE *)"board_name=", FALSE);
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
-            t_pair(&t, "audio", 1);  /* opcode 48: a usable AHI mix */
-            t_pair(&t, "pip", 0);    /* opcode 49 answers, but there is no safe picture */
+            t_pair(&t, "audio", 1);  /* opcode 48 is implemented in this build */
         }
 #endif
     }
@@ -4438,6 +4610,7 @@ static BOOL c_sysinfo(struct link *l)
 #endif
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
+    t_pair(&t, "emu68", emu68_present());  /* EMU68 is understood; 1: Emu68 runs here */
     t_str(&t, (const UBYTE *)"execbase=", FALSE);
     t_hex(&t, (ULONG)SysBase);
     t_chr(&t, '\n');
@@ -4566,7 +4739,7 @@ static BPTR copy_path(void)
     return first;
 }
 
-static void __saveds runner_main(void)
+static void AMIGENT_SAVEDS runner_main(void)
 {
     struct run *r;
     BPTR in, out, old = 0;
@@ -5044,11 +5217,7 @@ struct zin {
     struct huff lit, dist;
 };
 
-#ifdef AMIGENT_APOLLO
-#define ZIN_BUF 8192  /* fewer recv rounds while a packed upload inflates */
-#else
 #define ZIN_BUF 4096
-#endif
 
 static LONG zi_byte(struct zin *z)
 {
@@ -5462,7 +5631,7 @@ static BOOL c_compress(struct link *l, LONG level)
 
 /* ---- hooks: what programs draw, and their debug output -------------------- */
 
-/* Each patched function gets a stub of its own in front, from src/native/amiga/daemon/hookstub.s:
+/* Each patched function gets a stub of its own in front, from amiga/hookstub.s:
  * it counts itself busy, calls our hook while one is set, and goes on to the
  * original with all registers as they came. Stubs are never freed, since a task
  * may have just stepped into one when the vector goes back; when a later patch
@@ -5478,8 +5647,10 @@ static const UBYTE stub_code[60] = {
 #define STUB_ORIG 52
 #define STUB_SIZE 64
 
-enum { H_TEXT, H_RECTFILL, H_ERASE, H_SETRAST, H_SCROLL, H_SCROLLBF, H_DELLAYER, H_RAWPUT, HOOKS };
-#define HOOKS_NAME "amigent hooks 1"
+enum { H_TEXT, H_RECTFILL, H_ERASE, H_SETRAST, H_SCROLL, H_SCROLLBF, H_DELLAYER, H_RAWPUT,
+       H_CLIPBLIT, H_BLTRP, H_FREEBM, HOOKS };
+/* The number goes up with HOOKS: an older amigentd's set has fewer stubs. */
+#define HOOKS_NAME "amigent hooks 2"
 
 struct hookset {
     struct SignalSemaphore sem;  /* whoever holds it owns the hooks */
@@ -5499,7 +5670,7 @@ static struct Library *hook_lib(LONG i)
 
 static LONG hook_lvo(LONG i)
 {
-    static const WORD lvo[HOOKS] = {-60, -306, -810, -234, -396, -1002, -90, -516};
+    static const WORD lvo[HOOKS] = {-60, -306, -810, -234, -396, -1002, -90, -516, -552, -606, -924};
     return lvo[i];
 }
 
@@ -5508,7 +5679,7 @@ static void set_hook(LONG i, void (*fn)(ULONG *))
     struct Library *lib = hook_lib(i);
     UBYTE *s;
 
-    if (!lib || (i == H_SCROLLBF && lib->lib_Version < 39))
+    if (!lib || ((i == H_SCROLLBF || i == H_FREEBM) && lib->lib_Version < 39))
         return;
     if (!(s = hooks->stub[i])) {
         if (!(s = AllocMem(STUB_SIZE, MEMF_PUBLIC)))
@@ -5572,22 +5743,30 @@ static void unhook_all(void)
  * wipe it, ScrollRaster moves it, SetRast and DeleteLayer clear the layer.
  * Fixed width runs are kept to the character, so a Shell typing letter by
  * letter or deleting one comes out as one line. Only layers of windows count:
- * clocks and docks drawing into layers of their own would fill the store. */
+ * clocks and docks drawing into layers of their own would fill the store.
+ *
+ * Text drawn off-screen, into a rastport without a layer or with a layer of
+ * its own (alone in its Layer_Info), is kept per bitmap in bitmap coordinates
+ * (TXF_OFF, at most a quarter of the store). A ClipBlit or BltBitMapRastPort
+ * from there into a window copies it along, so programs that draw into a
+ * bitmap and copy it to their window against flicker can be read too. */
 #define TX_LEN 40
 #define TX_BUCKETS 64
+#define TXF_OFF 1  /* layer is a struct BitMap: drawn off-screen */
+#define TXF_NEW 2  /* just copied by a blit; tx_clear leaves it */
 #define TX_OLD 64
 
 struct tx {
     struct tx *next;
-    struct Layer *layer;
+    APTR layer;       /* a window's layer, or an off-screen bitmap (TXF_OFF) */
     WORD x, y, w, h;  /* box in the layer; y is the top, not the baseline */
     UWORD cw;         /* character width of a fixed width font, 0 otherwise */
-    UBYTE len, pad;
+    UBYTE len, flags;
     UBYTE s[TX_LEN];
 };
 
 static struct tx *tx_pool, *tx_free, *tx_head[TX_BUCKETS];
-static LONG tx_size;
+static LONG tx_size, tx_off;
 static ULONG tx_used, tx_evicted, tx_since, tx_gen;
 static struct Window *tx_old[TX_OLD];  /* open before recording started */
 
@@ -5601,6 +5780,8 @@ static void tx_drop(struct tx **at)
     e->next = tx_free;
     tx_free = e;
     tx_used--;
+    if (e->flags & TXF_OFF)
+        tx_off--;
 }
 
 static void tx_remove(struct tx *e)
@@ -5614,12 +5795,26 @@ static void tx_remove(struct tx *e)
 }
 
 /* A free entry at the end of the layer's bucket; full, the oldest goes if
- * evict is set (not while a caller walks a bucket). */
-static struct tx *tx_new(struct Layer *ly, BOOL evict)
+ * evict is set (not while a caller walks a bucket). Off-screen text has a
+ * quarter of the store: beyond, older off-screen text makes room. */
+static struct tx *tx_new(APTR ly, UBYTE flags, BOOL evict)
 {
     struct tx **at, *e;
     LONG b = TX_BUCKET(ly), k;
 
+    if ((flags & TXF_OFF) && tx_off >= tx_size / 4) {
+        if (!evict)
+            return NULL;
+        for (k = 0; k < TX_BUCKETS; k++) {
+            for (at = &tx_head[(b + k) & (TX_BUCKETS - 1)]; *at && !((*at)->flags & TXF_OFF);
+                 at = &(*at)->next)
+                ;
+            if (*at) {
+                tx_drop(at);
+                break;
+            }
+        }
+    }
     if (!tx_free) {
         if (!evict)
             return NULL;
@@ -5635,6 +5830,9 @@ static struct tx *tx_new(struct Layer *ly, BOOL evict)
     tx_used++;
     e->next = NULL;
     e->layer = ly;
+    e->flags = flags;
+    if (flags & TXF_OFF)
+        tx_off++;
     for (at = &tx_head[b]; *at; at = &(*at)->next)
         ;
     *at = e;
@@ -5661,7 +5859,7 @@ static void tx_cut(struct tx *e, LONG from, LONG to)
 
     for (i = to; i < e->len && e->s[i] == ' '; i++)
         ;
-    if (i < e->len && (r = tx_new(e->layer, FALSE))) {
+    if (i < e->len && (r = tx_new(e->layer, e->flags & TXF_OFF, FALSE))) {
         r->cw = e->cw;
         r->y = e->y;
         r->h = e->h;
@@ -5676,14 +5874,14 @@ static void tx_cut(struct tx *e, LONG from, LONG to)
 
 /* Text within x0..x1, y0..y1 (inclusive, layer coordinates) is gone. A box
  * that covers less than half of a run's height leaves it: an underline. */
-static void tx_clear(struct Layer *ly, LONG x0, LONG y0, LONG x1, LONG y1)
+static void tx_clear(APTR ly, LONG x0, LONG y0, LONG x1, LONG y1)
 {
     struct tx **at = &tx_head[TX_BUCKET(ly)], *e;
 
     while ((e = *at)) {
         LONG top, bottom;
 
-        if (e->layer != ly) {
+        if (e->layer != ly || (e->flags & TXF_NEW)) {
             at = &e->next;
             continue;
         }
@@ -5715,7 +5913,7 @@ static void tx_clear(struct Layer *ly, LONG x0, LONG y0, LONG x1, LONG y1)
 }
 
 /* Fixed width runs that straddle column x are split there. */
-static void tx_split(struct Layer *ly, LONG x)
+static void tx_split(APTR ly, LONG x)
 {
     struct tx *e;
     LONG k;
@@ -5728,7 +5926,7 @@ static void tx_split(struct Layer *ly, LONG x)
         }
 }
 
-static void tx_layer_gone(struct Layer *ly)
+static void tx_layer_gone(APTR ly)
 {
     struct tx **at = &tx_head[TX_BUCKET(ly)];
 
@@ -5739,20 +5937,44 @@ static void tx_layer_gone(struct Layer *ly)
             at = &(*at)->next;
 }
 
+/* Where text drawn into rp is kept: a window's layer (layer coordinates),
+ * or off-screen its bitmap (bitmap coordinates, *ox and *oy added to those of
+ * rp, flags TXF_OFF). NULL: not kept, like a clock's layer on a screen. */
+static APTR tx_where(struct RastPort *rp, LONG *ox, LONG *oy, UBYTE *flags)
+{
+    struct Layer *ly = rp->Layer;
+
+    *ox = *oy = 0;
+    *flags = 0;
+    if (ly && ly->Window)
+        return ly;
+    if (ly) {
+        if (ly->front || ly->back)
+            return NULL;  /* one of several: a screen's, not a drawing buffer */
+        *ox = ly->bounds.MinX - ly->Scroll_X;
+        *oy = ly->bounds.MinY - ly->Scroll_Y;
+    }
+    if (!rp->BitMap)
+        return NULL;
+    *flags = TXF_OFF;
+    return rp->BitMap;
+}
+
 /* regs: d0-d7 are r[0..7], a0-a6 r[8..14] */
 /* Text s[n] drawn in rp with its font, left edge x, top y. */
 static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG y)
 {
-    struct Layer *ly = rp->Layer;
     struct TextFont *f = rp->Font;
-    LONG cw, h, i, k, total = 0, piece;
+    LONG cw, h, i, k, total = 0, piece, ox, oy;
     WORD widths[(1024 + TX_LEN - 1) / TX_LEN];
     struct tx *e;
+    UBYTE off;
+    APTR ly;
 
-    if (!ly || !ly->Window || !f || n <= 0 || !tx_pool)
+    if (!f || n <= 0 || !tx_pool || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
-    if (mon_task && FindTask(NULL) == mon_task)
-        return;  /* amigent-monitor's log repeats what the agent looks for */
+    x += ox;
+    y += oy;
     if (n > 1024)
         n = 1024;
     /* Fixed width fonts may carry kerning tables too, all alike: the flag decides. */
@@ -5781,7 +6003,7 @@ static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG 
             if (e && e->len + piece > TX_LEN)
                 piece = TX_LEN - e->len;
         }
-        if (!e && (e = tx_new(ly, TRUE))) {
+        if (!e && (e = tx_new(ly, off, TRUE))) {
             e->x = x;
             e->y = y;
             e->h = h;
@@ -5818,12 +6040,15 @@ static void h_text(ULONG *r)
 static void h_fill(ULONG *r, BOOL erase)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
+    LONG ox, oy;
+    UBYTE off;
+    APTR ly;
 
-    if (!rp->Layer || !rp->Layer->Window || !tx_pool || (!erase && (rp->DrawMode & COMPLEMENT)))
+    if (!tx_pool || (!erase && (rp->DrawMode & COMPLEMENT)) || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
     Forbid();
     tx_gen++;
-    tx_clear(rp->Layer, (WORD)r[0], (WORD)r[1], (WORD)r[2], (WORD)r[3]);
+    tx_clear(ly, (WORD)r[0] + ox, (WORD)r[1] + oy, (WORD)r[2] + ox, (WORD)r[3] + oy);
     Permit();
 }
 
@@ -5840,11 +6065,14 @@ static void h_erase(ULONG *r)
 static void h_setrast(ULONG *r)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
+    LONG ox, oy;
+    UBYTE off;
+    APTR ly;
 
-    if (rp->Layer && tx_pool) {
+    if (tx_pool && (ly = tx_where(rp, &ox, &oy, &off))) {
         Forbid();
         tx_gen++;
-        tx_layer_gone(rp->Layer);
+        tx_layer_gone(ly);
         Permit();
     }
 }
@@ -5852,13 +6080,15 @@ static void h_setrast(ULONG *r)
 static void h_scroll(ULONG *r)
 {
     struct RastPort *rp = (struct RastPort *)r[9];
-    struct Layer *ly = rp->Layer;
     LONG dx = (WORD)r[0], dy = (WORD)r[1], x0 = (WORD)r[2], y0 = (WORD)r[3];
-    LONG x1 = (WORD)r[4], y1 = (WORD)r[5];
+    LONG x1 = (WORD)r[4], y1 = (WORD)r[5], ox, oy;
     struct tx **at, *e;
+    UBYTE off;
+    APTR ly;
 
-    if (!ly || !ly->Window || !tx_pool)
+    if (!tx_pool || !(ly = tx_where(rp, &ox, &oy, &off)))
         return;
+    x0 += ox, x1 += ox, y0 += oy, y1 += oy;
     Forbid();
     tx_gen++;
     /* Cut runs where the area starts and ends, and where the part that
@@ -5899,10 +6129,132 @@ static void h_dellayer(ULONG *r)
     Forbid();
     tx_gen++;
     tx_layer_gone(ly);
+    if (!ly->Window && !ly->front && !ly->back && ly->rp && ly->rp->BitMap)
+        tx_layer_gone(ly->rp->BitMap);  /* a drawing buffer's layer: its text goes too */
     for (i = 0; i < TX_OLD; i++)
         if (ly->Window && tx_old[i] == (struct Window *)ly->Window)
             tx_old[i] = NULL;
     Permit();
+}
+
+/* A copy of the box sx,sy (w x h) of src to dx,dy in dst: the text there is
+ * gone and what src holds in the box comes along. Only from an off-screen
+ * source with text: blits of anything else (a font engine's glyphs, a picture,
+ * a window scrolling itself) leave the text alone, as before. */
+static void tx_blit(APTR src, LONG sx, LONG sy, APTR dst, UBYTE dflags, LONG dx, LONG dy,
+                    LONG w, LONG h)
+{
+    struct tx *e, *c, **at;
+    LONG n = 0, k, x1 = sx + w - 1, y1 = sy + h - 1, bs = TX_BUCKET(src), bd = TX_BUCKET(dst);
+    BOOL known = FALSE;
+
+    for (e = tx_head[bs]; e; e = e->next)
+        if (e->layer == src) {
+            known = TRUE;
+            if (e->x <= x1 && e->x + e->w > sx && e->y <= y1 && e->y + e->h > sy)
+                n++;
+        }
+    if (!known)
+        return;
+    tx_gen++;
+    /* Room first: making it while copying could drop runs being copied. */
+    while (tx_size - (LONG)tx_used < n) {
+        for (k = 0; k < TX_BUCKETS; k++)
+            if (k != bs && k != bd && tx_head[k])
+                break;
+        if (k == TX_BUCKETS)
+            break;
+        tx_drop(&tx_head[k]);
+        tx_evicted++;
+    }
+    for (e = tx_head[bs]; e; e = e->next) {
+        LONG a = 0, b = e->len - 1, top, bottom;
+
+        if (e->layer != src || (e->flags & TXF_NEW) || !e->len)
+            continue;
+        top = sy > e->y ? sy : e->y;
+        bottom = y1 < e->y + e->h - 1 ? y1 : e->y + e->h - 1;
+        if (x1 < e->x || sx >= e->x + e->w || (bottom - top + 1) * 2 < e->h)
+            continue;
+        if (e->cw) {  /* the characters whose middle lies inside, as tx_clear */
+            LONG half = e->cw / 2;
+            a = sx - e->x - half + e->cw - 1;
+            a = a < 0 ? 0 : a / e->cw;
+            b = x1 - e->x - half;
+            b = b < 0 ? -1 : b / e->cw;
+            if (b >= e->len)
+                b = e->len - 1;
+            if (a > b)
+                continue;
+        } else if (e->x + e->w / 2 < sx || e->x + e->w / 2 > x1)
+            continue;
+        if (!(c = tx_new(dst, dflags | TXF_NEW, FALSE)))
+            break;
+        c->cw = e->cw;
+        c->h = e->h;
+        c->x = e->x + a * e->cw - sx + dx;
+        c->y = e->y - sy + dy;
+        c->len = b - a + 1;
+        c->w = e->cw ? c->len * e->cw : e->w;
+        CopyMem(e->s + a, c->s, c->len);
+    }
+    tx_clear(dst, dx, dy, dx + w - 1, dy + h - 1);  /* leaves the new ones */
+    at = &tx_head[bd];
+    while ((e = *at)) {
+        if (e->layer == dst && (e->flags & TXF_NEW)) {
+            e->flags &= ~TXF_NEW;
+            if (tx_blank(e)) {
+                tx_drop(at);
+                continue;
+            }
+        }
+        at = &e->next;
+    }
+}
+
+/* ClipBlit (from a rastport) and BltBitMapRastPort (from a bitmap): a0 the
+ * source, d0/d1 where in it, a1 the rastport, d2/d3 where, d4/d5 the size,
+ * d6 the minterm. Only plain copies count. */
+static void h_blit(ULONG *r, BOOL from_rp)
+{
+    struct RastPort *drp = (struct RastPort *)r[9];
+    LONG w = (WORD)r[4], h = (WORD)r[5], sox = 0, soy = 0, dox, doy;
+    UBYTE sflags, dflags;
+    APTR src, dst;
+
+    if (!tx_pool || (r[6] & 0xff) != 0xc0 || w <= 0 || h <= 0 || !r[8] ||
+        !(dst = tx_where(drp, &dox, &doy, &dflags)))
+        return;
+    if (from_rp) {
+        if (!(src = tx_where((struct RastPort *)r[8], &sox, &soy, &sflags)) || !(sflags & TXF_OFF))
+            return;
+    } else
+        src = (APTR)r[8];
+    if (src == dst)
+        return;  /* a buffer scrolling itself, maybe for ScrollRaster: h_scroll did that */
+    Forbid();
+    tx_blit(src, (WORD)r[0] + sox, (WORD)r[1] + soy, dst, dflags, (WORD)r[2] + dox,
+            (WORD)r[3] + doy, w, h);
+    Permit();
+}
+
+static void h_clipblit(ULONG *r)
+{
+    h_blit(r, TRUE);
+}
+
+static void h_bltrp(ULONG *r)
+{
+    h_blit(r, FALSE);
+}
+
+static void h_freebm(ULONG *r)
+{
+    if (tx_pool && r[8]) {
+        Forbid();
+        tx_layer_gone((APTR)r[8]);
+        Permit();
+    }
 }
 
 /* ---- debug output: kprintf, Enforcer, MuForce ------------------------------ */
@@ -5960,6 +6312,9 @@ static void hooks_start(void)
             set_hook(H_SCROLL, h_scroll);
             set_hook(H_SCROLLBF, h_scroll);
             set_hook(H_DELLAYER, h_dellayer);
+            set_hook(H_CLIPBLIT, h_clipblit);
+            set_hook(H_BLTRP, h_bltrp);
+            set_hook(H_FREEBM, h_freebm);
             text_on = TRUE;
         }
     }
@@ -6212,10 +6567,15 @@ static BOOL screen_text(struct text *t, const UBYTE *match)
     for (l = s->LayerInfo.top_layer; l && !found; l = l->back) {
         struct Window *w;
         LONG box[4];
+        BOOL mon;
 
         for (w = s->FirstWindow; w && w != (struct Window *)l->Window; w = w->NextWindow)
             ;
         if (!w || l != w->WLayer)
+            continue;
+        /* amigent-monitor's log repeats what the agent looks for: no match there */
+        mon = mon_task && w->UserPort && w->UserPort->mp_SigTask == mon_task;
+        if (match && mon)
             continue;
         if (!match) {
             box[0] = w->LeftEdge, box[1] = w->TopEdge, box[2] = w->Width, box[3] = w->Height;
@@ -6227,6 +6587,7 @@ static BOOL screen_text(struct text *t, const UBYTE *match)
             if (w == IntuitionBase->ActiveWindow) t_chr(t, 'a');
             if (w->Flags & WFLG_BACKDROP) t_chr(t, 'b');
             if (tx_is_old(w)) t_chr(t, 'o');
+            if (mon) t_chr(t, 'm');
             t_tab(t);
             t_str(t, w->Title, FALSE);
             t_chr(t, '\n');
@@ -6788,8 +7149,8 @@ static BOOL peek_allowed(ULONG at, ULONG n)
     if (!n || n > PEEK_MAX || end < at)
         return FALSE;
 #ifdef AMIGENT_APOLLO
-    /* A MemHeader that covered a SAGA, PIP or VREG window would still be a
-     * read with side effects. Those windows are refused even then. */
+    /* A MemHeader that covered a SAGA, PIP, VREG or ARNE window would still
+     * be a read or write with side effects. Those windows are refused first. */
     if (apollo_mmio_hit(at, n))
         return FALSE;
 #endif
@@ -6821,10 +7182,6 @@ static BOOL c_peek(struct link *l, UWORD len, ULONG n)
     for (p = hex; *p; p++)
         at = at << 4 | (*p <= '9' ? *p - '0' : (*p | 0x20) - 'a' + 10);
     FreeVec(hex);
-#ifdef AMIGENT_APOLLO
-    if (apollo_mmio_hit(at, n))
-        return c_fail(l, 1, "that range includes Apollo registers that a read can change");
-#endif
     if (!peek_allowed(at, n))
         return c_fail(l, 1, "only RAM exec manages and the Kickstart ROM, at most 64 KB");
     t_add(&t, (const void *)at, n);
@@ -6942,11 +7299,10 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
-/* Length uses the same PEEK_MAX bound as PEEK. Order: address → size →
- * ALLOWPOKE → MMIO/RAM gates → AllocVec/l_recv → CopyMem. Oversized n closes
- * the channel (FALSE) instead of draining. Bounded payload skip/recv use one
- * POKE_DEADLINE_MS wall-clock from now_ms(); fragments do not extend it.
- * A rebuilt binary is a new validation identity; prior HW results do not transfer. */
+/* Length uses the same PEEK_MAX bound as PEEK. Order: address -> size ->
+ * ALLOWPOKE -> region -> receive with a wall-clock deadline -> write.
+ * A huge n must not allocate or hang the receive before ALLOWPOKE is checked.
+ * POKE_DEADLINE_MS wall-clock from now_ms(); fragments do not extend it. */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
@@ -6977,7 +7333,7 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
         return l_skip_until(l, n, deadline) && c_fault(l, ERROR_NO_FREE_STORE);
     if (!l_recv_until(l, data, n, deadline)) {
         FreeVec(data);
-        return FALSE;  /* incomplete / deadline: close — do not treat as next command */
+        return FALSE;  /* incomplete / deadline: close - do not treat as next command */
     }
     mon_say('C', "write memory", NULL);
     Disable();
@@ -6990,7 +7346,7 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 
 /* ---- trace: tracepoints in a running program ----------------------------
  * A tracepoint puts TRAP #15 over one instruction of a program's code and
- * makes our trap handler (src/native/amiga/daemon/trapstub.s) that task's tc_TrapCode. When the
+ * makes our trap handler (amiga/trapstub.s) that task's tc_TrapCode. When the
  * program gets there, the handler keeps the registers and a bit of the stack,
  * puts the instruction back and lets the program go on as if nothing
  * happened: it fires once, and the program never stops.
@@ -7629,6 +7985,445 @@ static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD 
     return c_text(l, &t);
 }
 
+#ifndef AMIGENT_APOLLO
+/* ---- Emu68: what runs on the Raspberry Pi, and its JIT settings ---------
+ *
+ * Emu68 (the 68k JIT on a PiStorm and other Pi boards) offers the Amiga side
+ * devicetree.resource with its own /emu68 node, the Pi firmware's mailbox,
+ * and control registers that MOVEC reads and writes (docs/internals/
+ * ControlRegisters.md in the Emu68 sources). Nothing here touches a control
+ * register before /emu68 with an idstring was found: on any other 68k the
+ * MOVEC would be an illegal instruction. Only the JIT fields Emu68 documents
+ * as changeable can be written, and only in memory: nothing goes to the SD card.
+ * Built with vbcc only; other builds answer emu68=0. */
+
+#ifdef __VBCC__
+#define EMU68_BUILT 1
+APTR __DT_OpenKey(__reg("a6") APTR, __reg("a0") const char *name) = "\tjsr\t-6(a6)";
+void __DT_CloseKey(__reg("a6") APTR, __reg("a0") APTR key) = "\tjsr\t-12(a6)";
+APTR __DT_FindProperty(__reg("a6") APTR, __reg("a0") APTR key, __reg("a1") const char *name) = "\tjsr\t-24(a6)";
+ULONG __DT_GetPropLen(__reg("a6") APTR, __reg("a0") APTR prop) = "\tjsr\t-36(a6)";
+APTR __DT_GetPropValue(__reg("a6") APTR, __reg("a0") APTR prop) = "\tjsr\t-48(a6)";
+void __MB_RawCommand(__reg("a6") APTR, __reg("a0") ULONG *command) = "\tjsr\t-6(a6)";
+/* Supervisor mode only. MOVEC Rc,D0 is $4e7a,$0xxx; MOVEC D0,Rc is $4e7b,$0xxx. */
+void emu68_movec_all(__reg("a0") ULONG *r) =
+    "\tdc.w\t$4e7a,$00e0\n\tmove.l\td0,(a0)+\n"   /* CNTFRQ */
+    "\tdc.w\t$4e7a,$00e2\n\tmove.l\td0,(a0)+\n"   /* CNTVALHI */
+    "\tdc.w\t$4e7a,$00e1\n\tmove.l\td0,(a0)+\n"   /* CNTVALLO */
+    "\tdc.w\t$4e7a,$00e2\n\tmove.l\td0,(a0)+\n"   /* CNTVALHI again */
+    "\tdc.w\t$4e7a,$00e4\n\tmove.l\td0,(a0)+\n"   /* INSNCNTHI */
+    "\tdc.w\t$4e7a,$00e3\n\tmove.l\td0,(a0)+\n"   /* INSNCNTLO */
+    "\tdc.w\t$4e7a,$00e4\n\tmove.l\td0,(a0)+\n"
+    "\tdc.w\t$4e7a,$00e6\n\tmove.l\td0,(a0)+\n"   /* ARMCNTHI */
+    "\tdc.w\t$4e7a,$00e5\n\tmove.l\td0,(a0)+\n"   /* ARMCNTLO */
+    "\tdc.w\t$4e7a,$00e6\n\tmove.l\td0,(a0)+\n"
+    "\tdc.w\t$4e7a,$00e7\n\tmove.l\td0,(a0)+\n"   /* JITSIZE */
+    "\tdc.w\t$4e7a,$00e8\n\tmove.l\td0,(a0)+\n"   /* JITFREE */
+    "\tdc.w\t$4e7a,$00e9\n\tmove.l\td0,(a0)+\n"   /* JITCOUNT */
+    "\tdc.w\t$4e7a,$00ea\n\tmove.l\td0,(a0)+\n"   /* JITSCFTHRESH */
+    "\tdc.w\t$4e7a,$00eb\n\tmove.l\td0,(a0)+\n"   /* JITCTRL */
+    "\tdc.w\t$4e7a,$00ec\n\tmove.l\td0,(a0)+\n"   /* JITCMISS */
+    "\tdc.w\t$4e7a,$01e0\n\tmove.l\td0,(a0)+\n"   /* JITCTRL2 */
+    "\tdc.w\t$4e7a,$0002\n\tmove.l\td0,(a0)";     /* CACR */
+void emu68_movec_set(__reg("a0") ULONG *v) =
+    "\tmove.l\t(a0)+,d0\n\tdc.w\t$4e7b,$00ea\n"   /* JITSCFTHRESH */
+    "\tmove.l\t(a0)+,d0\n\tdc.w\t$4e7b,$00eb\n"   /* JITCTRL */
+    "\tmove.l\t(a0),d0\n\tdc.w\t$4e7b,$01e0";     /* JITCTRL2 */
+#else
+#define EMU68_BUILT 0
+#endif
+
+#define E68_REGS 18
+#define E68_SFTHRESH 13
+#define E68_JITCTRL 14
+#define E68_JITCTRL2 16
+/* The fields Emu68 documents as settable: JITCTRL soft flush, loop count,
+ * inline range, instruction depth; JITCTRL2 chip and DBF slowdown, CCR scan
+ * depth, chip slowdown ratio, blitter wait. Debug registers are not offered. */
+#define E68_CTRL_MASK 0xFFFFFFF1UL
+#define E68_CTRL2_MASK 0x00000FFBUL
+
+static APTR dt_base;
+
+static APTR dt_prop(const char *key, const char *name, ULONG *len)
+{
+#if EMU68_BUILT
+    APTR k, p, v = NULL;
+
+    if (!dt_base || !(k = __DT_OpenKey(dt_base, key)))
+        return NULL;
+    if ((p = __DT_FindProperty(dt_base, k, name))) {
+        v = __DT_GetPropValue(dt_base, p);
+        if (len)
+            *len = __DT_GetPropLen(dt_base, p);
+    }
+    __DT_CloseKey(dt_base, k);
+    return v;
+#else
+    return NULL;
+#endif
+}
+
+/* Emu68 for certain: its devicetree.resource has an /emu68 node with an idstring. */
+static BOOL emu68_present(void)
+{
+#if EMU68_BUILT
+    ULONG len = 0;
+
+    if (!dt_base)
+        dt_base = OpenResource("devicetree.resource");
+    return dt_base && dt_prop("/emu68", "idstring", &len) && len > 1;
+#else
+    return FALSE;
+#endif
+}
+
+/* All counters and settings; the 64 bit counters read again until their high half stands still. */
+static void emu68_read(ULONG *r)
+{
+#if EMU68_BUILT
+    LONG tries;
+    APTR ssp;
+
+    for (tries = 0; tries < 8; tries++) {
+        ssp = SuperState();
+        emu68_movec_all(r);
+        if (ssp)
+            UserState(ssp);
+        if (r[1] == r[3] && r[4] == r[6] && r[7] == r[9])
+            break;
+    }
+#endif
+}
+
+/* Set the documented fields; the other bits stay. ea, eb, 1e0 as reg, value, mask. */
+static void emu68_write(const ULONG *want, ULONG n)
+{
+#if EMU68_BUILT
+    ULONG r[E68_REGS], v[3], i;
+    APTR ssp;
+
+    Disable();  /* read, change, write in one go: no other tool in between */
+    ssp = SuperState();
+    emu68_movec_all(r);
+    v[0] = r[E68_SFTHRESH];
+    v[1] = r[E68_JITCTRL];
+    v[2] = r[E68_JITCTRL2];
+    for (i = 0; i < n; i++) {
+        ULONG reg = want[i * 3], val = want[i * 3 + 1], mask = want[i * 3 + 2];
+        LONG at = reg == 0xea ? 0 : reg == 0xeb ? 1 : reg == 0x1e0 ? 2 : -1;
+
+        if (at < 0)
+            continue;
+        mask &= at == 0 ? 0xFFFFFFFFUL : at == 1 ? E68_CTRL_MASK : E68_CTRL2_MASK;
+        v[at] = (v[at] & ~mask) | (val & mask);
+    }
+    emu68_movec_set(v);
+    if (ssp)
+        UserState(ssp);
+    Enable();
+    CacheClearU();  /* on Emu68 this flushes the JIT cache: the new settings apply from now */
+#endif
+}
+
+/* A Pi firmware property request with one tag: value words in v (two at most).
+ * Through mailbox.resource when there is one, else as EmuControl does it, at
+ * the mailbox found in the device tree, under Forbid and with a time limit. */
+static APTR mb_base;
+static volatile ULONG *mb_regs;
+static BOOL mb_looked;
+
+static void mb_find(void)
+{
+#if EMU68_BUILT
+    const char *alias;
+    const ULONG *reg, *ranges, *cells;
+    ULONG addr = 1, cpu = 1, len;
+
+    mb_looked = TRUE;
+    if ((mb_base = OpenResource("mailbox.resource")))
+        return;
+    if (!(alias = dt_prop("/aliases", "mailbox", NULL)))
+        return;
+    if ((cells = dt_prop("/soc", "#address-cells", NULL)))
+        addr = *cells;
+    if ((cells = dt_prop("/", "#address-cells", NULL)))
+        cpu = *cells;
+    if (addr < 1 || addr > 3 || cpu < 1 || cpu > 3)
+        return;
+    reg = dt_prop(alias, "reg", &len);
+    ranges = dt_prop("/soc", "ranges", NULL);
+    if (!reg || len < addr * 4 || !ranges)
+        return;
+    mb_regs = (volatile ULONG *)(reg[addr - 1] - ranges[addr - 1] + ranges[addr + cpu - 1]);
+#endif
+}
+
+static ULONG le32(ULONG x)
+{
+    return x >> 24 | (x >> 8 & 0xFF00) | (x << 8 & 0xFF0000) | x << 24;
+}
+
+static BOOL mb_tag(ULONG tag, ULONG words, ULONG *v)
+{
+#if EMU68_BUILT
+    /* In the Pi's own memory, never on a stack that might be Chip RAM across the bus */
+    ULONG *raw = AllocMem(64, MEMF_FAST | MEMF_PUBLIC | MEMF_CLEAR);
+    ULONG *m = (ULONG *)(((ULONG)raw + 15) & ~15UL), i, len = 32;
+    BOOL ok = FALSE;
+
+    if (!raw)
+        return FALSE;
+    if (!mb_looked)
+        mb_find();
+    m[0] = 32;
+    m[1] = 0;
+    m[2] = tag;
+    m[3] = 8;
+    m[4] = 0;
+    m[5] = v[0];
+    m[6] = words > 1 ? v[1] : 0;
+    m[7] = 0;
+    if (mb_base) {
+        __MB_RawCommand(mb_base, m);
+    } else if (mb_regs) {
+        volatile ULONG *rd = mb_regs, *st = mb_regs + 6, *wr = mb_regs + 8;
+        ULONG got = 0, spin;
+
+        for (i = 0; i < 8; i++)
+            m[i] = le32(m[i]);
+        Forbid();
+        CachePreDMA(m, &len, 0);
+        for (spin = 0; spin < 200000 && (le32(*st) & 0x80000000UL); spin++)
+            ;
+        if (spin < 200000) {
+            *wr = le32(((ULONG)m & ~15UL) | 8);
+            for (spin = 0; spin < 2000000; spin++) {
+                if (le32(*st) & 0x40000000UL)
+                    continue;
+                got = le32(*rd);
+                if ((got & 15) == 8)
+                    break;
+            }
+        }
+        CachePostDMA(m, &len, 0);
+        Permit();
+        for (i = 0; i < 8; i++)
+            m[i] = le32(m[i]);
+        if ((got & 15) != 8)
+            m[1] = 0;
+    } else
+        m[1] = 0;
+    ok = m[1] == 0x80000000UL && (m[4] & 0x80000000UL);
+    if (ok) {
+        v[0] = m[5];
+        if (words > 1)
+            v[1] = m[6];
+    }
+    FreeMem(raw, 64);
+    return ok;
+#else
+    return FALSE;
+#endif
+}
+
+/* A device tree string, as long as it is (bootargs pass the 256 of t_str). */
+static void t_prop(struct text *t, const char *out, const char *key, const char *name)
+{
+    ULONG len = 0, i;
+    const UBYTE *v = dt_prop(key, name, &len);
+
+    if (!v || !len)
+        return;
+    if (len > 4096)
+        len = 4096;
+    while (len && !v[len - 1])
+        len--;
+    /* not written as one literal: Version would take that for amigentd's own $VER */
+    if (len >= 6 && v[0] == '$' && !strncmp((const char *)v + 1, "VER: ", 5)) {
+        v += 6;
+        len -= 6;
+    }
+    t_str(t, (const UBYTE *)out, FALSE);
+    t_chr(t, '=');
+    for (i = 0; i < len; i++)
+        t_chr(t, v[i] < ' ' ? ' ' : v[i]);
+    t_chr(t, '\n');
+}
+
+static void t_hexpair(struct text *t, const char *key, ULONG v)
+{
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_chr(t, '=');
+    t_hex(t, v);
+    t_chr(t, '\n');
+}
+
+static void t_mb(struct text *t, const char *key, ULONG tag, ULONG id)
+{
+    ULONG v[2];
+
+    v[0] = id;
+    v[1] = 0;
+    if (mb_tag(tag, 2, v))
+        t_pair(t, key, v[1]);
+}
+
+/* emu68=0 without Emu68 and nothing else. what: 0 all, 2 counters and settings only. */
+static void emu68_text(struct text *t, UBYTE what)
+{
+    ULONG r[E68_REGS], v[2];
+    const ULONG *ver;
+    ULONG len = 0;
+
+    if (!emu68_present()) {
+        t_pair(t, "emu68", 0);
+        if (!EMU68_BUILT)
+            t_str(t, (const UBYTE *)"why=not in this amigentd build\n", FALSE);
+        return;
+    }
+    t_pair(t, "emu68", 1);
+    emu68_read(r);
+    t_pair(t, "cntfrq", r[0]);
+    t_hexpair(t, "cnt_hi", r[1]);
+    t_hexpair(t, "cnt_lo", r[2]);
+    t_hexpair(t, "insn_hi", r[4]);
+    t_hexpair(t, "insn_lo", r[5]);
+    t_hexpair(t, "arm_hi", r[7]);
+    t_hexpair(t, "arm_lo", r[8]);
+    t_pair(t, "jit_size", r[10]);
+    t_pair(t, "jit_free", r[11]);
+    t_pair(t, "jit_count", r[12]);
+    t_pair(t, "jit_sfthresh", r[13]);
+    t_hexpair(t, "jitctrl", r[14]);
+    t_pair(t, "jit_cmiss", r[15]);
+    t_hexpair(t, "jitctrl2", r[16]);
+    t_hexpair(t, "cacr", r[17]);
+    if (what == 2)
+        return;
+    t_prop(t, "idstring", "/emu68", "idstring");
+    if ((ver = dt_prop("/emu68", "version", &len)) && len >= 12) {
+        t_str(t, (const UBYTE *)"version=", FALSE);
+        t_num(t, ver[0]);
+        t_chr(t, '.');
+        t_num(t, ver[1]);
+        t_chr(t, '.');
+        t_num(t, ver[2]);
+        t_chr(t, '\n');
+    }
+    t_prop(t, "git", "/emu68", "git-hash");
+    t_prop(t, "variant", "/emu68", "variant");
+    t_prop(t, "model", "/", "model");
+    t_prop(t, "compatible", "/", "compatible");
+    t_prop(t, "bootargs", "/chosen", "bootargs");
+    if ((ver = dt_prop("/emu68", "m68k-jit-size", &len)) && len >= 4)
+        t_pair(t, "jit_size_mb", ver[0]);
+    v[0] = 0;
+    if (mb_tag(0x00010002, 1, v))  /* board revision: model and memory size */
+        t_hexpair(t, "board_revision", v[0]);
+    v[0] = 0;
+    if (mb_tag(0x00000001, 1, v))
+        t_pair(t, "firmware", v[0]);
+    t_mb(t, "temp", 0x00030006, 0);  /* millidegrees Celsius */
+    t_mb(t, "temp_max", 0x0003000a, 0);
+    t_mb(t, "arm_clock", 0x00030002, 3);  /* Hz: set, measured, highest */
+    t_mb(t, "arm_clock_measured", 0x00030047, 3);
+    t_mb(t, "arm_clock_max", 0x00030004, 3);
+    t_mb(t, "core_volt", 0x00030003, 1);  /* microvolts */
+    v[0] = 0;
+    if (mb_tag(0x00030046, 1, v))  /* under-voltage and throttling, now and since power on */
+        t_hexpair(t, "throttled", v[0]);
+    t_str(t, (const UBYTE *)(mb_base ? "mailbox=resource\n" : mb_regs ? "mailbox=direct\n" : "mailbox=none\n"), FALSE);
+}
+
+/* EMU68: c[1] 0 what runs and how it is, 2 counters only; 1 sets the JIT fields
+ * sent as reg, value, mask (three longs each), then answers as 2. */
+static BOOL c_emu68(struct link *l, UBYTE op, UWORD len)
+{
+    struct text t = {0};
+
+    if (op == 1) {
+        BOOL alive;
+        ULONG *want = (ULONG *)c_name(l, len, &alive);
+
+        if (!want)
+            return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
+        if (!emu68_present()) {
+            FreeVec(want);
+            return c_fail(l, 1, "not Emu68");
+        }
+        mon_say('C', "Emu68 JIT settings", NULL);
+        emu68_write(want, len / 12 > 8 ? 8 : len / 12);
+        FreeVec(want);
+        op = 2;
+    } else if (len && !l_skip(l, len, IO_SECONDS))
+        return FALSE;
+    else
+        mon_say('C', op == 2 ? "Emu68 counters" : "what runs under Emu68", NULL);
+    emu68_text(&t, op);
+    return c_text(l, &t);
+}
+
+static ULONG hexval(const char **p)
+{
+    ULONG v = 0;
+    char c;
+
+    while ((c = **p) && ((c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'f'))) {
+        v = v << 4 | (c <= '9' ? c - '0' : (c | 32) - 'a' + 10);
+        (*p)++;
+    }
+    return v;
+}
+
+/* amigentd EMU68JIT "eb:value:mask,1e0:value:mask" (hex): set the fields from a
+ * job's script, around a program; on anything but Emu68 it does nothing. */
+static int emu68_cli(const char *spec)
+{
+    ULONG want[24], n = 0;
+    const char *p = spec;
+
+    if (!emu68_present()) {
+        PutStr("amigentd: not Emu68, nothing changed\n");
+        return RETURN_WARN;
+    }
+    while (*p && n < 8) {
+        want[n * 3] = hexval(&p);
+        if (*p != ':')
+            break;
+        p++;
+        want[n * 3 + 1] = hexval(&p);
+        if (*p != ':')
+            break;
+        p++;
+        want[n * 3 + 2] = hexval(&p);
+        n++;
+        if (*p != ',')
+            break;
+        p++;
+    }
+    if (*p || !n) {
+        PutStr("amigentd: EMU68JIT wants reg:value:mask,... in hex\n");
+        return RETURN_ERROR;
+    }
+    emu68_write(want, n);
+    return RETURN_OK;
+}
+
+#else  /* AMIGENT_APOLLO: opcode 48 is AUDIO here, so EMU68 is not built */
+static BOOL emu68_present(void)
+{
+    return FALSE;
+}
+
+static int emu68_cli(const char *spec)
+{
+    (void)spec;
+    PutStr("amigentd: not Emu68, nothing changed\n");
+    return RETURN_WARN;
+}
+#endif  /* !AMIGENT_APOLLO */
+
 #ifdef AMIGENT_APOLLO
 /* What send() accepted. A full window is not an error: the caller pumps again. */
 static BOOL audio_send_some(struct link *l, UBYTE *buf, ULONG *sent, ULONG len)
@@ -8047,7 +8842,7 @@ static BOOL c_audio_stream(struct link *l)
     return ok;
 }
 
-/* AUDIO and PIP are their own answers, so a frame on the screen connection is not held up.
+/* AUDIO is its own answer, so a frame on the screen connection is not held up.
  * Nothing is read until a client sends the command. */
 static BOOL c_audio(struct link *l, UWORD ms)
 {
@@ -8069,30 +8864,7 @@ static BOOL c_audio(struct link *l, UWORD ms)
     return ok;
 }
 
-static BOOL c_pip(struct link *l)
-{
-    UBYTE *buf, head[13];
-    UWORD x = 0, y = 0, w = 0, h = 0;
-    LONG n, cap = 1024L * 768 * 3;
-    BOOL ok;
-
-    if (!(buf = AllocVec(cap, MEMF_ANY)))
-        return c_fault(l, ERROR_NO_FREE_STORE);
-    n = apollo_pip(buf, cap, &x, &y, &w, &h);
-    if (n < 0)
-        n = 0;
-    head[0] = 0;
-    be16(head + 1, x);
-    be16(head + 3, y);
-    be16(head + 5, w);
-    be16(head + 7, h);
-    be32(head + 9, (ULONG)n);
-    ok = l_send(l, head, 13, IO_SECONDS) && (n == 0 || l_send(l, buf, n, IO_SECONDS));
-    FreeVec(buf);
-    return ok;
-}
 #endif
-
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -8168,6 +8940,10 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_cpu(l, y, w);
     case CMD_DRAG:  /* window as hex in the name; arg pattern, y steps, w pixels */
         return c_drag(l, c[1], x, y, w);
+#ifndef AMIGENT_APOLLO
+    case CMD_EMU68:  /* c[1]: 0 info, 2 counters, 1 set (reg, value, mask longs in x bytes) */
+        return c_emu68(l, c[1], x);
+#endif
     case CMD_QUIET:  /* the monitor draws nothing for y seconds; 0 ends it */
         quiet_monitor(y);
         return c_ok(l);
@@ -8181,8 +8957,6 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         if (c[1] & 2)
             return c_ok(l); /* stop arrived with no stream on this channel */
         return c_audio(l, y);
-    case CMD_PIP:
-        return c_pip(l);
 #endif
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
@@ -8196,7 +8970,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     return c_fail(l, 1, "not on a command channel");
 }
 
-static void __saveds channel_main(void)
+static void AMIGENT_SAVEDS channel_main(void)
 {
     struct channel *c;
     struct link l;
@@ -8216,12 +8990,6 @@ static void __saveds channel_main(void)
         if (l.fd >= 0) {
             IoctlSocket(l.fd, FIONBIO, (char *)&one);
             setsockopt(l.fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
-#ifdef AMIGENT_APOLLO
-            {
-                LONG rcv = RECV_BUFFER;
-                setsockopt(l.fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-            }
-#endif
             ok = c_ok(&l);
             while (ok && l_recv(&l, cmd, sizeof(cmd), 0)) {
                 c->busy = TRUE;
@@ -8435,6 +9203,14 @@ static BOOL command(const UBYTE *c)
     case CMD_SCREENS:
         return screens();
     case CMD_SCREEN_FRONT:
+        if (c[1] & 1) {  /* from 1.5.0 (0x8000 in SCREENS): aim FRAME_RGB, move nothing */
+            aim = (ULONG)x << 16 | y;
+            if (aim && !open_screen(aim)) {
+                aim = 0;
+                return reply(1);
+            }
+            return reply(0);
+        }
         return screen_front((ULONG)x << 16 | y);
     case CMD_FRAME_RGB:
         return frame_rgb(c[1] & 1, x, y, w, h);
@@ -8616,11 +9392,7 @@ int __SSL_pending(__reg("a6") struct Library *, __reg("a0") const SSL *s) = "\tj
 #define TLS_FILE "S:amigent-tls.pem"
 #define TLS_CHECK_SECONDS 10
 #define TLS_PUMPS 8
-#ifdef AMIGENT_APOLLO
-#define TLS_BUFFER (32 * 1024)  /* one copy each way, and not more than send() is given */
-#else
 #define TLS_BUFFER 4096
-#endif
 
 static struct Task *volatile tls_task;
 /* tls_ready, declared above: AmiSSL is open, hello flag 2 */
@@ -8661,8 +9433,7 @@ static BOOL ssl_write_all(SSL *ssl, const UBYTE *buf, LONG n)
         n -= k;
     }
 #ifdef AMIGENT_APOLLO
-    /* The music task waits on this signal between halves instead of spinning
-     * through the picture cipher. */
+    /* The music task waits on this signal between halves instead of spinning. */
     if (audio_wait && audio_task)
         Signal(audio_task, SIGBREAKF_CTRL_D);
 #endif
@@ -8686,13 +9457,6 @@ static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (connect(inner, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
         setsockopt(inner, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-#ifdef AMIGENT_APOLLO
-        {
-            LONG rcv = RECV_BUFFER;
-            setsockopt(inner, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-            setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-        }
-#endif
         for (;;) {
             fd_set r;
             ULONG sigs = SIGBREAKF_CTRL_C;
@@ -8720,7 +9484,7 @@ static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
     SSL_shutdown(ssl);
 }
 
-static void __saveds pump_main(void)
+static void AMIGENT_SAVEDS pump_main(void)
 {
     struct pump *p;
     struct Library *SocketBase;
@@ -8748,12 +9512,6 @@ static void __saveds pump_main(void)
                 IoctlSocket(fd, FIONBIO, (char *)&zero);
                 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit));
                 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit));
-#ifdef AMIGENT_APOLLO
-                {
-                    LONG rcv = RECV_BUFFER;
-                    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-                }
-#endif
                 SSL_set_fd(p->ssl, fd);
                 pump(SocketBase, fd, p->ssl, buf);
                 CloseSocket(fd);
@@ -8834,18 +9592,12 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
     struct pump *p = NULL;
     struct Process *proc;
 
-    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, &len)) < 0)
+    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len))) < 0)
         return;
     Forbid();
     full = tls_pumps >= TLS_PUMPS;
     Permit();
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-#ifdef AMIGENT_APOLLO
-    {
-        LONG rcv = RECV_BUFFER;
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-    }
-#endif
     if (!full && (p = AllocVec(sizeof(*p), MEMF_CLEAR)) && (p->ssl = SSL_new(ctx)) &&
         (p->id = ReleaseSocket(fd, UNIQUE_ID)) != -1) {
         p->addr = addr.sin_addr.s_addr;
@@ -8874,7 +9626,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
 }
 
 /* Opens AmiSSL; listens while TLS_FILE is there, and reloads it when it changes. */
-static void __saveds tls_main(void)
+static void AMIGENT_SAVEDS tls_main(void)
 {
     struct Library *SocketBase;
     SSL_CTX *ctx = NULL;
@@ -9493,21 +10245,21 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
         old = CurrentDir(arg->wa_Lock);
         if ((icon = GetDiskObject(arg->wa_Name))) {
             tt = (STRPTR *)icon->do_ToolTypes;
-            if ((v = FindToolType(tt, "PORT")) && StrToLong(v, &n) > 0)
+            if ((v = FindToolType((CONST_STRPTR *)tt, "PORT")) && StrToLong(v, &n) > 0)
                 *port = n;
-            if (FindToolType(tt, "SETUP"))
+            if (FindToolType((CONST_STRPTR *)tt, "SETUP"))
                 setup_mode = TRUE;
-            if (FindToolType(tt, "QUIET"))
+            if (FindToolType((CONST_STRPTR *)tt, "QUIET"))
                 quiet = TRUE;
-            if (FindToolType(tt, "TLSONLY"))
+            if (FindToolType((CONST_STRPTR *)tt, "TLSONLY"))
                 tls_only = TRUE;
-            if (FindToolType(tt, "NOTEXT"))
+            if (FindToolType((CONST_STRPTR *)tt, "NOTEXT"))
                 no_text = TRUE;
-            if (FindToolType(tt, "NODEBUG"))
+            if (FindToolType((CONST_STRPTR *)tt, "NODEBUG"))
                 no_debug = TRUE;
-            if (FindToolType(tt, "ALLOWPOKE"))
+            if (FindToolType((CONST_STRPTR *)tt, "ALLOWPOKE"))
                 allow_poke = TRUE;
-            if ((v = FindToolType(tt, "KEY")))
+            if ((v = FindToolType((CONST_STRPTR *)tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
         }
@@ -9581,7 +10333,7 @@ static int follow(const char *from, const char *to)
 
 int main(int argc, char **argv)
 {
-    LONG args[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    LONG args[11] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -9593,13 +10345,18 @@ int main(int argc, char **argv)
         tool_types((struct WBStartup *)argv, &port);
     } else {
         rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K,"
-                       "ALLOWPOKE/S", args, NULL);
+                       "ALLOWPOKE/S,EMU68JIT/K", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
         }
         if (args[7] && args[8]) {  /* a job's helper, not the daemon */
             rc = follow((const char *)args[7], (const char *)args[8]);
+            FreeArgs(rda);
+            return rc;
+        }
+        if (args[10]) {  /* a job's helper: JIT settings around a program */
+            rc = emu68_cli((const char *)args[10]);
             FreeArgs(rda);
             return rc;
         }
@@ -9639,6 +10396,7 @@ int main(int argc, char **argv)
     }
     os39 = GfxBase->LibNode.lib_Version >= 39;
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
+    tables_init();
     zz_open();  /* a ZZ9000 looks at its own screen */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;

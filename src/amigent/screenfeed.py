@@ -31,11 +31,17 @@ DUTY = 0.5, 0.25  # share of the Amiga's time a sweep may take while awake, whil
 FOCUS_KEEP = 10.0  # a tile that answered a key stays interesting this long
 FOCUS_HALF_LIFE = 2.0  # seconds: old answers count half, the cursor moves on
 SHARED_GRACE = 20.0  # s the screen may stay taken by another client before we say offline
+# After the last viewer page leaves, keep the Amiga screen socket briefly so a
+# refresh does not flap. Past this, drop it: otherwise hello can still say
+# online=true with a dead socket, and the next page flashes online then offline.
+WATCH_RELEASE = 2.0
 FOCUS_BOXES = 2
 ANIMATED_KEEP = 30.0  # a tile that moved by itself is suspect this long after its last move
 ANIMATED_EVERY = 1.0  # while someone drives, the screen's own demo gets the leftovers
 QUIET_HANDS = 3.0  # a change this long after any input is nobody's doing
 BUDGET = 0.25  # seconds of wire a piece of screen may cost while someone drives
+SLOW_BUS_PIECE = 48  # tiles a request may cover on a Zorro II card: each read crosses the bus
+SLOW_BUS_DUTY = 0.25, 0.1  # DUTY there: a quiet look costs the Amiga a full read of the card
 FRAMES_IN_FLIGHT = 2  # always allowed, however big they may be
 MAX_FRAMES_IN_FLIGHT = 16  # cheap ones fill the round trip up to here
 INPUTS_IN_FLIGHT = 64  # a long paste must not bury the frames behind it
@@ -201,6 +207,7 @@ class Planner:
         self.animated_polled = 0.0
         self.avg_tile = 800.0  # bytes per tile on the wire, smoothed
         self.rate = 20000.0  # bytes per second the wire managed, smoothed
+        self.slow_bus = False  # the screen sits on a Zorro II graphics card (graphics.Info.slow_bus)
 
     def note_input(self, op: dict, now: float) -> None:
         self.last_input = now
@@ -272,8 +279,9 @@ class Planner:
     def piece_tiles(self, active: bool, quiet: bool) -> int:
         """How many tiles one request may cover: everything while the screen is quiet."""
         if quiet and not active:
-            return 1 << 16
-        return max(2, int(self.rate * BUDGET / max(self.avg_tile, 64)))
+            return SLOW_BUS_PIECE if self.slow_bus else 1 << 16
+        size = max(2, int(self.rate * BUDGET / max(self.avg_tile, 64)))
+        return min(size, SLOW_BUS_PIECE) if self.slow_bus else size
 
 
 # ---------------------------------------------------------------- the loop
@@ -343,11 +351,25 @@ class Feed:
 
     def run(self) -> None:
         retried, shared_since = False, 0.0
+        idle_since = None
         while True:
             if not self.watching():
+                now = time.monotonic()
+                if self.screen._sock is not None or self.online:
+                    if idle_since is None:
+                        idle_since = now
+                    elif now - idle_since >= WATCH_RELEASE:
+                        # Page gone long enough: do not keep a stale "online" over a
+                        # half-open Amiga socket for the next WebSocket hello.
+                        self._broken()
+                        self._set_online(False, "viewer page closed")
+                        idle_since = None
+                else:
+                    idle_since = None
                 self.wake.wait(1)
                 self.wake.clear()
                 continue
+            idle_since = None
             now = time.monotonic()
             if not self._due(now):
                 wait = self.next_sweep - now
@@ -559,9 +581,10 @@ class Feed:
         if self.found:
             return IDLE_STEPS[0]
         step = IDLE_STEPS[min(self.quiet, len(IDLE_STEPS)) - 1]
-        duty = DUTY[0]
+        duties = SLOW_BUS_DUTY if self.planner.slow_bus else DUTY
+        duty = duties[0]
         if now - self.planner.last_input > DOZE_AFTER and self.quiet > len(IDLE_STEPS):
-            step, duty = DOZE, DUTY[1]
+            step, duty = DOZE, duties[1]
         return max(step, self.sweep_took * (1 / duty - 1))
 
     def _tiles(self, tiles) -> None:

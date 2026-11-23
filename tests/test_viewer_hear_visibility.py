@@ -104,16 +104,31 @@ def test_disconnect_clears_amiga_and_hear():
     assert not hear_eligible(viewer.amiga, connected=False)
 
 
-def test_address_change_clears_capabilities(monkeypatch):
+def test_retiring_the_machine_clears_capabilities(monkeypatch):
+    """1.5.0: an address edit or removal retires the viewer; Hear must not outlive it."""
     viewer = _page(amiga=APOLLO_AUDIO)
     viewer.submit({"t": "audio", "on": True})
-    moved = []
-    monkeypatch.setattr("amigent.viewer.machines.move", lambda host, new: moved.append((host, new)))
-    monkeypatch.setattr(viewer.screen, "close", lambda: None)
-    monkeypatch.setattr(viewer.ctl, "close", lambda: None)
-    viewer.set_address("192.0.2.20")
+    assert viewer.hear is True
+    viewer.retire()
     assert viewer.hear is False and viewer.amiga == {}
-    assert moved == [("192.0.2.10", "192.0.2.20")]
+    assert not hear_eligible(viewer.amiga, connected=viewer.online is True)
+
+
+def test_connecting_elsewhere_does_not_move_the_saved_machine(monkeypatch):
+    """1.5.0: set_address hands over to the machine manager and never rewrites this machine."""
+    viewer = _page(amiga=APOLLO_AUDIO)
+    monkeypatch.setattr("amigent.viewer.machines.move",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("moved")))
+    asked = []
+
+    class Manager:
+        def connect(self, new):
+            asked.append(new)
+            return "other"
+
+    monkeypatch.setattr(viewer, "machine_manager", lambda: Manager())
+    assert viewer.set_address("192.0.2.20") == "other"
+    assert asked == ["192.0.2.20"]
 
 
 def test_reconnect_requires_fresh_apollo_capabilities():

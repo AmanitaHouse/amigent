@@ -238,3 +238,16 @@ def test_certificate_is_what_amissl_reads(tmp_path, monkeypatch):
                             "-text"], capture_output=True, text=True).stdout
     # LibreSSL (macOS) names no curve and makes an X.509 v1 cert; AmiSSL and the pin don't mind
     assert "id-ecPublicKey" in shown and "256 bit" in shown
+
+
+def test_commands_tries_amigentd_again_after_an_outage():
+    """One failed connect must not tie the session to amigactld for good."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()  # nothing listens: both daemons are away
+    commands = Commands("127.0.0.1", 1, port, timeout=2)
+    with pytest.raises(AmigaError) as raised:
+        commands.connect()
+    assert "amigactld does not answer either" in str(raised.value)
+    assert commands.backend is None

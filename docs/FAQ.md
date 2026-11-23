@@ -52,10 +52,12 @@ Workbench, or restart by hand.
 **What about PowerPC: AmigaOS 4, MorphOS, or a PPC board?**
 A PowerPC board (WarpOS or PowerUP) on a classic Amiga is fine: amigentd runs on
 the 68k side as usual, and Amigent names the PowerPC software it finds, so the
-agent can pick the matching version of a program. AmigaOS 4 and MorphOS run
+agent can pick the matching version of a program. `amiga_ppc` tells the card,
+the kernel, the flash ROM and known conflicts, and the agent can build and
+watch WarpOS programs (see the guide). AmigaOS 4 and MorphOS run
 amigentd only through their 68k emulation. Commands, files, mouse and keys
-should work there, the screen text probably not; it is untested, and Amigent
-says so when it meets one of them.
+should work there, the screen text probably not; Amigent says so when it
+meets one of them.
 
 **Does it run on a 68000?**
 Use `amigentd.000`; `amigent-setup` picks it by itself. On a 7 MHz 68000 a whole
@@ -73,10 +75,18 @@ On Windows, Amigent finds the `openssl` that comes with Git for Windows. `AMIGEN
 switches encryption off for a test.
 
 **A second computer says amigentd takes only encrypted connections.**
-That Amiga was set up for TLS only. Copy the files for it from
-`~/.config/amigent/` on the computer that set it up (the key and
-`tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
-there again with `amigentd SETUP` running.
+That Amiga was set up for TLS only. Copy its key and certificate from
+`~/.config/amigent/` on the computer that set it up (`key-<id>` and
+`tls-<id>.pem`, the ID is in `amigas.json` there) to the same folder on the
+other one, named `key-<address>` and `tls-<address>.pem`, then run
+`amigent-fleet --add NAME ADDRESS` there. Or run `amigent-setup` there again
+with `amigentd SETUP` running.
+
+**Amigent says AmiSSL does not open on the Amiga.**
+amigentd runs `TLSONLY`, and without AmiSSL it has no encrypted port, so it
+turns every other computer away. At the Amiga, install AmiSSL again and run
+`amigent-repair` from the Amigent folder, or start `amigentd SETUP` and run
+`amigent-setup` again from the PC.
 
 **How do I update?**
 Both halves, the PC and the Amiga. Paste this into your AI agent:
@@ -87,16 +97,34 @@ Both halves, the PC and the Amiga. Paste this into your AI agent:
 
 By hand: [Updating](GUIDE.md#updating) in the guide. Updated only the Amiga,
 with *Amigent-Update*? The PC says so from 1.3.0 on; run the prompt anyway.
+From 1.5.0 Amigent notices a new release by itself and offers the update, in
+the agent and in the remote desktop.
+
+**What does Amigent send to the internet?**
+Nothing about you or your Amiga. From 1.5.0 it asks PyPI, at most once a day,
+which Amigent versions there are, and for a newer one GitHub for its release
+notes: plain requests, as a browser makes them, so those sites see the PC's
+address and nothing else. `python -m amigent.update off` or
+`AMIGENT_NO_UPDATE_CHECK=1` stops it. Aminet is asked only when you or the agent
+search it. There is no tracking.
 
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
-shows up in `amigent-fleet`. The AI agent works with one Amiga per MCP server
-entry, so register a second entry with `AMIGENT_HOST=A500`.
+shows up in the Amiga menu at the left of the `amigent-viewer` toolbar. Use
+**Manage Amigas…** there to rename it,
+choose the default, edit its address or remove it. A single MCP server can
+operate both: ask the agent to list your Amigas,
+then name the machine or machines in your request. Tools take an explicit
+`machine` argument, so connections and installation records stay separate.
+Without one they use the default. With two or more Amigas saved,
+`amigent-viewer` without a name opens **Your Amigas**; see
+[Several Amigas](GUIDE.md#several-amigas).
 
 **The Amiga got a new address.**
 Nothing to do: Amigent searches the home network and takes the Amiga with your
-certificate or key. In another network, type the address into the field the
-remote desktop shows, or tell it to the AI agent.
+certificate or key. To change the saved address yourself, use **Manage Amigas… →
+Edit address**. **Connect to an address…** opens a one-off connection and leaves
+the saved mapping unchanged.
 
 **Directory Opus says it has waited long enough for a program.**
 Something in `SYS:WBStartup` never exits. Services go into `S:User-Startup`.
@@ -154,8 +182,11 @@ installation.
 
 **Can an installation be taken back?**
 Ask the agent to make it undoable: `amiga_install_begin` records the system
-folders and copies them aside on the Amiga, `amiga_install_end` lists what
-came and changed, `amiga_install_undo` puts it all back.
+folders, copies the program's folders and the system files it is known to
+touch aside on the Amiga, `amiga_install_end` lists what came and changed,
+`amiga_install_undo` puts back what it has copies of and names the rest. With
+`full=True` the system folders are copied whole. See the
+[guide](GUIDE.md) for details.
 
 **Screenshots of a graphics-card screen look a bit rough.**
 They're 256 colours on purpose. It's plenty for reading a screen and keeps the
@@ -221,7 +252,7 @@ WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.
 
 **"amigentd refused the key" or "amigentd wants a key".**
-The key on the PC (in `~/.config/amigent/`, or `AMIGENT_KEY`) must
+The key on the PC (`key-<id>` in `~/.config/amigent/`, or `AMIGENT_KEY`) must
 match `S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
 again with `amigentd SETUP` running. Deleting `S:amigent.key` switches the key
 off.

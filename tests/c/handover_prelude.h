@@ -1,4 +1,4 @@
-/* Host types for the screen-handover slice of amiga/amigentd.c.
+/* Host types for the screen-handover slice of src/native/amiga/daemon/amigentd.c.
  * Nothing here resets an Amiga or talks to a ZZ9000. */
 #include <stdio.h>
 #include <string.h>

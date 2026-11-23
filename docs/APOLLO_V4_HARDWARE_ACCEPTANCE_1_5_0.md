@@ -1,127 +1,163 @@
 # Hardware acceptance — AmiGent 1.5.0 + Apollo candidate
 
 **Procedure only.** Do not run this until separately authorised.
-**Forbidden without new authorisation:** `amigent-setup --update`, daemon restart,
-file transfer to the production Vampire V4, or any change to the live install.
+
+**Maintainer prohibition (in force for this gate):** do **not** run live
+`amigent-setup --update` (or `--force`) against the production Vampire V4.
+Do not restart the production daemon, transfer candidate files, or change the
+live install until a later, explicit hardware-test authorisation says so.
 
 | Field | Value |
 |---|---|
-| Candidate | `rehearse/integrate-150-apollo` @ `fa91b07` |
+| Candidate | `rehearse/integrate-150-apollo` @ `829831d` |
 | Worktree | `D:\Development\per\amigent-worktrees\integrate-150-apollo-rehearsal` |
 | Toolchain | ApolloCrossDev GCC-6.50-Stable (`Makefile.apollo`) |
 
-## 1. Identities under test
+## 1. Three daemon identities (do not conflate)
 
-| Artifact | Size | SHA-256 |
+These are **different** artifacts. Rollback, smoke history, and the candidate
+under test must be named separately.
+
+| Role | What it is | Size (if known) | Full SHA-256 |
+|---|---|---|---|
+| **A. Production baseline** | Previously restored **production** protocol-5 / TLS daemon on the V4. This is the live recovery target unless §2 records a different *currently installed* digest. | (record on capture) | `b00fef0e5279dec6c8496371a62eabe51c3297f1e280e6b3d1dd07eb525cb2d3` |
+| **B. Historical Apollo AUDIO smoke** | 1.4.0-era packaged `amigentd.apollo` used for earlier AUDIO hardware smoke. Superseded in candidate code (`SUPERSEDED_APOLLO_SHA256`). **Not** the production recovery baseline. | 128744 | `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` |
+| **C. Candidate under test** | Rebuilt 1.5.0 Apollo daemon from this tree (`src/native` + `Makefile.apollo`). Packaged as `amigentd.apollo`. **Not** HW-validated yet. | 132140 | `0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d` |
+
+Supporting candidate package artifacts (same build):
+
+| Artifact | Size | Full SHA-256 |
 |---|---|---|
-| `amigentd.apollo` (candidate) | 132140 | `0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d` |
 | `amigent-apollo-probe` | 3108 | `ea78c8c508e2e3c12b719ac20ebf175a4805d34a3458e6a4882118ad417d2bb7` |
 | `amigent-monitor.apollo` | 22804 | `e80c0456d63d435a57febd722caabdf7f1017c99985efa2e016d7f3c9a97bc96` |
-| Classic `amigentd` (unchanged) | 118268 | `6d5f6d0e9e91b37eeb75c1d5fd379781826e587d82bd93fbf414656bd5d8466a` |
+| Classic `amigentd` (upstream 1.5.0, unchanged) | 118268 | `6d5f6d0e9e91b37eeb75c1d5fd379781826e587d82bd93fbf414656bd5d8466a` |
 | Classic `amigent-monitor` | 18376 | `78b49713d9529bbe5804f02525f50bfc3e6431011ed9be0ae39c28643759b80e` |
 
-Historical production / HW-smoke daemon (keep as rollback reference; superseded in code):
+Candidate embedded version: `$VER: amigentd 1.5.0 (21.11.2026)`.
 
-| Artifact | Size | SHA-256 |
-|---|---|---|
-| Known-good / prior smoke `amigentd.apollo` | 128744 | `63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1` |
+## 2. Pre-flight: verify the V4’s *actual* installed daemon
 
-Embedded version expected in the candidate daemon: `$VER: amigentd 1.5.0 (21.11.2026)`.
+**Mandatory before any authorised test.** Do not deploy identity **C** until this
+section is completed and reconciled.
 
-## 2. Preservation and recovery (before any change)
+1. Read the bytes currently installed as the running daemon path (normally
+   `C:amigentd`). Record size and **full** SHA-256 offline.
+2. Also preserve, offline, the production configuration and backups that make
+   that install work: at least `S:amigent.key` / `SYS:amigent` key copy,
+   `ENVARC:amigent-home` (and spare if set), `SYS:amigent/` scripts and windows
+   as present, TLS material the install uses, and any dated spare/`repair`
+   copies already on the machine. Record paths and digests.
+3. Compare the installed daemon digest to the table in §1:
+   - If it equals **A** (`b00fef0e…`): production baseline confirmed; proceed
+     only after separate hardware-test authorisation.
+   - If it equals **B** (`63db83ff…`): the V4 is on the historical AUDIO smoke
+     binary, **not** the documented production protocol-5/TLS baseline.
+     **Stop.** Reconcile with the operator (restore **A**, or explicitly
+     re-baseline production documentation) before any candidate deploy.
+   - If it equals **C** (`0f1405a1…`): candidate already installed; **stop** and
+     treat as an unexpected state until authorised.
+   - If it matches **none** of A/B/C: **stop.** Capture the digest, reconcile
+     the historical record, and do not deploy until the live identity and the
+     rollback target agree in writing.
+4. The rollback target for an authorised test is always the **bytes and config
+   captured in this section** (expected to be **A**), never an assumption that
+   **B** is “the” recovery image.
 
-1. On the PC, copy the **currently installed** Amiga `C:amigentd` bytes (and
-   `SYS:amigent/amigent-monitor` if present) to a dated offline folder. Record
-   size and SHA-256.
-2. Confirm the offline copy matches either `63db83ff…` (prior smoke) or another
-   documented production digest. If it matches neither, **stop** and reassess.
-3. Keep a bootable way to restore that exact file to `C:amigentd` without
-   depending on the candidate package (Workbench / CF card / known-good spare).
-4. Do **not** delete the spare restore path until acceptance is complete.
+## 3. Preservation and recovery plan
 
-## 3. Authorised install path (when execution is later approved)
+1. Keep the §2 offline copies on non-V4 media until acceptance is finished.
+2. Keep a restore path that does **not** use `amigent-setup --update`: e.g.
+   Workbench / CF / known-good spare folder that can put the preserved
+   `C:amigentd` bytes and keys back by hand.
+3. On failure after an authorised install of **C**, restore the §2 daemon
+   **and** the preserved keys/home/scripts/windows as captured—not a generic
+   package default, and not identity **B** unless §2 proved **B** was what was
+   actually installed.
+4. After rollback, re-hash `C:amigentd` and confirm it matches the §2 capture
+   before further work.
 
-Prefer a **manual, reversible** install over `amigent-setup --update` until the
-maintainer lifts that restriction:
+## 4. Authorised install path (only after hardware-test authorisation)
+
+Still **without** live `amigent-setup --update`:
 
 1. Stop Hear / Viewer sessions on the PC.
-2. On the Amiga, quit the running amigentd (or use a maintenance boot) so
+2. Quit the running amigentd on the Amiga (or use a maintenance boot) so
    `C:amigentd` can be replaced offline.
-3. Copy candidate `amigentd.apollo` → `C:amigentd` only after the SHA-256 check
-   on the transfer media matches `0f1405a1…`.
-4. Optionally copy `amigent-monitor.apollo` → `SYS:amigent/amigent-monitor`.
-5. Start amigentd; do not run package `--update` against production in this gate.
+3. Copy candidate **C** → `C:amigentd` only after the transfer media hashes to
+   the full digest  
+   `0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d`.
+4. Optionally copy `amigent-monitor.apollo` → `SYS:amigent/amigent-monitor`
+   (hash `e80c0456d63d435a57febd722caabdf7f1017c99985efa2e016d7f3c9a97bc96`).
+5. Start amigentd manually. Do **not** run `amigent-setup --update` or
+   `--force` against production in this gate.
 
-## 4. Probe behaviour
+## 5. Probe behaviour
 
 1. Run packaged `amigent-apollo-probe` on ApolloOS with the 68080/`AFF_FPGA` bit set:
    - stdout contains `ApolloOS` and `68080`
    - exit code **0**
 2. On AmigaOS (or ApolloOS without the FPGA bit):
    - exit code **5** (non-zero)
-   - must **not** be treated as Apollo daemon selection for SETUP
+   - must **not** select the Apollo daemon for SETUP
 
-## 5. Connection, protocol, TLS, sessions
+## 6. Connection, protocol, TLS, sessions
 
-1. From the candidate Viewer/server, connect to the Amiga.
-2. Confirm protocol negotiation reaches protocol 6.
-3. SYSINFO on the Apollo daemon: `audio=1`, `emu68` not advertising as the
-   meaning of opcode 48 (client must use SYSINFO, never the opcode alone).
-4. Confirm TLS / key behaviour matches the existing 1.5.0 install (same key
-   folder; no forced re-key unless already required).
-5. Open two Viewer sessions if available; confirm #51 session-aware identity
-   (each session keeps its own daemon facts; disconnect clears that session’s
-   cache only).
+1. Connect with the candidate Viewer/server.
+2. After **C** is installed: confirm protocol 6 and SYSINFO `audio=1` (opcode 48
+   meaning comes from SYSINFO, never from the opcode alone).
+3. While still on production **A** (pre-deploy checks only): confirm the existing
+   protocol-5 / TLS behaviour still matches the preserved install—do not “fix”
+   by updating.
+4. Confirm keys/TLS still match the §2 preserved configuration (no forced
+   re-key unless already required by that install).
+5. If two Viewer sessions are available: #51 session-aware identity (per-session
+   daemon facts; disconnect clears that session’s cache only).
 
-## 6. AUDIO / Hear
+## 7. AUDIO / Hear (after **C** is authorised and installed)
 
-1. With `arne.audio` playing on ApolloOS, enable Viewer Hear.
-2. Confirm framed PCM arrives; Hear OFF stops cleanly.
-3. Disconnect / reconnect: Hear must not stay armed across a dead session.
-4. Before any later update test, Hear must stop before daemon replacement
-   (`stop_hear` ordering).
+1. With `arne.audio` playing, enable Viewer Hear; confirm framed PCM; Hear OFF
+   stops cleanly.
+2. Disconnect / reconnect: Hear must not stay armed across a dead session.
+3. Failure: machine lockup, `T:audio-mem` / `T:audio-ptrs` dumps, or Hear that
+   cannot be stopped from the Viewer.
 
-Failure: machine lockup, dump files under `T:audio-mem` / `T:audio-ptrs`, or
-Hear that cannot be stopped from the Viewer.
+## 8. Safety: MMIO, POKE deadline, TRACE (after **C**)
 
-## 7. Safety: MMIO, POKE deadline, TRACE
+1. PEEK/POKE of Apollo register windows refused with packaged refusal text.
+2. Oversized / slow POKE does not hang past the wall-clock POKE deadline.
+3. TRACE set refused (`tracepoints are not supported…`).
 
-Offline-proven in source/tests; on hardware confirm:
+## 9. Apollo monitor selection (after **C**, if monitor copied)
 
-1. PEEK/POKE of Apollo register windows is refused with the packaged refusal text.
-2. Oversized / slow POKE payload does not hang the daemon beyond the wall-clock
-   POKE deadline.
-3. TRACE set is refused on this Apollo build (`tracepoints are not supported…`).
+1. `amigent-monitor.apollo` installed as `amigent-monitor` updates without
+   taking input focus.
+2. Non-Apollo path continues to use classic `amigent-monitor`.
 
-## 8. Apollo monitor selection
+## 10. Failure criteria → rollback
 
-1. With `amigent-monitor.apollo` installed as `amigent-monitor`, open it on
-   ApolloOS; confirm the agent-link window updates without taking input focus.
-2. On a non-Apollo install path, classic `amigent-monitor` remains the file used.
+Restore §2 preserved daemon + configuration immediately if any of:
 
-## 9. Failure criteria → rollback
-
-Rollback immediately (restore the preserved `C:amigentd` from §2) if any of:
-
-- Boot failure, guru, or repeated daemon crash after install
+- Boot failure, guru, or repeated daemon crash after install of **C**
 - Loss of command channel / Viewer cannot reconnect
-- AUDIO/Hear hard-locks the machine
-- Probe exit 0 on a non-68080 ApolloOS-named system and selects Apollo daemon
-- Any need to run emergency `--force` classic downgrade without a recorded plan
+- AUDIO/Hear hard-lock
+- Probe exit 0 on a non-68080 ApolloOS-named system selecting Apollo daemon
+- Installed digest after “rollback” does not match the §2 capture
 
-After rollback, re-verify connection with the restored digest before further tests.
+Do **not** roll back by installing identity **B** unless §2 recorded **B** as
+what was actually running.
 
-## 10. Pass criteria (for a later GO to sync)
+## 11. Pass criteria (for a later sync decision)
 
-- Candidate daemon digest on Amiga is `0f1405a1…`
-- Probe policy §4 observed
-- Hear §6 observed without lockup
-- Safety §7 observed
-- Monitor §8 observed
-- Rollback path §2 still available and tested once
+- Pre-flight §2 completed; live identity reconciled to **A** (or a written
+  re-baseline) before deploy
+- After test: Amiga daemon digest is full `0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d`
+- §§5–9 observed
+- §2 rollback path still available and proven once
+- No use of live `amigent-setup --update` during the gate
 
-## 11. Explicit non-goals of this document
+## 12. Explicit non-goals
 
-- No authorisation to execute the steps above
+- No authorisation, by this document alone, to execute §§4–9
 - No fork `main` sync, PR publish, or upstream #46/#50 changes
-- No claim that `0f1405a1…` has already been HW-validated (it has not)
+- No claim that identity **C** is HW-validated
+- No claim that identity **B** is the production recovery image

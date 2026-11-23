@@ -111,6 +111,13 @@ def detect_cpu(run) -> int | None:
 APOLLO_SHA256 = frozenset({
     "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
 })
+# Prior packaged Apollo digests that a newer Apollo candidate may replace at the
+# same $VER once package bytes change (identify no longer matches).
+SUPERSEDED_APOLLO_SHA256 = frozenset({
+    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",  # F-DAE before stream-safety packaging
+    # F-FORKSAFE / Stage 3B-D2 hardware-tested dump; superseded by D3 POKE resource harden.
+    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+})
 APOLLO_MARKERS = (
     b"tracepoints are not supported on this Apollo build yet",
     b"that range includes Apollo registers that a read can change",
@@ -270,6 +277,12 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
                 return False, ("the installed amigentd reports the same version from a later date, "
                                "so it was left in place; --force replaces it anyway.")
             return True, ""
+    # Known prior packaged Apollo digests may be replaced at the same $VER once the
+    # package bytes change (identify no longer matches). Checked before the generic
+    # unknown-same-version guard.
+    if (is_apollo_daemon(installed) and candidate_spec.family == "apollo" and installed_spec is None
+            and hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256):
+        return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place; --force replaces it anyway.")

@@ -285,7 +285,7 @@ def test_fork_apollo_source_does_not_write_stream_diagnostics():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    apollo = (root / "amiga" / "apollo" / "apollo_audio.c").read_text(encoding="utf-8")
+    apollo = (root / "src/native/amiga" / "apollo" / "apollo_audio.c").read_text(encoding="utf-8")
     assert 'Open("T:audio-mem"' not in apollo
     assert 'Open("T:audio-ptrs"' not in apollo
     assert "dump_mix" not in apollo

@@ -296,7 +296,7 @@ def test_protocol_6_ends_at_quiet_audio_is_apollo_only_and_the_probe_is_68000_on
 
     detect = (ROOT / "src/native/amiga/apollo" / "apollo_detect.c").read_text(encoding="utf-8")
     probe = (ROOT / "src/native/amiga/apollo" / "apollo_probe.c").read_text(encoding="utf-8")
-    makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
+    makefile = (ROOT / "src/native/amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_os_here" in detect and "VREG_BOARD" in detect
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
     assert "RETURN_WARN" in probe and "m68080" not in probe

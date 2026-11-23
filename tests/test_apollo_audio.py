@@ -102,6 +102,6 @@ def test_the_daemon_implements_audio_48_and_not_pip():
     assert "CMD_PIP" not in daemon and "CMD_PIP" not in audio
     assert 't_pair(&t, "audio", 1)' in daemon
     assert 't_pair(&t, "pip"' not in daemon
-    makefile = (ROOT / "amiga" / "Makefile.apollo").read_text(encoding="utf-8")
+    makefile = (ROOT / "src/native/amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_audio.o" in makefile
     assert "apollo.o" not in makefile and "ammx" not in makefile

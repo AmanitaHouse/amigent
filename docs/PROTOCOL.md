@@ -501,6 +501,7 @@ else.
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
 | 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO) |
+| 49 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only (`audio=49` in SYSINFO). One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -591,6 +592,12 @@ separated by tabs.
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
 - From amigentd 1.5.0 SYSINFO also has `emu68`: present when EMU68 is
   understood, `1` when Emu68 runs on this Amiga, `0` otherwise.
+- On Apollo builds (`AMIGENT_APOLLO`), SYSINFO also reports `os` (`ApolloOS` or
+  `AmigaOS`), `board` and `board_name` (from the SAGA board register when
+  ApolloOS or `AFF_68080` is present), `trace=0` (tracepoints stay refused until
+  hardware-validated on 68080), and `audio=49` (`CMD_AUDIO` opcode number). On
+  Apollo builds, PEEK and POKE also refuse Apollo SAGA/PIP/VREG/ARNE MMIO windows
+  and POKE uses a single wall-clock deadline (`IO_SECONDS`) across fragments.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.

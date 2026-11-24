@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
+from .channel import AUDIO, LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
 from .daemons import SPECS, describe_connected
 from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
@@ -111,6 +111,40 @@ def connection_reason(text: str) -> str:
                                     "getaddrinfo", "no such host", "winerror 11001")):
         return "reason_unresolved"
     return ""
+
+
+# Hear streaming safeguards (product defaults — not the 10 s HW test cap).
+AUDIO_DRAIN_MAX = 64  # bounded end-marker / stop drain reads
+AUDIO_PCM_BUDGET = 8 * 1024 * 1024  # aggregate PCM broadcast per Hear session
+
+
+def apollo_machine(info: dict | None) -> bool:
+    """Same Apollo identity the Viewer page uses for memory/Hear labelling."""
+    if not info:
+        return False
+    if info.get("os") == "ApolloOS":
+        return True
+    return "68080" in str(info.get("cpu") or "")
+
+
+def hear_eligible(info: dict | None, *, connected: bool = True) -> bool:
+    """Whether stock Viewer Hear may be shown or start AUDIO.
+
+    Requires an active connection, Apollo identity (not protocol alone),
+    protocol >= 6, and SYSINFO ``audio=49`` (CMD_AUDIO opcode 49). Legacy
+    ``audio=1`` (opcode 48) and non-Apollo hosts remain hidden.
+    """
+    if not connected or not info:
+        return False
+    if not apollo_machine(info):
+        return False
+    try:
+        protocol = int(info.get("daemon_protocol") or 0)
+    except (TypeError, ValueError):
+        return False
+    if protocol < LOADED_PROTOCOL:
+        return False
+    return str(info.get("audio") or "") == str(AUDIO)
 
 
 UPLOAD_CHUNK = 32 * 1024
@@ -205,6 +239,11 @@ def status_free_bytes(chip_free, fast_free) -> int:
         {"fast_free": fast_free}, "fast_free")
 
 
+def pcm_message(rate: int, pcm: bytes) -> bytes:
+    """Binary message 5: s16le stereo from the ARNE mix. rate is samples a second."""
+    return struct.pack(">BI", 5, rate) + pcm
+
+
 class Viewer:
     """Streams the screen to every open page and plays their input on the Amiga.
 
@@ -244,6 +283,9 @@ class Viewer:
         self.reason = ""  # why the Amiga does not answer: a CONNECTION_REASONS key or ""
         self.ever_joined = False
         self.amiga: dict = {}
+        self.hear = False  # the page asks; opening the window does not start the mix
+        self._audio_idle = threading.Event()  # set while no Hear stream is open on this machine
+        self._audio_idle.set()
         self.screen_list: list = []
         self._system: dict = {}
         self._forget_daemon()
@@ -276,7 +318,8 @@ class Viewer:
                                       "direct": isinstance(self.host, roster.DirectAddress)}))
         except OSError:
             pass
-        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
+        for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats,
+                       self._media):
             threading.Thread(target=target, daemon=True).start()
         if self.remember:  # the program, not a viewer an agent or the fleet opened
             self.update_done = update.last_run()
@@ -309,6 +352,8 @@ class Viewer:
             self.clients.discard(ws)
             if not self.clients:
                 self.alone_since = time.monotonic()
+                self.hear = False
+        self.feed.ring()  # let the feed release a stale Amiga socket after WATCH_RELEASE
 
     def _watching(self) -> bool:
         with self.clients_lock:
@@ -380,6 +425,14 @@ class Viewer:
                 return  # malformed message from the page
             threading.Thread(target=self._pause, args=(seconds,), daemon=True).start()
             return
+        if op.get("t") == "audio":
+            want = op.get("on") is True
+            if want and not hear_eligible(self.amiga, connected=self.online is True):
+                self.hear = False
+                self.event("audio", on=False)
+                return
+            self.hear = want
+            return
         self.inputs.put(op)
         self.feed.ring()
 
@@ -401,6 +454,8 @@ class Viewer:
         self.enabled = False
         self.reason = "reason_machine_changed"
         self._forget_daemon()
+        self.hear = False  # a retired machine never keeps the mix running
+        self.amiga = {}
         self.event("online", online=False, reason=self.reason)
         with self.lock():
             self.screen.close()
@@ -412,6 +467,7 @@ class Viewer:
         if online != self.online or shown != self.reason:
             if not online:
                 # the next daemon to answer may be another file, or another Amiga
+                self.hear = False
                 self.amiga = {}
                 self._forget_daemon()
             self.online = online
@@ -446,6 +502,141 @@ class Viewer:
                 except (AmigaError, OSError):
                     pass  # the next round tries again
             seconds += 1
+
+    def _hearing(self) -> bool:
+        with self.clients_lock:
+            return bool(self.hear and self.clients)
+
+    def _audio_ready(self) -> bool:
+        """Whether this connection may stream Hear (Apollo + protocol >= 6 + audio=49)."""
+        if hear_eligible(self.amiga, connected=self.online is True):
+            return True
+        if self.hear:
+            self.hear = False
+            self.event("audio", on=False)
+        return False
+
+    def _release_audio(self, link: Commands) -> None:
+        try:
+            if link.connected:
+                try:
+                    link.audio_stop()
+                    for _ in range(AUDIO_DRAIN_MAX):
+                        if link.audio_read() is None:
+                            break
+                except (AmigaError, OSError, AttributeError):
+                    pass
+        finally:
+            try:
+                link.close()
+            except (AmigaError, OSError, AttributeError):
+                pass
+            self.event("audio", on=False)
+
+    def _play_audio(self, link: Commands, between=None) -> None:
+        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block.
+
+        A daemon end-marker, PCM budget, or Hear OFF always releases the stream and
+        clears ``hear`` so ``_media`` cannot silently call ``audio_start`` again.
+        The user must click Hear to resume.
+        """
+        self._audio_idle.clear()
+        try:
+            self._stream_audio(link, between)
+        finally:
+            self._audio_idle.set()
+
+    def _stream_audio(self, link: Commands, between=None) -> None:
+        if not link.connected:
+            link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
+        link.audio_start()
+        self.event("audio", on=True)
+        pcm_sent = 0
+        try:
+            while self._hearing():
+                got = link.audio_read()
+                if got is None:
+                    break
+                rate, pcm = got
+                if pcm and len(pcm) % 4:
+                    raise AmigaError("audio samples are not stereo frames")
+                if pcm:
+                    room = AUDIO_PCM_BUDGET - pcm_sent
+                    if room < 4:
+                        break
+                    if len(pcm) > room:
+                        pcm = pcm[: room - (room % 4)]
+                    if pcm:
+                        self.broadcast(pcm_message(rate or 48000, pcm))
+                        pcm_sent += len(pcm)
+                if between:
+                    between()
+        finally:
+            # Never return to _media with hear still True after a stream attempt.
+            self.hear = False
+            self._release_audio(link)
+
+    def stop_hear(self, wait: float = 2.0) -> bool:
+        """Stop Hear on this machine without retiring it (the updater is about to take the Amiga).
+
+        ``hear=False`` is the stop signal the streaming thread watches; that thread releases
+        its own audio link. The machine stays enabled and keeps its connection state.
+        Returns whether Hear was on. Waits up to ``wait`` seconds for an open stream to release.
+        """
+        streaming = not self._audio_idle.is_set()
+        was_on = bool(self.hear) or streaming
+        self.hear = False
+        if was_on and not streaming:
+            self.event("audio", on=False)  # a streaming thread says so itself when it releases
+        if streaming:
+            self._audio_idle.wait(wait)
+        return was_on
+
+    def _drop_audio(self, link: Commands) -> None:
+        self.hear = False
+        try:
+            if link.connected:
+                try:
+                    link.audio_stop()
+                    for _ in range(AUDIO_DRAIN_MAX):
+                        if link.audio_read() is None:
+                            break
+                except (AmigaError, OSError, AttributeError):
+                    pass
+        finally:
+            try:
+                link.close()
+            except (AmigaError, OSError, AttributeError):
+                pass
+            self.event("audio", on=False)
+
+    def _media(self) -> None:
+        """ARNE audio only after the page asks, while a page is open.
+
+        AUDIO is opcode 49 on its own command channel. The screen connection is
+        not this socket. When the daemon has closed the plain port, this socket
+        is TLS. A failed TLS handshake is not retried in the clear. Opening the
+        window never starts the mix.
+        """
+        link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
+
+        while True:
+            if not self._watching():
+                self.hear = False
+                if link.connected:
+                    self._release_audio(link)
+                time.sleep(0.05)
+                continue
+            if self._hearing() and self._audio_ready():
+                try:
+                    self._play_audio(link)
+                except (AmigaError, AttributeError, OSError):
+                    self._drop_audio(link)
+                    time.sleep(0.05)
+                continue
+            if link.connected:
+                self._release_audio(link)
+            time.sleep(0.05)
 
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""
@@ -500,11 +691,19 @@ class Viewer:
             self._system["graphics"] = self._graphics()
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]
+        facts = dict(self._system)
+        if info.get("os"):
+            facts["os"] = info["os"]
+        if str(info.get("cpu") or "") == "68080" or info.get("os") == "ApolloOS":
+            facts["cpu"] = "68080"
         # chip_free stays None when SYSINFO omits it, so a page can tell a real
         # zero from an older daemon. The other counts keep "missing means 0".
         protocol = getattr(getattr(self.ctl, "backend", None), "protocol", 0) or self.screen.protocol
-        return {**self._system, "tcp": info.get("bsdsocket", ""),
+        return {**facts,
                 **self._connected_daemon(info, protocol),
+                "tcp": info.get("bsdsocket", ""),
+                "board": info.get("board", ""), "board_name": info.get("board_name", ""),
+                "audio": info.get("audio", ""),
                 "chip_free": reported_bytes(info, "chip_free"),
                 "chip_total": counted_bytes(info, "chip_total"),
                 "fast_free": counted_bytes(info, "fast_free"),

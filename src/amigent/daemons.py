@@ -15,6 +15,7 @@ before protocol 3, fetched separately, and it does not change TLS.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from pathlib import Path
 # does not run a 68020 binary. The numbers are only compared that way.
 CPU_68000, CPU_68010 = 68000, 68010
 CPU_68020, CPU_68030, CPU_68040, CPU_68060, CPU_68080 = 68020, 68030, 68040, 68060, 68080
+
+HUNK_HEADER = b"\x00\x00\x03\xf3"  # an Amiga executable starts with HUNK_HEADER
 
 SUPPORTED, EXPERIMENTAL = "supported", "experimental"
 
@@ -48,7 +51,8 @@ SPECS: tuple[Spec, ...] = (
     Spec("amigentd.000", CPU_68000, 0, SUPPORTED, "68000", "68000", "68000"),
     Spec("amigentd", CPU_68020, 1, SUPPORTED, "general", "68020", "general"),
     Spec("amigentd.080", CPU_68080, 0, EXPERIMENTAL, "68080", "68080", "68080 experimental"),
-    # optional, not in the package yet: picked only where ApolloOS is recognised
+    # optional, not shipped in upstream release packages (build from src/native/amiga/);
+    # picked only where ApolloOS is recognised, and never replaced by a less specialised build
     Spec("amigentd.apollo", CPU_68080, 2, SUPPORTED, "apollo", "68080", "ApolloOS", "ApolloOS"),
 )
 
@@ -99,6 +103,72 @@ def detect_cpu(run) -> int | None:
     return CPU_68020
 
 
+# An installed Apollo daemon is recognised without a packaged file: by the SHA-256 of a
+# validated build, or by text that only the AMIGENT_APOLLO build of amigentd.c contains.
+# Both survive an upstream package that has no amigentd.apollo, which is what makes an
+# update safe there. Markers recognise Apollo builds whose digest is not listed yet.
+APOLLO_SHA256 = frozenset({
+    "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d",  # 1.5.0 fork HW-tested
+})
+SUPERSEDED_APOLLO_SHA256 = frozenset({
+    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",
+    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
+    "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
+})
+APOLLO_MARKERS = (
+    b"tracepoints are not supported on this Apollo build yet",
+    b"that range includes Apollo registers that a read can change",
+)
+
+
+def is_apollo_daemon(data: bytes) -> bool:
+    """True when ``data`` is an Apollo-family amigentd, whether or not it is packaged."""
+    if hashlib.sha256(data).hexdigest() in APOLLO_SHA256:
+        return True
+    return data.startswith(HUNK_HEADER) and any(mark in data for mark in APOLLO_MARKERS)
+
+
+def apollo_spec() -> Spec:
+    return next(spec for spec in SPECS if spec.family == "apollo")
+
+
+def installed_specialisation(data: bytes, directory: Path) -> tuple[int, str]:
+    """(specialisation, label) of a supported installed daemon, or (-1, "") when unknown.
+
+    The packaged bytes say it exactly. An Apollo daemon the package does not carry
+    (no amigentd.apollo, or another build of it) is still an Apollo daemon.
+    """
+    spec = identify(data, directory)
+    best = (spec.specialisation, spec.label) if spec and spec.verified else (-1, "")
+    if is_apollo_daemon(data):
+        apollo = apollo_spec()
+        if apollo.specialisation > best[0]:
+            best = (apollo.specialisation, apollo.label)
+    return best
+
+
+def specialisation_guard(installed: bytes | None, candidate_name: str, directory: Path) -> str:
+    """Why the installed daemon must stay, or "" when it may be replaced.
+
+    A more specialised installed daemon (ApolloOS) is not replaced by a less
+    specialised candidate (classic amigentd) on a normal update, whatever the version
+    numbers say. This keeps an installed Apollo daemon when the package has no
+    amigentd.apollo, or selection falls back to classic because detection failed.
+    ``setup.update`` consults it only through ``consider_replacement``; ``--force``
+    skips that comparison, as the ``apollo_without_build`` policy documents.
+    """
+    if installed is None:
+        return ""
+    candidate = next((spec for spec in SPECS if spec.name == candidate_name), None)
+    if candidate is None or not candidate.verified:
+        return ""
+    level, label = installed_specialisation(installed, directory)
+    if level > candidate.specialisation:
+        return (f"the installed {label} daemon was left in place. "
+                f"{candidate.label} would replace it with a less specialised build.")
+    return ""
+
+
 def identify(data: bytes, directory: Path) -> Spec | None:
     """The catalogue entry whose packaged bytes are exactly ``data``."""
     for spec in SPECS:
@@ -121,9 +191,11 @@ def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
     "not reported"); this module only reports and never selects or installs.
     """
     spec = identify(file_bytes, directory) if file_bytes else None
-    capabilities = [name for key, name in (("audio", "AUDIO"), ("loaded", "loaded"), ("probe", "probe"),
-                                           ("poke", "POKE"), ("trace", "TRACE"))
-                    if info.get(key) == "1"]
+    capabilities = [
+        name for key, name in (("audio", "AUDIO"), ("loaded", "loaded"), ("probe", "probe"),
+                               ("poke", "POKE"), ("trace", "TRACE"))
+        if (info.get(key) in ("49", "1") if key == "audio" else info.get(key) == "1")
+    ]
     return {
         "daemon_protocol": protocol if protocol else None,
         "daemon_version": (version or "").strip(),
@@ -186,10 +258,9 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
     candidate_spec = next((spec for spec in SPECS if spec.name == candidate_name), None)
     if candidate_spec is None or not candidate_spec.verified:
         return False, "the selected daemon is not a supported build, so nothing was replaced."
-    if (installed_spec and installed_spec.verified
-            and installed_spec.specialisation > candidate_spec.specialisation):
-        return False, (f"the installed {installed_spec.label} daemon was left in place. "
-                       f"{candidate_spec.label} would replace it with a less specialised build.")
+    kept = specialisation_guard(installed, candidate_name, directory)
+    if kept:
+        return False, kept
     installed_version = embedded_version(installed)
     candidate_version = embedded_version(candidate)
     if installed_version and candidate_version and installed_version > candidate_version:
@@ -203,6 +274,9 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
                 return False, ("the installed amigentd reports the same version from a later date, "
                                "so it was left in place; --force replaces it anyway.")
             return True, ""
+    if (is_apollo_daemon(installed) and candidate_spec.family == "apollo" and installed_spec is None
+            and hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256):
+        return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place; --force replaces it anyway.")

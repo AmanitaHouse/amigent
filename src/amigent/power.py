@@ -11,8 +11,8 @@ import shlex
 import subprocess
 import time
 
+from . import net, safety, tls
 from .errors import AmigaError
-from .net import greet
 from .roster import address
 
 OFF_SECONDS = 30
@@ -35,11 +35,18 @@ def set_power(on: bool) -> None:
     subprocess.run([*shlex.split(command), "on" if on else "off"], check=True, timeout=60)
 
 
+def greet(host: str, port: int, timeout: float, connect_timeout: float) -> bytes:
+    """The service's hello: on its TLS port under AMIGENT_REQUIRE_TLS, else on port itself."""
+    if safety.require_tls():
+        return tls.greet(host, port, timeout, connect_timeout)
+    return net.greet(address(host), port, timeout, connect_timeout=connect_timeout)
+
+
 def wait_for_port(host: str, port: int, wait: float) -> bool:
     """True once the service says hello; polls every 10 s until wait runs out."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        if greet(address(host), port, 8, connect_timeout=5):
+        if greet(host, port, 8, connect_timeout=5):
             return True
         time.sleep(10)
     return False
@@ -49,7 +56,7 @@ def wait_gone(host: str, port: int, wait: float = 30) -> bool:
     """True once the service stops saying hello: proof the restart really happened."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        if not greet(address(host), port, 3, connect_timeout=3):
+        if not greet(host, port, 3, connect_timeout=3):
             return True
         time.sleep(1)
     return False

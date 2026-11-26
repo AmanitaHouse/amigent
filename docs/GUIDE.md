@@ -837,6 +837,8 @@ settings and menu entries; see
 | `AMIGENT_FLEET_PORT` | `6820` | port of the overview, on 127.0.0.1 only |
 | `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/` |
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
+| `AMIGENT_REQUIRE_TLS` | off | `1`: TLS with the pinned certificate or no connection at all, see [Security](#security) |
+| `AMIGENT_READ_ONLY` | off | `1`: the MCP server offers only tools that change nothing, see [Security](#security) |
 | `AMIGENT_GDB` | | `host:port` of WinUAE's GDB server, when not set as `"gdb"` in `amigas.json` |
 | `AMIGENT_WINUAE` | | WinUAE's program, when not set as `"winuae"` in `amigas.json` |
 | `AMIGENT_NO_UPDATE_CHECK` | | `1` stops looking for new releases (also `python -m amigent.update off`) |
@@ -872,6 +874,27 @@ or the close gadget ends it, C clears the log.
   [PROTOCOL.md](PROTOCOL.md#tls) for how. Without TLS the connection is
   unencrypted, and someone who can read your network traffic could read the key
   too.
+- `AMIGENT_REQUIRE_TLS=1` makes the PC side refuse anything but TLS with the
+  pinned certificate: no pin, `AMIGENT_TLS=off`, a failed handshake or another
+  certificate end the attempt before a byte reaches a plain port. There is no
+  fallback to `amigactld`, no search of the network for a moved Amiga
+  (`amiga_find` with an address still works), and a refused TLS port is not
+  explained from the plain port's hello. `amiga_restart` waits on the TLS port;
+  `amiga_machines` and the overview count an Amiga as reachable only there.
+- `AMIGENT_READ_ONLY=1` makes `amigent-server` offer only `amiga_list`,
+  `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
+  `amiga_installs`, for every saved Amiga (`machine=`). Every other tool, and
+  any tool added later, is neither listed nor run, whatever the AI app's own
+  tool switches say, and the server refuses to start if anything else is
+  registered. Its command channel sends only the commands those tools need
+  (DIR, TEXT, TASKS, LOADED, SYSINFO), it does not fall back to `amigactld`, it
+  opens no screen connection (that one carries mouse and keys), and
+  `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
+  PowerPC section (it runs WarpOS's `stat`), and the server does not look for
+  a new Amigent release. Its instructions to the AI name only those six tools.
+  With mcp 1.7 or later the tools carry the MCP hint `readOnlyHint`; hints
+  are for the AI app, the server does the enforcing. These tools do show the
+  Amiga's file names, screen text and tasks to the AI.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

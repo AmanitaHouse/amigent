@@ -12,10 +12,16 @@ import time
 from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
+from mcp.server.fastmcp.exceptions import ToolError
+
+try:
+    from mcp.types import ToolAnnotations
+except ImportError:  # mcp before 1.7: no annotations, the allowlist below works all the same
+    ToolAnnotations = None
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
-from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
+from . import gdb, journal, memory, net, probes, safety, secret, system, tls, update, uptime, watch
 from . import emu68net, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
@@ -80,7 +86,54 @@ INSTRUCTIONS = """Amigent operates registered Amigas.
 - When amiga_status says a newer Amigent is out, tell the user once; only
   after they agree, amiga_update(apply=True) updates this PC and the Amigas."""
 
-mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
+# AMIGENT_READ_ONLY=1: only these tools exist. Each was read down to the amigentd
+# commands it sends (DIR, TEXT, TASKS, LOADED, SYSINFO) or the PC files it reads;
+# channel.READ_ONLY_COMMANDS holds the channel to the same list, whatever a tool does.
+# A tool not named here is not offered and not run: new tools stay out until audited.
+READ_ONLY = safety.read_only()
+READ_ONLY_TOOLS = frozenset({"amiga_list", "amiga_screen_text", "amiga_tasks", "amiga_loaded",
+                             "amiga_notes", "amiga_installs"})
+# MCP annotations are hints for the client, never the enforcement. Tools named in no
+# set make no claim; that includes ones that only look but were not audited for it.
+# amiga_tasks only looks under AMIGENT_READ_ONLY; otherwise its PowerPC section runs
+# Version, CPU and WarpOS's stat through EXEC, so there it claims nothing.
+READ_ONLY_HINTED = READ_ONLY_TOOLS if READ_ONLY else READ_ONLY_TOOLS - {"amiga_tasks"}
+DESTRUCTIVE_TOOLS = frozenset({
+    "amiga_exec", "amiga_start", "amiga_arexx", "amiga_job", "amiga_run", "amiga_everywhere",
+    "amiga_write_text", "amiga_put", "amiga_move", "amiga_delete", "amiga_memory_write",
+    "amiga_trace", "amiga_task", "amiga_restart", "amiga_power", "amiga_install_undo",
+    "amiga_aminet_install", "amiga_emulator"})
+CHANGING_TOOLS = DESTRUCTIVE_TOOLS | frozenset({
+    "amiga_status", "amiga_find", "amiga_break", "amiga_rexx_ports", "amiga_jobs",
+    "amiga_quiet_monitor", "amiga_drag_measure", "amiga_state", "amiga_screen_diff",
+    "amiga_create_project", "amiga_build", "amiga_mkdir", "amiga_get", "amiga_inventory",
+    "amiga_pause_screen", "amiga_screen_front", "amiga_mouse_relative", "amiga_ui_click",
+    "amiga_menu_select", "amiga_click", "amiga_mouse_move", "amiga_button", "amiga_drag",
+    "amiga_type", "amiga_key", "amiga_hrtmon", "amiga_viewer", "amiga_click_text", "amiga_do",
+    "amiga_link", "amiga_follow", "amiga_clipboard", "amiga_note", "amiga_install_begin",
+    "amiga_install_end", "amiga_software_failure"})
+if READ_ONLY:
+    INSTRUCTIONS += ("\n- This server is read-only (AMIGENT_READ_ONLY): only "
+                     + ", ".join(sorted(READ_ONLY_TOOLS)) + " are offered; nothing else runs.")
+
+
+class _Server(FastMCP):
+    """FastMCP that, read-only, lists and calls nothing outside READ_ONLY_TOOLS.
+
+    Unregistered tools are unknown to FastMCP anyway; this holds at the door too,
+    for anything that might get registered some other way."""
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        return [t for t in tools if not READ_ONLY or t.name in READ_ONLY_TOOLS]
+
+    async def call_tool(self, name: str, arguments: dict):
+        if READ_ONLY and name not in READ_ONLY_TOOLS:
+            raise ToolError(f"AMIGENT_READ_ONLY: {name} is not offered by this server")
+        return await super().call_tool(name, arguments)
+
+
+mcp = _Server("amigent", instructions=INSTRUCTIONS)
 # One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
 sessions = Sessions(CTL_PORT, SCREEN_PORT)
 
@@ -107,7 +160,11 @@ def note_line(name: str, kwargs: dict, defaults: dict | None = None) -> str:
 
 
 def _note(line: str) -> bool:
-    """Best effort and only on a link that is up: the monitor must never cost a tool."""
+    """Best effort and only on a link that is up: the monitor must never cost a tool.
+
+    Read-only, amigent-monitor gets no line: NOTE is a command like any other."""
+    if READ_ONLY:
+        return False
     backend = getattr(_session().ctl, "backend", None)
     if not getattr(_session().ctl, "connected", False) or not hasattr(backend, "note"):
         return False
@@ -192,7 +249,7 @@ def _noted(fn):
         finally:
             if not sent:  # the tool may have brought the link up
                 _note(line)
-            if fn.__name__ not in UNJOURNALED:
+            if fn.__name__ not in UNJOURNALED and not READ_ONLY:
                 diary.add(_amiga_name(), line, ok)
         if isinstance(result, str):
             result = _outdated_note() + result
@@ -207,15 +264,43 @@ def _noted(fn):
 
 
 _tool = mcp.tool
+ANNOTATIONS = ToolAnnotations is not None and "annotations" in inspect.signature(FastMCP.tool).parameters
+
+
+def annotations_for(name: str):
+    """The MCP hints for a tool, from the sets above; None where nothing is claimed."""
+    if ToolAnnotations is None:
+        return None
+    if name in READ_ONLY_HINTED:
+        return ToolAnnotations(readOnlyHint=True)
+    if name in DESTRUCTIVE_TOOLS:
+        return ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+    if name in CHANGING_TOOLS:
+        return ToolAnnotations(readOnlyHint=False)
+    return None
+
+
+def _refused(fn):
+    """What a tool's name means in Python when AMIGENT_READ_ONLY keeps it from MCP."""
+    @functools.wraps(fn)
+    def refuse(*args, **kwargs):
+        raise AmigaError(f"AMIGENT_READ_ONLY: {fn.__name__} is not offered by this server")
+    return refuse
 
 
 UNTARGETED = {"amiga_everywhere", "amiga_machines", "amiga_aminet_search", "amiga_aminet_readme", "amiga_update"}
 
 
 def _tool_noted(*args, **kwargs):
-    register = _tool(*args, **kwargs)
+    def register(name):
+        hints = annotations_for(name)
+        if ANNOTATIONS and hints is not None and "annotations" not in kwargs:
+            return _tool(*args, annotations=hints, **kwargs)
+        return _tool(*args, **kwargs)
 
     def decorate(fn):
+        if READ_ONLY and fn.__name__ not in READ_ONLY_TOOLS:
+            return _refused(fn)
         targeted = fn.__name__ not in UNTARGETED
         signature = inspect.signature(fn)
         if targeted:
@@ -255,7 +340,7 @@ def _tool_noted(*args, **kwargs):
             # Separate machines can progress while a slow command waits.
             return await asyncio.to_thread(run, *args, **kwargs)
 
-        register(dispatch)
+        register(fn.__name__)(dispatch)
         return run
     return decorate
 
@@ -274,7 +359,12 @@ def amiga_machines() -> str:
     entries = machines.load()
     def status(entry):
         conflicts = machines.conflicts(entry, entries)
-        online = not conflicts and net.greet(entry['host'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
+        if conflicts:
+            online = False
+        elif safety.require_tls():  # the pinned TLS port or nothing; no pin reads as offline
+            online = tls.greet(entry['id'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
+        else:
+            online = net.greet(entry['host'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
         return {"id": entry['id'], "name": entry['name'], "address": entry['host'],
                 "default": bool(entry.get('default')), "online": online,
                 "conflicts": conflicts}
@@ -1029,7 +1119,7 @@ def amiga_tasks(name: str = "") -> str:
     Needs amigentd 1.4.0. With WarpOS running, the PowerPC tasks follow
     with their CPU load, as WarpOS's tool stat tells it."""
     table = memory.task_table(_tasks(), name)
-    extra = _ppc_task_section(name)
+    extra = "" if READ_ONLY else _ppc_task_section(name)  # runs Version, CPU and stat: EXEC
     return table + ("\n\n" + extra if extra else "")
 
 
@@ -4760,8 +4850,28 @@ def _close_for_update() -> None:
             pass
 
 
+def read_only_problems() -> list[str]:
+    """Everything a read-only server would offer beyond READ_ONLY_TOOLS; empty when it is clean.
+
+    Asks FastMCP's own registry, not the filter in _Server, so a tool, resource or
+    prompt that got in another way is found too."""
+    async def offered():
+        return (await FastMCP.list_tools(mcp), await mcp.list_resources(),
+                await mcp.list_resource_templates(), await mcp.list_prompts())
+
+    tools, resources, templates, prompts = asyncio.run(offered())
+    problems = [f"tool {t.name}" for t in tools if t.name not in READ_ONLY_TOOLS]
+    problems += [f"resource {r.uri}" for r in resources]
+    problems += [f"resource template {r.uriTemplate}" for r in templates]
+    problems += [f"prompt {p.name}" for p in prompts]
+    return problems
+
+
 def main() -> None:
-    update.refresh_in_background()
+    if READ_ONLY and (problems := read_only_problems()):
+        raise SystemExit("AMIGENT_READ_ONLY: refusing to start, not audited: " + ", ".join(problems))
+    if not READ_ONLY:  # it writes update.json and asks PyPI; neither is reading the Amiga
+        update.refresh_in_background()
     mcp.run()
 
 

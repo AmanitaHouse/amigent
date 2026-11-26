@@ -8,6 +8,7 @@ server runs as a child process over stdio, the way an MCP client starts it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import queue
@@ -103,14 +104,36 @@ class TlsFront:
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.load_cert_chain(str(certfile))
         self.accepted = self.handshakes = 0
+        self.refusing = False
         listener.listen(8)
         threading.Thread(target=self._accept, daemon=True).start()
+
+    def refuse(self):
+        """Shut the port so a dial is refused, on every system."""
+        self.refusing = True
+        port = self.listener.getsockname()[1]
+        with contextlib.suppress(OSError):  # Linux: wakes the accept() that keeps it listening
+            self.listener.shutdown(socket.SHUT_RDWR)
+        self.listener.close()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                socket.create_connection((HOST, port), 5).close()  # still listening: wakes accept()
+            except ConnectionRefusedError:
+                return
+            except OSError:
+                pass
+            time.sleep(0.05)
+        raise AssertionError(f"port {port} still takes connections")
 
     def _accept(self):
         while True:
             try:
                 conn, _ = self.listener.accept()
             except OSError:
+                return
+            if self.refusing:
+                conn.close()
                 return
             self.accepted += 1
             threading.Thread(target=self._one, args=(conn,), daemon=True).start()
@@ -303,8 +326,7 @@ def test_require_tls_reads_no_plain_hello_when_the_tls_port_refuses(stage, monke
     """tls._why_tls_refused reads the plain hello to explain a shut TLS port; not under the switch."""
     monkeypatch.setattr(machines, "relocate", lambda host: None)
     world = stage()
-    world["front"].listener.shutdown(socket.SHUT_RDWR)  # wakes its accept(): the TLS port refuses now
-    world["front"].listener.close()
+    world["front"].refuse()
     monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")
     with pytest.raises(OSError):
         tls.connect(HOST, world["port"], 3)
@@ -322,8 +344,7 @@ def test_require_tls_does_not_search_for_a_saved_amiga(stage, monkeypatch):
     world = stage(pin=None)
     saved = roster.remember("A1200", HOST)["id"]
     tls.remember(saved, world["certificate"])
-    world["front"].listener.shutdown(socket.SHUT_RDWR)
-    world["front"].listener.close()
+    world["front"].refuse()
     searched = []
     monkeypatch.setattr(machines, "relocate", lambda host: searched.append(host))
     monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")

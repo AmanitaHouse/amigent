@@ -892,9 +892,16 @@ or the close gadget ends it, C clears the log.
   `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
   PowerPC section (it runs WarpOS's `stat`), and the server does not look for
   a new Amigent release. Its instructions to the AI name only those six tools.
-  With mcp 1.7 or later the tools carry the MCP hint `readOnlyHint`; hints
-  are for the AI app, the server does the enforcing. These tools do show the
+  `amiga_list` lists one directory at a time there, never recursively. With
+  mcp 1.7 or later these tools carry the MCP hint `readOnlyHint`; hints are
+  for the AI app, the server does the enforcing. These tools do show the
   Amiga's file names, screen text and tasks to the AI.
+- What `AMIGENT_REQUIRE_TLS` does not cover: the link to WinUAE's GDB server
+  (`amiga_emulator`, `amiga_trace` on an emulator) is plain TCP on the PC;
+  `amiga_pistorm` uses ssh and `amiga_serial_log` a local serial port. The
+  remote desktop, the overview and `amigent-setup` follow the variable only
+  when they see it, so set it for them too when they are started on their
+  own.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

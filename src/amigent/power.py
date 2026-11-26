@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import socket
 import subprocess
 import time
 
@@ -52,11 +53,24 @@ def wait_for_port(host: str, port: int, wait: float) -> bool:
     return False
 
 
+def _tls_port_open(host: str, port: int, timeout: float) -> bool:
+    """Whether amigentd's TLS port still takes a connection. Nothing is sent: a slow
+    handshake (a 68000, a plipbox) must not read as an Amiga that went away."""
+    try:
+        with socket.create_connection((address(host), port + 1), timeout):
+            return True
+    except OSError:
+        return False
+
+
 def wait_gone(host: str, port: int, wait: float = 30) -> bool:
     """True once the service stops saying hello: proof the restart really happened."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        if not greet(host, port, 3, connect_timeout=3):
+        if safety.require_tls():
+            if not _tls_port_open(host, port, 3):
+                return True
+        elif not greet(host, port, 3, connect_timeout=3):
             return True
         time.sleep(1)
     return False

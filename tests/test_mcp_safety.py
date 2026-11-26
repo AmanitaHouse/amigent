@@ -530,12 +530,17 @@ def test_read_only_server_skips_the_update_check(monkeypatch):
     assert asked == [1]
 
 
-def test_annotation_sets_name_real_tools():
+def test_read_only_tools_are_real_tools():
     registered = {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
-    assert server.READ_ONLY_TOOLS | server.CHANGING_TOOLS <= registered
-    assert not server.READ_ONLY_TOOLS & server.CHANGING_TOOLS
-    assert server.DESTRUCTIVE_TOOLS <= server.CHANGING_TOOLS
-    assert server.READ_ONLY_HINTED == server.READ_ONLY_TOOLS - {"amiga_tasks"}  # unrestricted here
+    assert server.READ_ONLY_TOOLS <= registered
+    assert all(server.annotations_for(name) is None for name in registered)  # unrestricted here
+
+
+def test_read_only_refuses_a_recursive_listing(monkeypatch):
+    monkeypatch.setattr(server, "READ_ONLY", True)
+    fn = getattr(server.amiga_list, "fn", server.amiga_list)
+    with pytest.raises(server.AmigaError, match="recursive listing is not offered"):
+        fn("SYS:", recursive=True)
 
 
 def test_read_only_instructions_name_only_the_offered_tools():
@@ -702,12 +707,6 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
         if not server.ANNOTATIONS:
             assert not hints, name  # mcp before 1.7 has no annotations to give
             continue
-        assert (hints.get("readOnlyHint") is True) == (name in server.READ_ONLY_HINTED), name
-        if name in server.CHANGING_TOOLS:
-            assert hints.get("readOnlyHint") is False, name
-        elif name not in server.READ_ONLY_HINTED:
-            assert not hints, name  # unaudited, amiga_tasks and the 1.5.0 tools: no claim
-        assert ("destructiveHint" in hints) == (name in server.DESTRUCTIVE_TOOLS), name
-        assert "idempotentHint" not in hints, name
+        assert not hints, name  # the default server makes no claim, as before
     assert not listed.get("isError") and "C" in listed["content"][0]["text"]
     assert ctl.knocks == 0

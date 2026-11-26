@@ -891,7 +891,8 @@ or the close gadget ends it, C clears the log.
   opens no screen connection (that one carries mouse and keys), and
   `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
   PowerPC section (it runs WarpOS's `stat`), and the server does not look for
-  a new Amigent release. The tools carry the MCP hint `readOnlyHint`; hints
+  a new Amigent release. Its instructions to the AI name only those six tools.
+  The tools carry the MCP hint `readOnlyHint`; hints
   are for the AI app, the server does the enforcing. These tools do show the
   Amiga's file names, screen text and tasks to the AI.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.

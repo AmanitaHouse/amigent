@@ -112,9 +112,23 @@ CHANGING_TOOLS = DESTRUCTIVE_TOOLS | frozenset({
     "amiga_type", "amiga_key", "amiga_hrtmon", "amiga_viewer", "amiga_click_text", "amiga_do",
     "amiga_link", "amiga_follow", "amiga_clipboard", "amiga_note", "amiga_install_begin",
     "amiga_install_end", "amiga_software_failure"})
+READ_ONLY_INSTRUCTIONS = """Amigent looks at registered Amigas, read-only (AMIGENT_READ_ONLY).
+- The server enforces it: only amiga_list, amiga_screen_text, amiga_loaded,
+  amiga_tasks, amiga_notes and amiga_installs exist, and the line to the Amiga
+  takes only the read commands they use. Nothing is run, changed or written on
+  the Amiga; when a request needs that, tell the user it needs the server
+  without AMIGENT_READ_ONLY.
+- An omitted machine uses AMIGENT_HOST, the saved default, or the sole Amiga;
+  otherwise pass machine, a saved name or ID, and keep each machine's results apart.
+- amiga_list shows one directory; list the ones below one at a time, recursive
+  listing is not offered here.
+- amiga_screen_text for what is on the screen, window by window.
+- amiga_loaded for what really runs (a driver, a library version); amiga_tasks
+  for the tasks, their state and stack.
+- amiga_notes(topic) for what was learned earlier about a program; amiga_installs
+  for the installations recorded on this Amiga."""
 if READ_ONLY:
-    INSTRUCTIONS += ("\n- This server is read-only (AMIGENT_READ_ONLY): only "
-                     + ", ".join(sorted(READ_ONLY_TOOLS)) + " are offered; nothing else runs.")
+    INSTRUCTIONS = READ_ONLY_INSTRUCTIONS
 
 
 class _Server(FastMCP):

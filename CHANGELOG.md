@@ -15,7 +15,8 @@ Versions follow [semver](https://semver.org). The number lives in
   `amiga_installs`, on every saved Amiga, refuses every other name, and will
   not start with anything else registered. Its channel sends only the commands
   those tools need; `amiga_tasks` leaves out the PowerPC section, which runs
-  commands. There is no update check either.
+  commands. There is no update check either, and the server's instructions to
+  the AI name only those six tools.
 - Tools carry MCP annotations: `readOnlyHint` on the read-only tools,
   `readOnlyHint: false` on tools that change things, `destructiveHint` on
   those that can delete, overwrite, run commands or restart. Tools added in

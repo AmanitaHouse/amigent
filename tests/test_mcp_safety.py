@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import random
+import re
 import socket
 import ssl
 import struct
@@ -515,6 +516,17 @@ def test_annotation_sets_name_real_tools():
     assert server.READ_ONLY_HINTED == server.READ_ONLY_TOOLS - {"amiga_tasks"}  # unrestricted here
 
 
+def test_read_only_instructions_name_only_the_offered_tools():
+    text = server.READ_ONLY_INSTRUCTIONS
+    assert set(re.findall(r"\bamiga_\w+", text)) == server.READ_ONLY_TOOLS
+    assert "enforces" in text
+    lowered = text.lower()
+    for absent in ("exec", "shell", "status", "write", "memory", "restart", "screenshot", "click",
+                   "key", "mouse", "update", "power", "machines"):
+        assert absent not in lowered, absent
+    assert server.INSTRUCTIONS != text and "amiga_exec" in server.INSTRUCTIONS  # unrestricted here
+
+
 # ---------------------------------------------------------------- the real server over stdio
 
 class Stdio:
@@ -595,7 +607,7 @@ def test_stdio_read_only_and_tls_only(stage, tmp_path):
     try:
         hello = mcp.start()["result"]
         assert hello["serverInfo"]["name"] == "amigent" and "tools" in hello["capabilities"]
-        assert "read-only" in hello.get("instructions", "")
+        assert hello.get("instructions") == server.READ_ONLY_INSTRUCTIONS
         tools = mcp.request("tools/list")["result"]["tools"]
         assert {t["name"] for t in tools} == server.READ_ONLY_TOOLS
         assert all(_hints(t).get("readOnlyHint") is True for t in tools)
@@ -648,13 +660,14 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
     _child_config(tmp_path, None)
     mcp = Stdio(_server_env(tmp_path, fake.port, ctl.port, AMIGENT_NO_UPDATE_CHECK="1"))
     try:
-        mcp.start()
+        hello = mcp.start()["result"]
         tools = {t["name"]: t for t in mcp.request("tools/list")["result"]["tools"]}
         listed = mcp.call("amiga_list", {"path": "SYS:"})
     finally:
         mcp.stop()
     assert set(tools) == {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
     assert len(tools) > len(server.READ_ONLY_TOOLS) and "amiga_exec" in tools
+    assert hello.get("instructions") == server.INSTRUCTIONS
     assert {"amiga_machines", "amiga_update", "amiga_pi_network", "amiga_emu68_update"} <= set(tools)
     for name, tool in tools.items():
         hints = _hints(tool)

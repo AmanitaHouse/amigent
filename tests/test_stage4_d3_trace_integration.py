@@ -5,11 +5,9 @@ import re
 from pathlib import Path
 
 from amigent.channel import feature_opcode
-from amigent.daemons import SUPERSEDED_APOLLO_SHA256
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
-HW = "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c"
 
 
 def function_body(src: str, name: str) -> str:
@@ -32,7 +30,6 @@ def test_combined_source_has_both_corrections():
     assert "not supported on this Apollo build yet" in trace
     assert trace.index("not supported on this Apollo") < trace.index("*tr->at = 0x4E4F")
     assert 't_pair(&t, "trace", 0)' in DAEMON
-    assert HW in SUPERSEDED_APOLLO_SHA256
 
 
 def test_client_hides_trace_when_advertised_off():

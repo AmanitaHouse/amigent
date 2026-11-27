@@ -11,11 +11,22 @@ from amigent.channel import PLAIN_CLOSED
 from amigent.viewer import Viewer
 
 
+class Page:
+    """An open page: what the viewer sent it."""
+
+    def __init__(self):
+        self.got = []
+
+    def send(self, data):
+        self.got.append(data)
+
+
 def _page(host: str) -> Viewer:
     viewer = Viewer(host, screen_port=1, ctl_port=1)
     viewer.screen.flags = PLAIN_CLOSED
     viewer.online = True
-    viewer.clients.add(object())
+    viewer.page = Page()
+    viewer.clients.add(viewer.page)
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
     viewer.event = lambda kind, **fields: viewer.sent.append((kind, fields))
@@ -51,17 +62,17 @@ class Link:
 def test_two_viewers_have_independent_hear_state():
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
     assert a.hear is False and b.hear is False
-    a.submit({"t": "audio", "on": True})
+    a.submit({"t": "audio", "on": True}, a.page)
     assert a.hear is True and b.hear is False
-    b.submit({"t": "audio", "on": True})
-    a.submit({"t": "audio", "on": False})
+    b.submit({"t": "audio", "on": True}, b.page)
+    a.submit({"t": "audio", "on": False}, a.page)
     assert a.hear is False and b.hear is True
 
 
 def test_retiring_one_machine_does_not_clear_the_other():
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
-    a.submit({"t": "audio", "on": True})
-    b.submit({"t": "audio", "on": True})
+    a.submit({"t": "audio", "on": True}, a.page)
+    b.submit({"t": "audio", "on": True}, b.page)
     a.retire()
     assert a.hear is False and a.enabled is False
     assert b.hear is True and b.enabled is True and b._hearing()
@@ -70,8 +81,8 @@ def test_retiring_one_machine_does_not_clear_the_other():
 
 def test_one_machine_going_offline_does_not_clear_the_other():
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
-    a.submit({"t": "audio", "on": True})
-    b.submit({"t": "audio", "on": True})
+    a.submit({"t": "audio", "on": True}, a.page)
+    b.submit({"t": "audio", "on": True}, b.page)
     a._set_online(False, "")
     assert a.hear is False and a.amiga == {}
     assert b.hear is True and b.online is True and b.amiga["audio"] == "49"
@@ -79,23 +90,23 @@ def test_one_machine_going_offline_does_not_clear_the_other():
 
 def test_last_page_leaving_one_machine_leaves_the_other_hearing():
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
-    a.submit({"t": "audio", "on": True})
-    b.submit({"t": "audio", "on": True})
+    a.submit({"t": "audio", "on": True}, a.page)
+    b.submit({"t": "audio", "on": True}, b.page)
     a.leave(next(iter(a.clients)))
     assert a.hear is False and b.hear is True and b._hearing()
 
 
 def test_stop_hear_on_one_machine_leaves_the_other():
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
-    a.submit({"t": "audio", "on": True})
-    b.submit({"t": "audio", "on": True})
+    a.submit({"t": "audio", "on": True}, a.page)
+    b.submit({"t": "audio", "on": True}, b.page)
     assert a.stop_hear() is True
     assert a.hear is False and b.hear is True
 
 
 def test_stop_hear_clears_hear_tells_the_page_and_keeps_the_machine():
     viewer = _page("192.0.2.10")
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.stop_hear() is True
     assert viewer.hear is False and not viewer._hearing()
     assert ("audio", {"on": False}) in viewer.sent
@@ -111,7 +122,7 @@ def test_stop_hear_when_hear_is_off_is_quiet():
 
 def test_stop_hear_waits_for_a_running_stream_to_release_its_link():
     viewer = _page("192.0.2.10")
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     thread = threading.Thread(target=viewer._play_audio, args=(link,), daemon=True)
     thread.start()
@@ -147,7 +158,7 @@ def test_close_for_update_clears_hear_on_every_open_session_before_closing(monke
     order = []
     a, b = _page("192.0.2.10"), _page("192.0.2.11")
     for viewer in (a, b):
-        viewer.submit({"t": "audio", "on": True})
+        viewer.submit({"t": "audio", "on": True}, viewer.page)
     for host, viewer in (("192.0.2.10", a), ("192.0.2.11", b)):
         real = viewer.stop_hear
         viewer.stop_hear = lambda wait=2.0, host=host, real=real: (order.append((host, "stop_hear")), real(wait))[1]

@@ -115,7 +115,31 @@ def connection_reason(text: str) -> str:
 
 # Hear streaming safeguards (product defaults — not the 10 s HW test cap).
 AUDIO_DRAIN_MAX = 64  # bounded end-marker / stop drain reads
-AUDIO_PCM_BUDGET = 8 * 1024 * 1024  # aggregate PCM broadcast per Hear session
+AUDIO_PCM_RATE = 48000 * 4  # bytes a second of the mix: 48 kHz, s16le stereo
+AUDIO_PCM_BURST = 4 * AUDIO_PCM_RATE  # what a link that stalled may deliver at once
+
+
+class PcmPace:
+    """How much PCM a Hear stream may still pass on to its pages.
+
+    The allowance refills at twice the mix's own rate, up to ``AUDIO_PCM_BURST``,
+    so a page may listen for as long as it likes, while a daemon that sends far
+    faster than any mix plays is stopped. Nothing is queued here.
+    """
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.left = float(AUDIO_PCM_BURST)
+        self.at = clock()
+
+    def take(self, n: int) -> bool:
+        now = self.clock()
+        self.left = min(float(AUDIO_PCM_BURST), self.left + (now - self.at) * 2 * AUDIO_PCM_RATE)
+        self.at = now
+        if n > self.left:
+            return False
+        self.left -= n
+        return True
 
 
 def apollo_machine(info: dict | None) -> bool:
@@ -283,7 +307,8 @@ class Viewer:
         self.reason = ""  # why the Amiga does not answer: a CONNECTION_REASONS key or ""
         self.ever_joined = False
         self.amiga: dict = {}
-        self.hear = False  # the page asks; opening the window does not start the mix
+        self.hearers: set[WebSocket] = set()  # pages that turned Hear on; only they get PCM
+        self._media_wake = threading.Event()  # Hear asked for, given up, or the viewer retired
         self._audio_idle = threading.Event()  # set while no Hear stream is open on this machine
         self._audio_idle.set()
         self.screen_list: list = []
@@ -350,9 +375,32 @@ class Viewer:
     def leave(self, ws: WebSocket) -> None:
         with self.clients_lock:
             self.clients.discard(ws)
+            self.hearers.discard(ws)
             if not self.clients:
                 self.alone_since = time.monotonic()
-                self.hear = False
+                self.hearers.clear()
+        self._media_wake.set()
+
+    @property
+    def hear(self) -> bool:
+        """Whether any open page has Hear on."""
+        with self.clients_lock:
+            return bool(self.hearers)
+
+    def _hear_for(self, page, on: bool) -> None:
+        """One page's Hear. A page that is not open (or no page) is never added."""
+        with self.clients_lock:
+            if on and page in self.clients:
+                self.hearers.add(page)
+            else:
+                self.hearers.discard(page)
+        self._media_wake.set()
+
+    def _deafen(self) -> None:
+        """Hear off for every page: the stream ends and no page gets PCM."""
+        with self.clients_lock:
+            self.hearers.clear()
+        self._media_wake.set()
 
     def _watching(self) -> bool:
         with self.clients_lock:
@@ -411,7 +459,8 @@ class Viewer:
 
     # input: queued here, played by the feed on its pipeline
 
-    def submit(self, op: dict) -> None:
+    def submit(self, op: dict, page=None) -> None:
+        """An input from ``page``. Hear is that page's own: it is not anyone else's."""
         if not self.enabled:
             return
         if op.get("t") == "restart":
@@ -427,10 +476,10 @@ class Viewer:
         if op.get("t") == "audio":
             want = op.get("on") is True
             if want and not hear_eligible(self.amiga, connected=self.online is True):
-                self.hear = False
+                self._hear_for(page, False)
                 self.event("audio", on=False)
                 return
-            self.hear = want
+            self._hear_for(page, want)
             return
         self.inputs.put(op)
         self.feed.ring()
@@ -453,7 +502,7 @@ class Viewer:
         self.enabled = False
         self.reason = "reason_machine_changed"
         self._forget_daemon()
-        self.hear = False  # a retired machine never keeps the mix running
+        self._deafen()  # a retired machine never keeps the mix running; _media ends
         self.amiga = {}
         self.event("online", online=False, reason=self.reason)
         with self.lock():
@@ -466,7 +515,7 @@ class Viewer:
         if online != self.online or shown != self.reason:
             if not online:
                 # the next daemon to answer may be another file, or another Amiga
-                self.hear = False
+                self._deafen()
                 self.amiga = {}
                 self._forget_daemon()
             self.online = online
@@ -504,16 +553,26 @@ class Viewer:
 
     def _hearing(self) -> bool:
         with self.clients_lock:
-            return bool(self.hear and self.clients)
+            return bool(self.hearers & self.clients)
 
     def _audio_ready(self) -> bool:
         """Whether this connection may stream Hear (Apollo + protocol >= 6 + audio=49)."""
         if hear_eligible(self.amiga, connected=self.online is True):
             return True
         if self.hear:
-            self.hear = False
+            self._deafen()
             self.event("audio", on=False)
         return False
+
+    def _to_hearers(self, data: bytes) -> None:
+        """PCM for the pages that turned Hear on, and for no other page."""
+        with self.clients_lock:
+            pages = list(self.hearers)
+        for ws in pages:
+            try:
+                ws.send(data)
+            except OSError:
+                self.leave(ws)
 
     def _release_audio(self, link: Commands) -> None:
         try:
@@ -533,11 +592,12 @@ class Viewer:
             self.event("audio", on=False)
 
     def _play_audio(self, link: Commands, between=None) -> None:
-        """Stream the ARNE mix while the page keeps asking. ``between`` runs after each block.
+        """Stream the ARNE mix while a page keeps asking. ``between`` runs after each block.
 
-        A daemon end-marker, PCM budget, or Hear OFF always releases the stream and
-        clears ``hear`` so ``_media`` cannot silently call ``audio_start`` again.
-        The user must click Hear to resume.
+        A daemon end-marker, a daemon sending faster than ``PcmPace`` allows, or the
+        last page turning Hear off always releases the stream and clears every page's
+        Hear, so ``_media`` cannot silently call ``audio_start`` again. A page must
+        click Hear to resume.
         """
         self._audio_idle.clear()
         try:
@@ -550,7 +610,7 @@ class Viewer:
             link.connect_audio(tls=audio_uses_tls(getattr(self.screen, "flags", 0), self.host))
         link.audio_start()
         self.event("audio", on=True)
-        pcm_sent = 0
+        pace = PcmPace()
         try:
             while self._hearing():
                 got = link.audio_read()
@@ -560,31 +620,26 @@ class Viewer:
                 if pcm and len(pcm) % 4:
                     raise AmigaError("audio samples are not stereo frames")
                 if pcm:
-                    room = AUDIO_PCM_BUDGET - pcm_sent
-                    if room < 4:
+                    if not pace.take(len(pcm)):
                         break
-                    if len(pcm) > room:
-                        pcm = pcm[: room - (room % 4)]
-                    if pcm:
-                        self.broadcast(pcm_message(rate or 48000, pcm))
-                        pcm_sent += len(pcm)
+                    self._to_hearers(pcm_message(rate or 48000, pcm))
                 if between:
                     between()
         finally:
-            # Never return to _media with hear still True after a stream attempt.
-            self.hear = False
+            # Never return to _media with a page still hearing after a stream attempt.
+            self._deafen()
             self._release_audio(link)
 
     def stop_hear(self, wait: float = 2.0) -> bool:
         """Stop Hear on this machine without retiring it (the updater is about to take the Amiga).
 
-        ``hear=False`` is the stop signal the streaming thread watches; that thread releases
+        No page hearing is the stop signal the streaming thread watches; that thread releases
         its own audio link. The machine stays enabled and keeps its connection state.
         Returns whether Hear was on. Waits up to ``wait`` seconds for an open stream to release.
         """
         streaming = not self._audio_idle.is_set()
-        was_on = bool(self.hear) or streaming
-        self.hear = False
+        was_on = self.hear or streaming
+        self._deafen()
         if was_on and not streaming:
             self.event("audio", on=False)  # a streaming thread says so itself when it releases
         if streaming:
@@ -592,7 +647,7 @@ class Viewer:
         return was_on
 
     def _drop_audio(self, link: Commands) -> None:
-        self.hear = False
+        self._deafen()
         try:
             if link.connected:
                 try:
@@ -616,26 +671,27 @@ class Viewer:
         not this socket. When the daemon has closed the plain port, this socket
         is TLS. A failed TLS handshake is not retried in the clear. Opening the
         window never starts the mix.
+
+        Asleep on ``_media_wake`` while no page hears: a page's Hear, a page
+        leaving and ``retire`` set it. It is cleared before the look, so a wake
+        that comes during the look is not lost. A retired viewer's thread ends.
         """
         link = Commands(self.host, self.ctl.ctl_port, self.ctl.screen_port, timeout=8)
 
-        while True:
-            if not self._watching():
-                self.hear = False
-                if link.connected:
-                    self._release_audio(link)
-                time.sleep(0.05)
-                continue
-            if self._hearing() and self._audio_ready():
+        while self.enabled:
+            self._media_wake.clear()
+            if self._watching() and self._hearing() and self._audio_ready():
                 try:
                     self._play_audio(link)
                 except (AmigaError, AttributeError, OSError):
                     self._drop_audio(link)
-                    time.sleep(0.05)
                 continue
             if link.connected:
                 self._release_audio(link)
-            time.sleep(0.05)
+            if self.enabled:
+                self._media_wake.wait()
+        if link.connected:
+            self._release_audio(link)
 
     def _read_screens(self) -> None:
         """Ask for the screen list on the feed's pipeline; no round trip of its own."""

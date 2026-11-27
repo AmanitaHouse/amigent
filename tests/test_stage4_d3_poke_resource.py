@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from amigent import channel
-from amigent.daemons import APOLLO_SHA256, SUPERSEDED_APOLLO_SHA256, consider_replacement
+from amigent.daemons import consider_replacement
 from amigent.errors import AmigaError
 from amigent.paths import AMIGA
 
@@ -15,8 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
 MMIO = (ROOT / "src/native/amiga/apollo/apollo_mmio.c").read_text(encoding="utf-8")
 BIN = AMIGA / "bin"
-
-HW_VALIDATED_SHA256 = "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c"
 
 
 def function_body(src: str, name: str) -> str:
@@ -126,11 +124,6 @@ def test_near_4gib_declared_length_is_over_peek_max():
     assert n > 65536
     poke = function_body(DAEMON, "c_poke")
     assert "n > PEEK_MAX" in poke and "return FALSE" in poke.split("n > PEEK_MAX", 1)[1][:80]
-
-
-def test_historical_apollo_digests_stay_recorded():
-    assert HW_VALIDATED_SHA256 in SUPERSEDED_APOLLO_SHA256
-    assert "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d" in APOLLO_SHA256
 
 
 def test_unknown_same_version_apollo_stays_without_force(tmp_path):

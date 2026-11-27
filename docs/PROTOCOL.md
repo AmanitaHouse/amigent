@@ -501,7 +501,7 @@ else.
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
 | 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO) |
-| 49 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only (`audio=49` in SYSINFO). One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. |
+| 49 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only (`audio=49` in SYSINFO); not yet run on a V4-SA, see the GUIDE's Apollo section. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first

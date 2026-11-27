@@ -6,14 +6,14 @@ Amiga. Nothing here contacts hardware.
 """
 
 import shutil
+from pathlib import Path
 
 import pytest
 
-from amigent import setup
+from amigent import daemons, setup
 from amigent.client import ExecResult
 from amigent.daemons import (
-    APOLLO_SHA256, CPU_68080, SUPERSEDED_APOLLO_SHA256, Machine, available_names, choose,
-    consider_replacement, identify, is_apollo_daemon,
+    CPU_68080, Machine, available_names, choose, consider_replacement, identify, is_apollo_daemon,
 )
 from amigent.errors import AmigaError
 from amigent.paths import AMIGA
@@ -23,7 +23,6 @@ APOLLO_MARK = b"tracepoints are not supported on this Apollo build yet"
 APOLLO_INFO = {"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"}
 VAMPIRE_INFO = {"os": "AmigaOS", "exec_version": "47.4", "attn_flags": "0x400"}
 EXEC51_INFO = {"exec_version": "51.1", "attn_flags": "0x8f"}  # AROS-like: no 68080 bit
-FORK_HW_APOLLO_SHA = "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d"
 HOME = "SYS:amigent"
 
 
@@ -190,9 +189,7 @@ def test_an_update_with_an_unknown_cpu_leaves_an_installed_apollo_alone(tmp_path
     assert "left in place" in capsys.readouterr().out
 
 
-def test_an_apollo_daemon_is_recognised_by_known_digests_and_markers(tmp_path):
-    assert FORK_HW_APOLLO_SHA in APOLLO_SHA256
-    assert len(SUPERSEDED_APOLLO_SHA256) >= 3
+def test_an_apollo_daemon_is_recognised_by_its_markers_alone(tmp_path):
     assert is_apollo_daemon(APOLLO)
     assert not is_apollo_daemon((AMIGA / "bin" / "amigentd").read_bytes())
     assert not is_apollo_daemon((AMIGA / "bin" / "amigentd.000").read_bytes())
@@ -201,6 +198,25 @@ def test_an_apollo_daemon_is_recognised_by_known_digests_and_markers(tmp_path):
     empty = tmp_path / "bin"
     empty.mkdir()
     assert identify(APOLLO, empty) is None  # not packaged, still recognised by is_apollo_daemon
+
+
+def test_no_digest_of_a_particular_binary_decides_an_update():
+    import re
+
+    source = Path(daemons.__file__).read_text(encoding="utf-8")
+    assert not re.search(r"\b[0-9a-f]{64}\b", source) and "hashlib" not in source
+    assert not any(name.endswith("SHA256") for name in vars(daemons))
+
+
+def test_an_installed_apollo_of_any_build_is_updated_by_a_newer_packaged_apollo(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "amigentd.apollo").write_bytes(APOLLO)
+    for tag in (b"fork-a", b"fork-b", b"own-build"):
+        installed = build(version="1.5.0", date="18.11.2026", tag=tag, apollo=True)
+        assert consider_replacement(installed, APOLLO, "amigentd.apollo", bin_dir) == (True, "")
+        keep, reason = consider_replacement(installed, CLASSIC, "amigentd", bin_dir)
+        assert not keep and "less specialised" in reason
 
 
 def test_a_classic_candidate_never_replaces_an_apollo_daemon_even_when_newer(tmp_path):

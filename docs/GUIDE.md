@@ -915,6 +915,19 @@ from source:
   (produces 68020-targeted CI build verification binaries with `-DAMIGENT_APOLLO`;
   not hardware-tested).
 
+**Status: untested on hardware.** AUDIO (opcode 49), the Viewer's Hear button
+and `amiga_listen` have not yet been run on a physical Apollo V4-SA from this
+source. What has been checked is only this:
+
+- Compilation: the Apollo binaries build without warnings with ApolloCrossDev
+  GCC 6.5 (Stable and Dev) and with GCC 16 in CI.
+- Simulation: the test suite runs the daemon's AUDIO task code against a
+  simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
+  PCM and pages.
+
+Neither says the Apollo part works on a V4-SA. Until it has been accepted
+there, treat Apollo support as experimental.
+
 ## Translations
 
 Each language of the remote desktop is one file in

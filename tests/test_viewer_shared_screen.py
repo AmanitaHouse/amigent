@@ -82,7 +82,7 @@ def test_closing_the_page_leaves_the_agents_connection_open(lent, monkeypatch):
     page = object()
     viewer.clients.add(page)
     viewer.feed.online = viewer.online = True
-    viewer.hear = True
+    viewer.hearers.add(page)
 
     viewer.leave(page)
     _idle(viewer, 30.0, monkeypatch)  # far past the 2 s after which the old feed closed it

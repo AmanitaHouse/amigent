@@ -15,7 +15,6 @@ before protocol 3, fetched separately, and it does not change TLS.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,18 +102,9 @@ def detect_cpu(run) -> int | None:
     return CPU_68020
 
 
-# An installed Apollo daemon is recognised without a packaged file: by the SHA-256 of a
-# validated build, or by text that only the AMIGENT_APOLLO build of amigentd.c contains.
-# Both survive an upstream package that has no amigentd.apollo, which is what makes an
-# update safe there. Markers recognise Apollo builds whose digest is not listed yet.
-APOLLO_SHA256 = frozenset({
-    "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c735d",  # 1.5.0 fork HW-tested
-})
-SUPERSEDED_APOLLO_SHA256 = frozenset({
-    "1e0e3f65d46b62c93f7986d8137120ef5e2dec2515a9b63f6aa5909d2e75e9ca",
-    "004437199347eb4479399002dbb6d45ae9cb0fda8d56b257bfe24b54d3b9676c",
-    "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1",
-})
+# An installed Apollo daemon is recognised without a packaged file, by text that only the
+# AMIGENT_APOLLO build of amigentd.c contains. That survives an upstream package that has
+# no amigentd.apollo, which is what makes an update safe there, for any Apollo build.
 APOLLO_MARKERS = (
     b"tracepoints are not supported on this Apollo build yet",
     b"that range includes Apollo registers that a read can change",
@@ -123,8 +113,6 @@ APOLLO_MARKERS = (
 
 def is_apollo_daemon(data: bytes) -> bool:
     """True when ``data`` is an Apollo-family amigentd, whether or not it is packaged."""
-    if hashlib.sha256(data).hexdigest() in APOLLO_SHA256:
-        return True
     return data.startswith(HUNK_HEADER) and any(mark in data for mark in APOLLO_MARKERS)
 
 
@@ -274,9 +262,6 @@ def consider_replacement(installed: bytes | None, candidate: bytes, candidate_na
                 return False, ("the installed amigentd reports the same version from a later date, "
                                "so it was left in place; --force replaces it anyway.")
             return True, ""
-    if (is_apollo_daemon(installed) and candidate_spec.family == "apollo" and installed_spec is None
-            and hashlib.sha256(installed).hexdigest() in SUPERSEDED_APOLLO_SHA256):
-        return True, ""
     if installed_spec is None and installed_version and candidate_version and installed_version == candidate_version:
         return False, ("the installed amigentd is not one of the builds in this package and "
                        "reports the same version, so it was left in place; --force replaces it anyway.")

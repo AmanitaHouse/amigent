@@ -117,11 +117,22 @@ def _apollo_audio(**extra):
     return info
 
 
+class Page:
+    """An open page: what the viewer sent it."""
+
+    def __init__(self):
+        self.got = []
+
+    def send(self, data):
+        self.got.append(data)
+
+
 def _page(host="192.0.2.10", flags=0):
     viewer = Viewer(host, screen_port=1, ctl_port=1)
     viewer.screen.flags = flags
     viewer.online = True
-    viewer.clients.add(object())
+    viewer.page = Page()
+    viewer.clients.add(viewer.page)
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
     viewer.event = lambda kind, **fields: viewer.sent.append((kind, fields))
@@ -132,7 +143,7 @@ def test_playback_starts_only_when_asked_and_stops_cleanly():
     viewer = _page(flags=PLAIN_CLOSED)
     viewer.amiga = _apollo_audio()
     assert not viewer._hearing()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer._hearing() and viewer._audio_ready()
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
@@ -140,12 +151,13 @@ def test_playback_starts_only_when_asked_and_stops_cleanly():
     assert link.tls is True and link.started == 1 and link.stopped == 1 and link.closed == 1
     assert viewer.hear is False
     assert viewer.sent[0] == ("audio", {"on": True})
-    frame = next(m for m in viewer.sent if isinstance(m, (bytes, bytearray)))
+    assert not [m for m in viewer.sent if isinstance(m, (bytes, bytearray))]  # PCM is not broadcast
+    frame = next(m for m in viewer.page.got if isinstance(m, (bytes, bytearray)))
     assert frame == pcm_message(48000, b"\x01\x00\x02\x00")
     assert frame[0] == 5 and struct.unpack(">I", frame[1:5]) == (48000,)
     assert ("audio", {"on": False}) in viewer.sent
 
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link2 = Link()
     link2.reads = [(48000, b"\x00\x00\x00\x00"), None]
     viewer._play_audio(link2)
@@ -155,18 +167,18 @@ def test_playback_starts_only_when_asked_and_stops_cleanly():
 def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
     viewer = _page()
     viewer.amiga = {}
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert not viewer._hearing() and not viewer._audio_ready()
     assert ("audio", {"on": False}) in viewer.sent
     viewer.amiga = {"os": "AmigaOS", "audio": ""}
     assert not viewer._audio_ready() and not viewer.hear
 
     viewer.amiga = _apollo_audio(audio="1")  # legacy fork opcode 48 must be refused
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert not viewer._hearing() and not viewer._audio_ready()
 
     viewer.amiga = _apollo_audio()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [AmigaError("the Amiga does not answer")]
     with pytest.raises(AmigaError):
@@ -174,7 +186,7 @@ def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
     assert not viewer.hear and link.closed == 1
 
     odd = Link()
-    viewer.hear = True
+    viewer.hearers.add(viewer.page)
     odd.reads = [(48000, b"\x00\x00\x00")]
     with pytest.raises(AmigaError, match="stereo"):
         viewer._play_audio(odd)
@@ -183,13 +195,13 @@ def test_unsupported_audio_and_a_lost_connection_leave_no_stream():
 def test_reconnection_does_not_keep_playback():
     viewer = _page()
     viewer.amiga = _apollo_audio()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     viewer._set_online(False, "the Amiga does not answer")
     assert viewer.hear is False and viewer.amiga == {}
     viewer._set_online(True)
     assert viewer.hear is False and not viewer._hearing()
     client = next(iter(viewer.clients))
-    viewer.hear = True
+    viewer.hearers.add(client)
     viewer.leave(client)
     assert viewer.hear is False and not viewer.clients
 
@@ -275,6 +287,32 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
 
     monkeypatch.setattr(server._session(), "ctl", Silent())
     assert server.amiga_listen(1) == ["nothing is playing through AHI"]
+
+
+def test_listen_on_amigactld_says_so_and_on_amigentd_still_listens(monkeypatch):
+    from amigent.amigactl import AmigaCtl
+    from amigent.channel import AmigaChannel
+
+    class OldDaemon(AmigaCtl):
+        def sysinfo(self):
+            return {"audio": "49"}  # even when it claims the mix, it has no CMD_AUDIO
+
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
+    old = Commands("192.0.2.1")
+    old.backend = OldDaemon("192.0.2.1")
+    monkeypatch.setattr(server._session(), "ctl", old)
+    reply = server.amiga_listen(1)
+    assert len(reply) == 1 and "amigactld" in reply[0] and "amigent-setup --update" in reply[0]
+
+    pcm = b"\x01\x00\x02\x00" * 9600
+    channel = AmigaChannel.__new__(AmigaChannel)
+    channel.sysinfo = lambda: {"audio": "49"}
+    channel.audio = lambda ms: (48000, pcm)
+    new = Commands("192.0.2.1")
+    new.backend = channel
+    monkeypatch.setattr(server._session(), "ctl", new)
+    text, block = server.amiga_listen(0.2)
+    assert text == f"heard {len(pcm)} bytes at 48000 Hz" and block.data == pcm_wav(pcm, 48000)
 
 
 def test_apollo_source_does_not_write_stream_diagnostics():

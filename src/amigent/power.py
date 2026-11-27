@@ -36,18 +36,22 @@ def set_power(on: bool) -> None:
     subprocess.run([*shlex.split(command), "on" if on else "off"], check=True, timeout=60)
 
 
-def greet(host: str, port: int, timeout: float, connect_timeout: float) -> bytes:
+def greet(host: str, port: int, timeout: float, connect_timeout: float,
+          handshake: float | None = None) -> bytes:
     """The service's hello: on its TLS port under AMIGENT_REQUIRE_TLS, else on port itself."""
     if safety.require_tls():
-        return tls.greet(host, port, timeout, connect_timeout)
+        return tls.greet(host, port, timeout, connect_timeout, handshake)
     return net.greet(address(host), port, timeout, connect_timeout=connect_timeout)
 
 
 def wait_for_port(host: str, port: int, wait: float) -> bool:
-    """True once the service says hello; polls every 10 s until wait runs out."""
+    """True once the service says hello; polls every 10 s until wait runs out.
+
+    Under AMIGENT_REQUIRE_TLS the hello comes after the handshake, which gets
+    tls.HANDSHAKE_WAIT: a slow one is an Amiga that came back, not one still away."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        if greet(host, port, 8, connect_timeout=5):
+        if greet(host, port, 8, connect_timeout=5, handshake=tls.HANDSHAKE_WAIT):
             return True
         time.sleep(10)
     return False

@@ -124,7 +124,8 @@ def _why_tls_refused(address: str, port: int) -> str:
     return NO_CERT_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
 
 
-def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
+def _dial(address: str, host: str, port: int, timeout: float,
+          handshake: float | None = None) -> socket.socket:
     if wanted(host):
         try:
             sock = socket.create_connection((address, port + 1), timeout)
@@ -136,6 +137,8 @@ def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
                 raise TlsDown(why) from e
             raise
         try:
+            if handshake:
+                sock.settimeout(handshake)
             return wrap(sock, host)
         except (OSError, ssl.SSLError):
             sock.close()
@@ -169,10 +172,16 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
         return _dial(moved, host, port, timeout)
 
 
-def greet(host: str, port: int, timeout: float, connect_timeout: float | None = None) -> bytes:
-    """net.greet over TLS: amigentd's first bytes on port + 1, the pin checked; b"" for silence."""
+HANDSHAKE_WAIT = 30.0  # seconds; AmiSSL on a 68000 or over a plipbox takes its time
+
+
+def greet(host: str, port: int, timeout: float, connect_timeout: float | None = None,
+          handshake: float | None = None) -> bytes:
+    """net.greet over TLS: amigentd's first bytes on port + 1, the pin checked; b"" for silence.
+
+    The handshake gets connect_timeout too, unless handshake says otherwise."""
     try:
-        with _dial(roster.address(host), host, port, connect_timeout or timeout) as s:
+        with _dial(roster.address(host), host, port, connect_timeout or timeout, handshake) as s:
             s.settimeout(timeout)
             return s.recv(8)
     except OSError:  # ssl.SSLError and TlsRequired included

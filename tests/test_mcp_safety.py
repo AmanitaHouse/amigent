@@ -107,6 +107,7 @@ class TlsFront:
         self.context.load_cert_chain(str(certfile))
         self.accepted = self.handshakes = 0
         self.refusing = False
+        self.delay = 0.0  # seconds before the handshake: a slow AmiSSL
         listener.listen(8)
         threading.Thread(target=self._accept, daemon=True).start()
 
@@ -142,6 +143,8 @@ class TlsFront:
 
     def _one(self, conn):
         try:
+            if self.delay:
+                threading.Event().wait(self.delay)  # not time.sleep, which tests may shorten
             if not self.plain:
                 conn = self.context.wrap_socket(conn, server_side=True)
                 self.handshakes += 1
@@ -241,7 +244,7 @@ def stage(tmp_path, monkeypatch):
         fake = fake or KeyedFake()
         world = {"wire": Tripwire(plain), "ctl": Tripwire(), "fake": fake,
                  "front": TlsFront(tls_port, fake, served, plain=plain_tls),
-                 "certificate": certificate}
+                 "certificate": certificate, "served": served}
         world["port"] = world["wire"].port
         return world
     monkeypatch.setenv("AMIGENT_KEY", KEY)
@@ -417,6 +420,106 @@ def test_default_mode_keeps_the_plain_paths(stage, monkeypatch):
     with pytest.raises(AmigaError):
         Commands(HOST, world["ctl"].port, world["port"], timeout=5).connect()
     assert world["ctl"].knocks == 1
+
+
+# ---------------------------------------------------------------- TLS only: gone, and back
+
+@pytest.fixture
+def quick(monkeypatch):
+    """AMIGENT_REQUIRE_TLS with short pauses between looks and a short handshake allowance."""
+    monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")
+    nap = time.sleep
+    monkeypatch.setattr(power.time, "sleep", lambda s: nap(0.2))
+    monkeypatch.setattr(tls, "HANDSHAKE_WAIT", 2.0)
+
+
+def _stalled(tmp_path):
+    """A plain tripwire and, on the port after, a pinned TLS port that takes the
+    connection and never answers the handshake."""
+    plain, stalled = _neighbours()
+    stalled.listen(8)  # the system completes the connection; nobody ever accepts it
+    tls.remember(HOST, _certificate(tmp_path, "stalled")[1])
+    return Tripwire(plain), stalled
+
+
+def test_require_tls_restart_checks_on_a_live_and_a_shut_port(stage, quick):
+    world = stage()
+    port = world["port"]
+    assert power.wait_for_port(HOST, port, 5)
+    assert not power.wait_gone(HOST, port, wait=1)
+    world["front"].refuse()
+    assert power.wait_gone(HOST, port, wait=5)
+    assert not power.wait_for_port(HOST, port, 1)
+    assert world["fake"].keys_heard == []  # looking sends no key
+    _no_plain(world)
+
+
+def test_require_tls_a_stalled_handshake_is_neither_gone_nor_back(tmp_path, quick):
+    wire, stalled = _stalled(tmp_path)
+    try:
+        assert not power.wait_gone(HOST, wire.port, wait=1), "a stalled handshake is not a restart"
+        assert not power.wait_for_port(HOST, wire.port, 1)
+    finally:
+        stalled.close()
+    assert wire.knocks == 0
+
+
+@pytest.mark.parametrize("case", ["wrong certificate", "no TLS behind the port"])
+def test_require_tls_a_failed_handshake_is_neither_gone_nor_back(stage, quick, case):
+    world = stage(pin="other" if case == "wrong certificate" else "same",
+                  plain_tls=case == "no TLS behind the port")
+    assert not power.wait_gone(HOST, world["port"], wait=1)
+    assert not power.wait_for_port(HOST, world["port"], 1)
+    assert world["front"].accepted >= 2 and world["fake"].keys_heard == []
+    _no_plain(world)
+
+
+def test_require_tls_wait_for_port_waits_out_a_slow_handshake(stage, quick, monkeypatch):
+    monkeypatch.setattr(tls, "HANDSHAKE_WAIT", 30.0)
+    world = stage()
+    world["front"].delay = 6.0  # longer than the 5 s connect timeout
+    assert power.wait_for_port(HOST, world["port"], 20)
+    assert world["front"].handshakes == 1
+    _no_plain(world)
+
+
+def test_require_tls_wait_for_port_sees_the_amiga_come_back(stage, quick):
+    world = stage()
+    port = world["port"]
+    world["front"].refuse()
+    back = threading.Timer(1.0, lambda: world.update(
+        front=TlsFront(_bound(port + 1), world["fake"], world["served"])))
+    back.start()
+    try:
+        assert power.wait_for_port(HOST, port, 20)
+    finally:
+        back.cancel()
+    assert world["front"].handshakes == 1
+    _no_plain(world)
+
+
+def test_require_tls_restart_is_not_inferred_from_a_stalled_handshake(tmp_path, quick, monkeypatch,
+                                                                      machine_session):
+    wire, stalled = _stalled(tmp_path)
+    monkeypatch.setattr(machine_session, "host", HOST)
+    monkeypatch.setattr(server, "SCREEN_PORT", wire.port)
+    monkeypatch.setattr(server, "reboot", lambda *a: None)  # C:Reboot ran, or so it says
+    monkeypatch.setattr(server, "wait_gone", lambda host, port: power.wait_gone(host, port, wait=1))
+    monkeypatch.setattr(server, "wait_for_port", lambda *a: pytest.fail("took the restart as done"))
+    try:
+        with pytest.raises(AmigaError, match="still up"):
+            server.amiga_restart()
+    finally:
+        stalled.close()
+    assert wire.knocks == 0
+
+
+def test_default_mode_restart_checks_stay_plain(stage, monkeypatch):
+    """Without the switch, gone and back are the plain hello, as before."""
+    world = stage()
+    assert power.wait_for_port(HOST, world["port"], 5)
+    assert not power.wait_gone(HOST, world["port"], wait=1)
+    assert world["wire"].knocks >= 2 and world["front"].accepted == 0
 
 
 # ---------------------------------------------------------------- read only, on the wire

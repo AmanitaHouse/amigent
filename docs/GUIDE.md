@@ -879,8 +879,10 @@ or the close gadget ends it, C clears the log.
   certificate end the attempt before a byte reaches a plain port. There is no
   fallback to `amigactld`, no search of the network for a moved Amiga
   (`amiga_find` with an address still works), and a refused TLS port is not
-  explained from the plain port's hello. `amiga_restart` waits on the TLS port;
-  `amiga_machines` and the overview count an Amiga as reachable only there.
+  explained from the plain port's hello. `amiga_restart` waits on the TLS port:
+  gone once it takes no connection, back once the pinned `amigentd` says hello,
+  with up to 30 seconds for a slow handshake. `amiga_machines` and the overview
+  count an Amiga as reachable only there.
 - `AMIGENT_READ_ONLY=1` makes `amigent-server` offer only `amiga_list`,
   `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
   `amiga_installs`, for every saved Amiga (`machine=`). Every other tool, and

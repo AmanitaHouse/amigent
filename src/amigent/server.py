@@ -4923,6 +4923,9 @@ def amiga_listen(seconds: float = 1.0) -> list:
     count is bytes received from the daemon, not a claim that they were heard.
     """
     seconds = _listen_seconds(seconds)
+    if not _with_ctl(lambda: callable(getattr(_session().ctl, "audio", None))):  # amigactld
+        return ["listening needs amigentd's command channel; this connection uses the older "
+                "amigactld. Run amigent-setup --update to install amigentd"]
     info = _with_ctl(_session().ctl.sysinfo)
     if info.get("audio") != "1":
         return ["this Amiga has no AHI mix to hear"]

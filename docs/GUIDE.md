@@ -927,6 +927,20 @@ Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's a
 The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
 whenever something in `src/native/amiga/` changes and keeps them as an artifact of the run.
 
+For the Apollo build (`src/native/amiga/Makefile.apollo`), the AUDIO task
+lifecycle, per-page Hear subscription and PCM pacing changes have been verified
+by:
+
+- Compilation: `amigentd.apollo`, `amigent-apollo-probe` and
+  `amigent-monitor.apollo` build without warnings with ApolloCrossDev GCC 6.5
+  (Stable and Dev) and with GCC 16 in CI.
+- Simulation: the offline test suite runs the daemon's AUDIO task code against
+  a simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
+  PCM and pages.
+
+Neither compilation nor simulation is physical V4-SA acceptance; hardware
+acceptance on a V4-SA remains separate.
+
 ## Translations
 
 Each language of the remote desktop is one file in

@@ -17,10 +17,21 @@ APOLLO_AUDIO = {
 }
 
 
+class Page:
+    """An open page: what the viewer sent it."""
+
+    def __init__(self):
+        self.got = []
+
+    def send(self, data):
+        self.got.append(data)
+
+
 def _page(amiga=None, online=True):
     viewer = Viewer("192.0.2.10", screen_port=1, ctl_port=1)
     viewer.screen.flags = PLAIN_CLOSED
-    viewer.clients.add(object())
+    viewer.page = Page()
+    viewer.clients.add(viewer.page)
     viewer.online = online
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
@@ -83,20 +94,20 @@ def test_protocol6_alone_is_not_apollo_evidence():
 
 def test_submit_rejects_hear_when_ineligible():
     viewer = _page(amiga={"os": "AmigaOS", "audio": "1", "daemon_protocol": 6})
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.hear is False
     assert ("audio", {"on": False}) in viewer.sent
 
 
 def test_submit_allows_hear_when_eligible():
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.hear is True and viewer._audio_ready()
 
 
 def test_disconnect_clears_amiga_and_hear():
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.hear is True
     viewer._set_online(False, "the Amiga does not answer")
     assert viewer.hear is False
@@ -107,7 +118,7 @@ def test_disconnect_clears_amiga_and_hear():
 def test_retiring_the_machine_clears_capabilities(monkeypatch):
     """1.5.0: an address edit or removal retires the viewer; Hear must not outlive it."""
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.hear is True
     viewer.retire()
     assert viewer.hear is False and viewer.amiga == {}
@@ -133,22 +144,39 @@ def test_connecting_elsewhere_does_not_move_the_saved_machine(monkeypatch):
 
 def test_reconnect_requires_fresh_apollo_capabilities():
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     viewer._set_online(False, "lost")
     viewer._set_online(True)
     assert viewer.amiga == {}
     assert not viewer._audio_ready()
     viewer.amiga = dict(APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer.hear is True and viewer._audio_ready()
 
 
 def test_audio_ready_stops_active_hear_when_eligibility_lost():
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     viewer.amiga = {"os": "AmigaOS", "cpu": "68040", "audio": "1", "daemon_protocol": 6}
     assert not viewer._audio_ready()
     assert viewer.hear is False
+
+
+def test_the_hear_label_is_translated_in_every_language():
+    import json
+    import re
+
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    button = html.split('id="hear"', 1)[1].split(">", 1)[0]
+    assert 'data-i18n-label="hear"' in button and "Hear the Amiga" not in button
+    script = (WEB / "ui.js").read_text(encoding="utf-8")
+    codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))
+    english = json.loads((WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+    assert english["hear"] == "Hear the Amiga"
+    assert codes == {p.stem for p in (WEB / "locales").glob("*.json")}
+    for code in codes - {"en"}:
+        texts = json.loads((WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"))
+        assert texts.get("hear", "").strip() and texts["hear"] != english["hear"], code
 
 
 def test_page_source_enforces_visibility_gates():
@@ -168,7 +196,7 @@ def test_page_source_enforces_visibility_gates():
 
 def test_normal_activation_and_deactivation_still_work():
     viewer = _page(amiga=APOLLO_AUDIO)
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert viewer._hearing() and viewer._audio_ready()
-    viewer.submit({"t": "audio", "on": False})
+    viewer.submit({"t": "audio", "on": False}, viewer.page)
     assert not viewer._hearing()

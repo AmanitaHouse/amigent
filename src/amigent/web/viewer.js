@@ -238,14 +238,21 @@
     return !!(info && (info.os === "ApolloOS" || String(info.cpu || "").includes("68080")));
   }
 
-  // Hear is visible only for an active Apollo connection with protocol ≥ 6
-  // and SYSINFO audio=1. Protocol 6 alone is not Apollo evidence.
+  // Hear is visible only for an active Apollo connection with protocol >= 6
+  // and valid negotiated AUDIO capability: canonical upstream audio=49
+  // (without pip=1 or emu68=1 conflict) or legacy protocol-6 audio=1 (without
+  // emu68=1 conflict). Protocol 6 alone is not Apollo evidence.
   function infoHearEligible(info) {
     if (!info || typeof info !== "object") return false;
     if (!apolloMachine(info)) return false;
     const proto = Number(info.daemon_protocol);
     if (!Number.isFinite(proto) || proto < 6) return false;
-    return info.audio === "1";
+    const audio = String(info.audio || "").trim();
+    const emu68 = String(info.emu68 || "").trim();
+    const pip = String(info.pip || "").trim();
+    if (emu68 === "1") return false;
+    if (audio === "49") return pip !== "1";
+    return proto === 6 && audio === "1";
   }
 
   function hearEligible(info) {

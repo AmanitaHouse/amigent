@@ -32,7 +32,8 @@ from pathlib import Path
 from . import __version__, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
+from .channel import (AUDIO, LEGACY_AUDIO_6, LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands,
+                      apollo_machine, audio_uses_tls, feature_opcode, pc_outdated)
 from .daemons import SPECS, describe_connected
 from .paths import AMIGA
 from .system import (OS_NAMES, apply_loaded, attn_flags, describe_fpu, describe_system,  # noqa: F401
@@ -143,32 +144,28 @@ class PcmPace:
         return True
 
 
-def apollo_machine(info: dict | None) -> bool:
-    """Same Apollo identity the Viewer page uses for memory/Hear labelling."""
-    if not info:
-        return False
-    if info.get("os") == "ApolloOS":
-        return True
-    return "68080" in str(info.get("cpu") or "")
-
-
 def hear_eligible(info: dict | None, *, connected: bool = True) -> bool:
     """Whether stock Viewer Hear may be shown or start AUDIO.
 
     Requires an active connection, Apollo identity (not protocol alone),
-    protocol ≥ 6, and SYSINFO ``audio=1``. Protocol 6 without Apollo stays hidden.
+    protocol >= 6, and valid negotiated AUDIO capability (canonical upstream
+    ``audio=49`` without ``pip=1``/``emu68=1`` conflicts, or legacy protocol-6
+    ``audio=1`` without ``emu68=1``). Protocol 6 without Apollo stays hidden.
     """
     if not connected or not info:
         return False
     if not apollo_machine(info):
         return False
+    raw_proto = info.get("daemon_protocol")
+    if isinstance(raw_proto, bool):
+        return False
     try:
-        protocol = int(info.get("daemon_protocol") or 0)
+        protocol = int(raw_proto or 0)
     except (TypeError, ValueError):
         return False
     if protocol < LOADED_PROTOCOL:
         return False
-    return info.get("audio") == "1"
+    return feature_opcode(protocol, "AUDIO", info) in (AUDIO, LEGACY_AUDIO_6)
 
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
@@ -564,7 +561,7 @@ class Viewer:
             return bool(self.hearers & self.clients)
 
     def _audio_ready(self) -> bool:
-        """Whether this connection may stream Hear (Apollo + protocol ≥ 6 + audio=1)."""
+        """Whether this connection may stream Hear (Apollo + protocol >= 6 + negotiated AUDIO)."""
         if hear_eligible(self.amiga, connected=self.online is True):
             return True
         if self.hear:
@@ -675,7 +672,8 @@ class Viewer:
     def _media(self) -> None:
         """ARNE audio only after the page asks, while a page is open.
 
-        AUDIO is opcode 48 on its own command channel. The screen connection is
+        AUDIO uses the negotiated opcode (canonical 49, or legacy 48) on its own
+        command channel. The screen connection is
         not this socket. When the daemon has closed the plain port, this socket
         is TLS. A failed TLS handshake is not retried in the clear. Opening the
         window never starts the mix.
@@ -767,6 +765,8 @@ class Viewer:
                 "tcp": info.get("bsdsocket", ""),
                 "board": info.get("board", ""), "board_name": info.get("board_name", ""),
                 "audio": info.get("audio", ""),
+                "emu68": info.get("emu68", ""),
+                "pip": info.get("pip", ""),
                 "chip_free": reported_bytes(info, "chip_free"),
                 "chip_total": counted_bytes(info, "chip_total"),
                 "fast_free": counted_bytes(info, "fast_free"),

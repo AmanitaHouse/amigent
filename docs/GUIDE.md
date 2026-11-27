@@ -943,6 +943,24 @@ by:
 Neither compilation nor simulation is physical V4-SA acceptance; hardware
 acceptance on a V4-SA remains separate.
 
+### Apollo AUDIO opcode alignment and hardware status
+
+Upstream is authoritative for protocol opcode assignments:
+
+- **Authoritative upstream protocol:** opcode `48` is `EMU68`, opcode `49` is
+  `AUDIO` (`audio=49` in SYSINFO), PIP has no opcode assignment, and opcode `50`
+  is unassigned.
+- **Transitional fork host compatibility:** the host negotiates canonical
+  `AUDIO` on opcode `49` (`audio=49`), while continuing to support deployed fork
+  Apollo daemons advertising legacy `audio=1` (opcode `48` on protocol 6 and
+  opcode `38` on protocol 5) through an explicit legacy compatibility path.
+  Ambiguous or contradictory capabilities (`audio=49` with `pip=1`, or `audio=1`
+  / `audio=49` with `emu68=1`) fail closed.
+- **Hardware status:** the packaged fork `amigentd.apollo` (`audio=1`, legacy
+  opcode `48`) retains its prior V4-SA acceptance baseline and is not replaced
+  by this host-side alignment. The upstream native `AUDIO` opcode-49
+  implementation has not yet passed physical V4-SA acceptance.
+
 ## Translations
 
 Each language of the remote desktop is one file in

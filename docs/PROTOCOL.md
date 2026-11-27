@@ -500,8 +500,24 @@ else.
 | 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
-| 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO). Not built on Apollo, where 48 is AUDIO |
-| 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only: there 48 is AUDIO and EMU68 is not built. A client takes the meaning from SYSINFO (`audio=1` or `emu68=1`), never from the opcode alone. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. Opcode 49 is reserved and is not assigned. |
+| 48 | EMU68 | 0 all, 2 counters, 1 set | x = payload length (for 1) | for 1: register, value, mask as three `u32` each | text, see [emu68](#emu68) (amigentd 1.5.0, `emu68` in SYSINFO). Authoritative upstream opcode 48 |
+| 49 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Authoritative upstream Apollo AUDIO (`audio=49` in SYSINFO, protocol >= 6). One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. Not yet accepted on physical V4-SA hardware. PIP is not assigned an opcode; opcode 50 is unassigned. |
+
+Transitional fork legacy compatibility (host-side only, strictly capability-negotiated):
+
+- Deployed fork protocol-6 Apollo daemons (including the current packaged
+  `amigentd.apollo` with prior V4-SA acceptance) advertise `audio=1` and answer
+  AUDIO on legacy opcode `48` (where EMU68 is not built). The host dispatches
+  opcode `48` as AUDIO only when `protocol == 6`, `audio=1`, and `emu68 != 1`,
+  and refuses EMU68 on opcode `48` whenever `audio=1` is present.
+- Historical fork protocol-5 daemons advertising `audio=1` use legacy AUDIO on
+  opcode `38` (with `LOADED` at `40` when `modules=1` and `TASKS` at `41` when
+  `tasklist=1`). Opcodes `48` and `49` are never sent on protocol 5.
+- Historical fork PIP experiments (formerly `39` on protocol 5 and unimplemented
+  `49` on early protocol 6) were retired; PIP has no active opcode, no host API,
+  and no upstream allocation. Contradictory (`audio=49` with `pip=1`, `audio=1`
+  or `audio=49` with `emu68=1`) or unknown `audio=` values fail closed without
+  sending a command.
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -592,6 +608,10 @@ separated by tabs.
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
 - From amigentd 1.5.0 SYSINFO also has `emu68`: present when EMU68 is
   understood, `1` when Emu68 runs on this Amiga, `0` otherwise.
+- Authoritative upstream Apollo builds advertise `audio=49` (`CMD_AUDIO` opcode
+  49) alongside `os=ApolloOS`, `board` and `board_name`. Existing packaged fork
+  Apollo builds advertise legacy `audio=1` (opcode 48 on protocol 6; opcode 38
+  on protocol 5). PIP is not advertised or allocated; opcode 50 is unassigned.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.

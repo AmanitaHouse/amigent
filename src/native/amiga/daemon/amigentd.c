@@ -88,8 +88,9 @@ void UnLockBitMap(APTR handle);
 #endif
 
 #ifdef AMIGENT_APOLLO
-/* The 68000 probe and this daemon share the identification. AUDIO is opcode
- * 48 on this build. Opcode 49 is reserved for PIP and is not implemented. */
+/* The 68000 probe and this daemon share the identification. This fork build
+ * still carries legacy AUDIO on opcode 48; upstream assigns opcode 49 to
+ * CMD_AUDIO and PIP is not implemented. */
 #include "apollo_audio.h"
 BOOL apollo_os_here(void);
 UWORD apollo_board(void);
@@ -158,7 +159,7 @@ enum {
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
 #ifdef AMIGENT_APOLLO
-    CMD_AUDIO = 48  /* ARNE mix. Apollo builds only; there it replaces EMU68. 49 is reserved for PIP. */
+    CMD_AUDIO = 48  /* ARNE mix (legacy fork opcode 48; upstream assigns opcode 49 to AUDIO; no PIP). */
 #else
     CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
 #endif

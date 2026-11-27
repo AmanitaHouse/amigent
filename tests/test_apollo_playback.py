@@ -24,10 +24,12 @@ DAEMON = (132140, "0f1405a1d3494e1bebf6185030139c7858d5636a22cd565a8b432143c90c7
 
 
 def test_audio_capability_follows_the_advertisement_and_the_protocol():
+    assert feature_opcode(6, "AUDIO", {"audio": "49"}) == 49
     assert feature_opcode(6, "AUDIO", {"audio": "1"}) == 48
     assert feature_opcode(6, "AUDIO", {}) is None
     assert feature_opcode(6, "AUDIO", {"audio": "0"}) is None
     assert feature_opcode(5, "AUDIO", {"audio": "1"}) == 38
+    assert feature_opcode(5, "AUDIO", {"audio": "49"}) is None
     assert feature_opcode(5, "AUDIO", {}) is None
     assert feature_opcode(4, "AUDIO", {"audio": "1"}) is None
     viewer = (WEB.parent / "viewer.py").read_text(encoding="utf-8")
@@ -236,8 +238,10 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     assert server._listen_seconds(2) == 2
 
     class Quiet:
+        protocol = 6
+
         def sysinfo(self):
-            return {"audio": "0"}
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "0"}
 
         def audio(self, ms):
             raise AssertionError("the mix was read")
@@ -246,9 +250,24 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     assert server.amiga_listen(1) == ["this Amiga has no AHI mix to hear"]
 
-    class Down:
+    class NonApollo49:
+        protocol = 6
+
         def sysinfo(self):
-            return {"audio": "1"}
+            return {"os": "AmigaOS", "cpu": "68020", "audio": "49"}
+
+        def audio(self, ms):
+            raise AssertionError("non-Apollo build must not be dispatched AUDIO")
+
+    monkeypatch.setattr(server._session(), "ctl", NonApollo49())
+    refused = server.amiga_listen(1)
+    assert len(refused) == 1 and "Apollo" in refused[0]
+
+    class Down:
+        protocol = 6
+
+        def sysinfo(self):
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "1"}
 
         def audio(self, ms):
             raise AmigaError("the Amiga does not answer")
@@ -260,8 +279,10 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     pcm = b"\x00\x00" * int(0.2 * 48000 * 2)
 
     class Playing:
+        protocol = 6
+
         def sysinfo(self):
-            return {"audio": "1"}
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "1"}
 
         def audio(self, ms):
             assert ms == 200
@@ -272,13 +293,30 @@ def test_listen_validates_and_reports_transport_results(monkeypatch):
     assert text == f"heard {len(pcm)} bytes at 48000 Hz"
     assert block.data == pcm_wav(pcm, 48000) and block.data.startswith(b"RIFF")
 
+    class Playing49:
+        protocol = 6
+
+        def sysinfo(self):
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "49", "emu68": "0"}
+
+        def audio(self, ms):
+            assert ms == 200
+            return 48000, pcm
+
+    monkeypatch.setattr(server._session(), "ctl", Playing49())
+    text49, block49 = server.amiga_listen(0.2)
+    assert text49 == f"heard {len(pcm)} bytes at 48000 Hz"
+    assert block49.data == pcm_wav(pcm, 48000)
+
     clock = {"t": 0.0}
     monkeypatch.setattr(server.time, "monotonic", lambda: clock.__setitem__("t", clock["t"] + 1) or clock["t"])
     monkeypatch.setattr(server.time, "sleep", lambda _seconds: None)
 
     class Silent:
+        protocol = 6
+
         def sysinfo(self):
-            return {"audio": "1"}
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "1"}
 
         def audio(self, ms):
             return 48000, b""
@@ -292,7 +330,7 @@ def test_listen_on_amigactld_says_so_and_on_amigentd_still_listens(monkeypatch):
 
     class OldDaemon(AmigaCtl):
         def sysinfo(self):
-            return {"audio": "1"}  # even when it claims the mix, it has no CMD_AUDIO
+            return {"os": "ApolloOS", "cpu": "68080", "audio": "1"}  # even when it claims the mix, it has no CMD_AUDIO
 
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     old = Commands("192.0.2.1")
@@ -303,7 +341,8 @@ def test_listen_on_amigactld_says_so_and_on_amigentd_still_listens(monkeypatch):
 
     pcm = b"\x01\x00\x02\x00" * 9600
     channel = AmigaChannel.__new__(AmigaChannel)
-    channel.sysinfo = lambda: {"audio": "1"}
+    channel.protocol = 6
+    channel.sysinfo = lambda: {"os": "ApolloOS", "cpu": "68080", "audio": "1"}
     channel.audio = lambda ms: (48000, pcm)
     new = Commands("192.0.2.1")
     new.backend = channel

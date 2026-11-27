@@ -4881,7 +4881,7 @@ def _listen_seconds(seconds) -> float:
 
 
 def _listen_clip(seconds: float) -> tuple[int, bytes]:
-    """Gather up to seconds of the Apollo mix. Opcode 48, not LOADED."""
+    """Gather up to seconds of the Apollo mix via the negotiated AUDIO opcode."""
     from .channel import pcm_wav
     deadline = time.monotonic() + max(seconds, 0.4) * 12
     chunks: list[bytes] = []
@@ -4919,16 +4919,34 @@ def amiga_listen(seconds: float = 1.0) -> list:
 
     A short clip of the mix arne.audio is sending to the DAC. Nothing comes
     back when the Amiga is quiet, or when the sound is not going through AHI.
-    seconds is from 0.2 to 2. This is opcode 48, not LOADED. The returned
-    count is bytes received from the daemon, not a claim that they were heard.
+    seconds is from 0.2 to 2. Uses canonical upstream CMD_AUDIO (opcode 49,
+    audio=49) or negotiated legacy Apollo AUDIO (opcode 48 on protocol 6 /
+    opcode 38 on protocol 5 with audio=1). Requires Apollo hardware/OS identity
+    so a non-Apollo build advertising audio=49 is never dispatched AUDIO. The
+    returned count is bytes received from the daemon, not a claim that they
+    were heard.
     """
+    from .channel import apollo_machine, audio_capability_error, feature_opcode
     seconds = _listen_seconds(seconds)
     if not _with_ctl(lambda: callable(getattr(_session().ctl, "audio", None))):  # amigactld
         return ["listening needs amigentd's command channel; this connection uses the older "
                 "amigactld. Run amigent-setup --update to install amigentd"]
     info = _with_ctl(_session().ctl.sysinfo)
-    if info.get("audio") != "1":
+    protocol = _with_ctl(
+        lambda: getattr(getattr(_session().ctl, "backend", None), "protocol", None)
+        if getattr(_session().ctl, "backend", None) is not None
+        else getattr(_session().ctl, "protocol", None)
+    )
+    audio = str(info.get("audio") or "").strip()
+    if audio in ("", "0"):
         return ["this Amiga has no AHI mix to hear"]
+    err = audio_capability_error(protocol, info)
+    if err:
+        return [f"refusing AUDIO: {err}"]
+    if feature_opcode(protocol, "AUDIO", info) is None:
+        return ["this Amiga has no AHI mix to hear"]
+    if not apollo_machine(info):
+        return ["this Amiga is not an Apollo/68080 machine; refusing AUDIO"]
     rate, wav = _listen_clip(seconds)
     if not wav:
         return ["nothing is playing through AHI"]

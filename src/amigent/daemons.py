@@ -200,10 +200,14 @@ def describe_connected(protocol: int, version: str, file_bytes: bytes | None,
     family. What the daemon did not tell is "" (a page shows its own localised
     "not reported"); this module only reports and never selects or installs.
     """
+    from .channel import feature_opcode
     spec = identify(file_bytes, directory) if file_bytes else None
-    capabilities = [name for key, name in (("audio", "AUDIO"), ("loaded", "loaded"), ("probe", "probe"),
-                                           ("poke", "POKE"), ("trace", "TRACE"))
-                    if info.get(key) == "1"]
+    capabilities = []
+    if feature_opcode(protocol, "AUDIO", info) is not None:
+        capabilities.append("AUDIO")
+    for key, name in (("loaded", "loaded"), ("probe", "probe"), ("poke", "POKE"), ("trace", "TRACE")):
+        if info.get(key) == "1":
+            capabilities.append(name)
     return {
         "daemon_protocol": protocol if protocol else None,
         "daemon_version": (version or "").strip(),

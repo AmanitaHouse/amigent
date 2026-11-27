@@ -27,6 +27,7 @@
 
 typedef int8_t BYTE;
 #define EWOULDBLOCK_SIM 35
+#undef EWOULDBLOCK  /* MinGW's stdlib.h brings errno.h with its own */
 #define EWOULDBLOCK EWOULDBLOCK_SIM
 
 struct Node { BYTE ln_Pri; };

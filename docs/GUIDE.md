@@ -924,6 +924,42 @@ Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's a
 The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
 whenever something in `src/native/amiga/` changes and keeps them as an artifact of the run.
 
+### Apollo V4 / 68080 (source-only)
+
+Release packages (wheels, source distributions, and Aminet `.lha` archives) ship
+the classic `amigentd`, `amigentd.000`, `amigent-status`, and `amigent-monitor`
+executables only. No prebuilt `amigentd.apollo`, `amigent-apollo-probe`, or
+`amigent-monitor.apollo` executable is included in upstream release packages.
+`amigent-setup` keeps an existing Apollo daemon in place during a normal update
+when no packaged `amigentd.apollo` is present (`--force` installs classic `amigentd`).
+
+To build the Apollo binaries (`build/apollo/amigentd.apollo`,
+`build/apollo/amigent-apollo-probe`, and `build/apollo/amigent-monitor.apollo`)
+from source:
+
+- With ApolloCrossDev (`GCC-6.50-Stable`, which supports `-m68080`):
+  `APOLLOCROSSDEV=/path/to/ApolloCrossDev src/native/amiga/build-amigentd-apollo`
+  (add `install` to stage locally into `src/amigent/amiga/bin/`).
+- With GCC 16 (`amigadev/crosstools:m68k-amigaos`, as run by the `amiga` GitHub
+  Actions workflow into the `amiga-gcc` artifact): upstream GCC 16 rejects
+  `-m68080`, so CI passes `CPU_FLAG=-m68020`:
+  `make -f src/native/amiga/Makefile.apollo PREFIX="$CROSS_ROOT" CC=m68k-amigaos-gcc CPU_FLAG=-m68020`
+  (produces 68020-targeted CI build verification binaries with `-DAMIGENT_APOLLO`;
+  not hardware-tested).
+
+**Status: untested on hardware.** AUDIO (opcode 49), the Viewer's Hear button
+and `amiga_listen` have not yet been run on a physical Apollo V4-SA from this
+source. What has been checked is only this:
+
+- Compilation: the Apollo binaries build without warnings with ApolloCrossDev
+  GCC 6.5 (Stable and Dev) and with GCC 16 in CI.
+- Simulation: the test suite runs the daemon's AUDIO task code against a
+  simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
+  PCM and pages.
+
+Neither says the Apollo part works on a V4-SA. Until it has been accepted
+there, treat Apollo support as experimental.
+
 ## Translations
 
 Each language of the remote desktop is one file in

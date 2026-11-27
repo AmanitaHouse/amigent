@@ -4829,6 +4829,12 @@ def _close_for_update() -> None:
     with sessions._lock:
         open_now = list(sessions._sessions.values())
     for session in open_now:
+        viewer = session.viewer
+        if viewer is not None:
+            try:
+                viewer.stop_hear()  # Hear's own audio link goes before the daemon is replaced
+            except Exception:  # noqa: BLE001 - a stuck viewer must not block the update
+                pass
         try:
             with session.calls, bound(session):
                 with _exclusive():
@@ -4862,6 +4868,76 @@ def main() -> None:
     if not READ_ONLY:  # it writes update.json and asks PyPI; neither is reading the Amiga
         update.refresh_in_background()
     mcp.run()
+
+
+def _listen_seconds(seconds) -> float:
+    """The clip length the tool accepts: a number from a fifth of a second to two."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    value = float(seconds)
+    if not 0.2 <= value <= 2.0:
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    return value
+
+
+def _listen_clip(seconds: float) -> tuple[int, bytes]:
+    """Gather up to seconds of the Apollo mix. Opcode 49, not LOADED or EMU68."""
+    from .channel import pcm_wav
+    deadline = time.monotonic() + max(seconds, 0.4) * 12
+    chunks: list[bytes] = []
+    rate = 0
+    last = b""
+    want = int(seconds * 48000 * 4)
+    while time.monotonic() < deadline and sum(len(c) for c in chunks) < want:
+        got_rate, pcm = _with_ctl(lambda: _session().ctl.audio(200))
+        if pcm and pcm != last:
+            if rate and got_rate != rate:
+                break
+            rate = got_rate or rate
+            last = pcm
+            chunks.append(pcm)
+            if rate:
+                want = int(seconds * rate * 4)
+            continue
+        time.sleep(0.002)
+    pcm = b"".join(chunks)
+    return rate, pcm_wav(pcm, rate) if pcm and rate else b""
+
+
+def _audio_result(wav: bytes):
+    """An MCP audio block, from whichever module this sdk version exports it."""
+    try:
+        from mcp.server.fastmcp import Audio as McpAudio
+    except ImportError:
+        from mcp.server.fastmcp.utilities.types import Audio as McpAudio
+    return McpAudio(data=wav, format="wav")
+
+
+@mcp.tool()
+def amiga_listen(seconds: float = 1.0) -> list:
+    """Hear what an AHI program is playing on ApolloOS.
+
+    A short clip of the mix arne.audio is sending to the DAC. Nothing comes
+    back when the Amiga is quiet, or when the sound is not going through AHI.
+    seconds is from 0.2 to 2. Uses CMD_AUDIO (opcode 49), when SYSINFO
+    advertises audio=49. The returned count is bytes received from the daemon,
+    not a claim that they were heard.
+    """
+    from .channel import AUDIO
+    seconds = _listen_seconds(seconds)
+    if not _with_ctl(lambda: callable(getattr(_session().ctl, "audio", None))):  # amigactld
+        return ["listening needs amigentd's command channel; this connection uses the older "
+                "amigactld. Run amigent-setup --update to install amigentd"]
+    info = _with_ctl(_session().ctl.sysinfo)
+    audio = str(info.get("audio") or "")
+    if audio == "1":
+        return ["this Apollo daemon advertises legacy audio=1 (opcode 48); update it for opcode 49 (audio=49)"]
+    if audio != str(AUDIO):
+        return ["this Amiga has no AHI mix to hear"]
+    rate, wav = _listen_clip(seconds)
+    if not wav:
+        return ["nothing is playing through AHI"]
+    return [f"heard {len(wav) - 44} bytes at {rate} Hz", _audio_result(wav)]
 
 
 if __name__ == "__main__":

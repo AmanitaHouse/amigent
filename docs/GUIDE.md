@@ -896,11 +896,12 @@ or the close gadget ends it, C clears the log.
   `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
   PowerPC section (it runs WarpOS's `stat`), and the server does not look for
   a new Amigent release. Its instructions to the AI name only those six tools.
-  `amiga_list` lists one directory at a time there, never recursively. These
-  tools carry the MCP hint `readOnlyHint`; hints are for the AI app, the server
-  does the enforcing. The default server gives no hints: an AI app may act on
-  them, and its tools have not all been audited for what a hint would claim.
-  These tools do show the Amiga's file names, screen text and tasks to the AI.
+  `amiga_list` lists one directory at a time there, never recursively. With
+  mcp 1.7 or later these tools carry the MCP hint `readOnlyHint`; hints are
+  for the AI app, the server does the enforcing. The default server gives no
+  hints: an AI app may act on them, and its tools have not all been audited
+  for what a hint would claim. These tools do show the Amiga's file names,
+  screen text and tasks to the AI.
 - What `AMIGENT_REQUIRE_TLS` does not cover: the link to WinUAE's GDB server
   (`amiga_emulator`, `amiga_trace` on an emulator) is plain TCP on the PC;
   `amiga_pistorm` uses ssh and `amiga_serial_log` a local serial port. The
@@ -933,7 +934,8 @@ by:
 
 - Compilation: `amigentd.apollo`, `amigent-apollo-probe` and
   `amigent-monitor.apollo` build without warnings with ApolloCrossDev GCC 6.5
-  (Stable and Dev) and with GCC 16 in CI.
+  (Stable and Dev); the GitHub Actions GCC 16 `amiga` workflow builds only the
+  classic binaries.
 - Simulation: the offline test suite runs the daemon's AUDIO task code against
   a simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
   PCM and pages.

@@ -5631,7 +5631,7 @@ static BOOL c_compress(struct link *l, LONG level)
 
 /* ---- hooks: what programs draw, and their debug output -------------------- */
 
-/* Each patched function gets a stub of its own in front, from amiga/hookstub.s:
+/* Each patched function gets a stub of its own in front, from src/native/amiga/daemon/hookstub.s:
  * it counts itself busy, calls our hook while one is set, and goes on to the
  * original with all registers as they came. Stubs are never freed, since a task
  * may have just stepped into one when the vector goes back; when a later patch
@@ -7358,7 +7358,7 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 
 /* ---- trace: tracepoints in a running program ----------------------------
  * A tracepoint puts TRAP #15 over one instruction of a program's code and
- * makes our trap handler (amiga/trapstub.s) that task's tc_TrapCode. When the
+ * makes our trap handler (src/native/amiga/daemon/trapstub.s) that task's tc_TrapCode. When the
  * program gets there, the handler keeps the registers and a bit of the stack,
  * puts the instruction back and lets the program go on as if nothing
  * happened: it fires once, and the program never stops.

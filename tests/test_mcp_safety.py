@@ -25,6 +25,7 @@ import types
 from pathlib import Path
 
 import pytest
+from mcp.types import InitializeResult
 
 import amigent.server as server
 from amigent import machines, net, others, power, roster, tls
@@ -38,6 +39,7 @@ from fakeamiga import FakeAmiga
 
 HOST = "127.0.0.1"
 KEY = "canary-key-3f9b0c71"
+INSTRUCTED = "instructions" in InitializeResult.model_fields  # mcp 1.2 sends none
 SRC = Path(__file__).resolve().parents[1] / "src"
 FORBIDDEN = {  # tool: arguments that would change the Amiga if the call got through
     "amiga_exec": {"command": "Delete SYS:#? ALL QUIET"},
@@ -927,7 +929,13 @@ class Stdio:
 
     def stop(self) -> bytes:
         self.proc.stdin.close()
-        assert self.proc.wait(timeout=20) == 0
+        try:
+            code = self.proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:  # mcp 1.6 and 1.7: the stdio server outlives its input
+            self.proc.terminate()
+            self.proc.wait(timeout=20)
+        else:
+            assert code == 0
         return b"".join(self.out) + self.err
 
 
@@ -960,10 +968,10 @@ def test_stdio_read_only_and_tls_only(stage, tmp_path):
     try:
         hello = mcp.start()["result"]
         assert hello["serverInfo"]["name"] == "amigent" and "tools" in hello["capabilities"]
-        assert hello.get("instructions") == server.READ_ONLY_INSTRUCTIONS
+        assert hello.get("instructions") == (server.READ_ONLY_INSTRUCTIONS if INSTRUCTED else None)
         tools = mcp.request("tools/list")["result"]["tools"]
         assert {t["name"] for t in tools} == server.READ_ONLY_TOOLS
-        assert all(_hints(t).get("readOnlyHint") is True for t in tools)
+        assert all(_hints(t).get("readOnlyHint") is (True if server.ANNOTATIONS else None) for t in tools)
         assert all("machine" in t["inputSchema"]["properties"] for t in tools)
         assert mcp.request("resources/list")["result"]["resources"] == []
         assert mcp.request("prompts/list")["result"]["prompts"] == []
@@ -1022,10 +1030,14 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
         fake.close()
     assert set(tools) == {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
     assert len(tools) > len(server.READ_ONLY_TOOLS) and "amiga_exec" in tools
-    assert hello.get("instructions") == server.INSTRUCTIONS
+    assert hello.get("instructions") == (server.INSTRUCTIONS if INSTRUCTED else None)
     assert {"amiga_machines", "amiga_update", "amiga_pi_network", "amiga_emu68_update"} <= set(tools)
     for name, tool in tools.items():
-        assert not _hints(tool), name  # the default server makes no claim, as before
+        hints = _hints(tool)
+        if not server.ANNOTATIONS:
+            assert not hints, name  # mcp before 1.7 has no annotations to give
+            continue
+        assert not hints, name  # the default server makes no claim, as before
     assert not listed.get("isError") and "C" in listed["content"][0]["text"]
     assert ctl.knocks == 0
 

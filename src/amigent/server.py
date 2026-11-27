@@ -93,25 +93,9 @@ INSTRUCTIONS = """Amigent operates registered Amigas.
 READ_ONLY = safety.read_only()
 READ_ONLY_TOOLS = frozenset({"amiga_list", "amiga_screen_text", "amiga_tasks", "amiga_loaded",
                              "amiga_notes", "amiga_installs"})
-# MCP annotations are hints for the client, never the enforcement. Tools named in no
-# set make no claim; that includes ones that only look but were not audited for it.
-# amiga_tasks only looks under AMIGENT_READ_ONLY; otherwise its PowerPC section runs
-# Version, CPU and WarpOS's stat through EXEC, so there it claims nothing.
-READ_ONLY_HINTED = READ_ONLY_TOOLS if READ_ONLY else READ_ONLY_TOOLS - {"amiga_tasks"}
-DESTRUCTIVE_TOOLS = frozenset({
-    "amiga_exec", "amiga_start", "amiga_arexx", "amiga_job", "amiga_run", "amiga_everywhere",
-    "amiga_write_text", "amiga_put", "amiga_move", "amiga_delete", "amiga_memory_write",
-    "amiga_trace", "amiga_task", "amiga_restart", "amiga_power", "amiga_install_undo",
-    "amiga_aminet_install", "amiga_emulator"})
-CHANGING_TOOLS = DESTRUCTIVE_TOOLS | frozenset({
-    "amiga_status", "amiga_find", "amiga_break", "amiga_rexx_ports", "amiga_jobs",
-    "amiga_quiet_monitor", "amiga_drag_measure", "amiga_state", "amiga_screen_diff",
-    "amiga_create_project", "amiga_build", "amiga_mkdir", "amiga_get", "amiga_inventory",
-    "amiga_pause_screen", "amiga_screen_front", "amiga_mouse_relative", "amiga_ui_click",
-    "amiga_menu_select", "amiga_click", "amiga_mouse_move", "amiga_button", "amiga_drag",
-    "amiga_type", "amiga_key", "amiga_hrtmon", "amiga_viewer", "amiga_click_text", "amiga_do",
-    "amiga_link", "amiga_follow", "amiga_clipboard", "amiga_note", "amiga_install_begin",
-    "amiga_install_end", "amiga_software_failure"})
+# MCP annotations are hints for the client, never the enforcement. Only the
+# read-only server gives them, where every tool it offers was audited to only look;
+# the default server makes no claim, so it stays as it was.
 READ_ONLY_INSTRUCTIONS = """Amigent looks at registered Amigas, read-only (AMIGENT_READ_ONLY).
 - The server enforces it: only amiga_list, amiga_screen_text, amiga_loaded,
   amiga_tasks, amiga_notes and amiga_installs exist, and the line to the Amiga
@@ -283,15 +267,9 @@ ANNOTATIONS = ToolAnnotations is not None and "annotations" in inspect.signature
 
 def annotations_for(name: str):
     """The MCP hints for a tool, from the sets above; None where nothing is claimed."""
-    if ToolAnnotations is None:
+    if ToolAnnotations is None or not READ_ONLY or name not in READ_ONLY_TOOLS:
         return None
-    if name in READ_ONLY_HINTED:
-        return ToolAnnotations(readOnlyHint=True)
-    if name in DESTRUCTIVE_TOOLS:
-        return ToolAnnotations(readOnlyHint=False, destructiveHint=True)
-    if name in CHANGING_TOOLS:
-        return ToolAnnotations(readOnlyHint=False)
-    return None
+    return ToolAnnotations(readOnlyHint=True)
 
 
 def _refused(fn):
@@ -2287,6 +2265,9 @@ def _host_path(path: str) -> str:
 @mcp.tool()
 def amiga_list(path: str, recursive: bool = False) -> str:
     """List a directory, e.g. 'Work:Games'. Amiga paths use VOLUME:dir/file."""
+    if recursive and READ_ONLY:
+        raise AmigaError("AMIGENT_READ_ONLY: recursive listing is not offered; list one "
+                         "directory at a time")
     entries = _with_ctl(lambda: _session().ctl.list_dir(path, recursive))
     return "\n".join(
         f"{e['type']:4} {e['size']:>10} {e['date']} {e['name']}" for e in entries

@@ -8,8 +8,8 @@ Versions follow [semver](https://semver.org). The number lives in
 - `AMIGENT_REQUIRE_TLS=1`: TLS with the pinned certificate or no connection.
   No plain dial, no `amigactld` fallback, no network sweep for a moved Amiga,
   no key on a plain line, and no plain hello read to explain a refused TLS
-  port; `amiga_restart` waits on the TLS port, and `amiga_machines` and the
-  overview check reachability there.
+  port; `amiga_restart` waits on the TLS port, with time for a slow handshake,
+  and `amiga_machines` and the overview check reachability there.
 - `AMIGENT_READ_ONLY=1`: `amigent-server` lists and runs only `amiga_list`,
   `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
   `amiga_installs`, on every saved Amiga, refuses every other name, and will
@@ -17,10 +17,8 @@ Versions follow [semver](https://semver.org). The number lives in
   those tools need; `amiga_tasks` leaves out the PowerPC section, which runs
   commands. There is no update check either, and the server's instructions to
   the AI name only those six tools.
-- Tools carry MCP annotations: `readOnlyHint` on the read-only tools,
-  `readOnlyHint: false` on tools that change things, `destructiveHint` on
-  those that can delete, overwrite, run commands or restart. Tools added in
-  1.5.0 carry none yet.
+  `amiga_list` lists one directory at a time there. These six tools carry the
+  MCP hint `readOnlyHint`; the default server gives no hints, as before.
 
 ## 1.5.0 (2026-11-23)
 

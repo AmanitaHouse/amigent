@@ -8548,21 +8548,32 @@ static void yield_close(struct MsgPort *port, struct timerequest *io)
         DeleteMsgPort(port);
 }
 
-/* TRUE when the wait finished. FALSE when stop arrived during it. */
-static BOOL yield_us(struct MsgPort *port, struct timerequest *io, ULONG us)
+/* Asleep until one of wake arrives or us have passed, whichever is first; the
+ * timer request is back when this returns. Without a timer, one vblank. */
+static ULONG yield_wait(struct MsgPort *port, struct timerequest *io, ULONG us, ULONG wake)
 {
     ULONG sigs;
 
+    if (!io) {
+        Delay(1);
+        return SetSignal(0, wake) & wake;  /* taken, as Wait takes them */
+    }
     io->tr_node.io_Command = TR_ADDREQUEST;
-    io->tr_time.tv_secs = 0;
-    io->tr_time.tv_micro = us;
+    io->tr_time.tv_secs = us / 1000000;
+    io->tr_time.tv_micro = us % 1000000;
     SendIO((struct IORequest *)io);
-    sigs = Wait((1UL << port->mp_SigBit) | SIGBREAKF_CTRL_C);
+    sigs = Wait((1UL << port->mp_SigBit) | wake);
     if (!CheckIO((struct IORequest *)io))
         AbortIO((struct IORequest *)io);
     WaitIO((struct IORequest *)io);
     SetSignal(0, 1UL << port->mp_SigBit);
-    return (sigs & SIGBREAKF_CTRL_C) == 0;
+    return sigs & wake;
+}
+
+/* TRUE when the wait finished. FALSE when stop arrived during it. */
+static BOOL yield_us(struct MsgPort *port, struct timerequest *io, ULONG us)
+{
+    return (yield_wait(port, io, us, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) == 0;
 }
 
 /* The TLS pump connects from this machine. A music socket from the PC does not. */
@@ -8576,6 +8587,12 @@ static BOOL peer_local(struct link *l)
         return TRUE;
     return addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK);
 }
+
+/* Between looks at the mix, as the plain path naps: a half lasts about 10 ms. */
+#define AUDIO_LOOK_US 1000
+/* At most this long for the pump to pass a batch on, one vblank. Then the
+ * loop looks again; a session is never ended by it. */
+#define AUDIO_PUMP_US 20000
 
 static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, ULONG *since,
                          UBYTE *out, ULONG *out_len, ULONG *out_sent)
@@ -8592,8 +8609,7 @@ static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, 
     /* Stay above the picture cipher and wait on the timer between looks.
      * Dropping to the bottom and giving the picture one turn let it keep
      * the CPU, and a pass went out only every couple of seconds. */
-    if (plain)
-        nap = yield_io(&nap_port);
+    nap = yield_io(&nap_port);
     audio_hold = 1;
     audio_task = me;
     SetTaskPri(me, 5);
@@ -8650,8 +8666,13 @@ static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, 
         if (apollo_audio_seq() != seq)
             *since = now_ms();
         now = now_ms();
-        if (apollo_audio_seq() == seq && (ULONG)(now - look) < 15)
+        if (apollo_audio_seq() == seq && (ULONG)(now - look) < 15) {
+            if (!yield_us(nap_port, nap, AUDIO_LOOK_US)) {  /* asleep, not polling at 5 */
+                ok = FALSE;
+                break;
+            }
             continue;
+        }
         if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
             ok = FALSE;
             break;
@@ -8665,15 +8686,20 @@ static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, 
         if (*since && (ULONG)(now - *since) > 600)
             break;
         if (*out_len || apollo_audio_pending() >= 4) {
+            if (!plain) {  /* armed first: the pump may pass this batch on at once */
+                SetSignal(0, SIGBREAKF_CTRL_D);
+                audio_wait = 1;
+            }
             if (!audio_push(l, out, out_len, out_sent, *rate, 16384)) {
                 ok = FALSE;
                 break;
             }
             if (!plain) {
-                SetSignal(0, SIGBREAKF_CTRL_D);
-                audio_wait = 1;
+                /* The pump's CTRL_D, or AUDIO_PUMP_US: a pump that went with
+                 * its client never signals, and the next look finds the
+                 * socket closed. */
                 SetTaskPri(me, 3);
-                got = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D);
+                got = yield_wait(nap_port, nap, AUDIO_PUMP_US, SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D);
                 audio_wait = 0;
                 if (got & SIGBREAKF_CTRL_C) {
                     ok = FALSE;

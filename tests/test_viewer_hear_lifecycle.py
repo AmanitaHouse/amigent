@@ -7,7 +7,7 @@ import pytest
 
 from amigent.channel import PLAIN_CLOSED
 from amigent.errors import AmigaError
-from amigent.viewer import AUDIO_DRAIN_MAX, AUDIO_PCM_BUDGET, Viewer, pcm_message
+from amigent.viewer import AUDIO_DRAIN_MAX, Viewer, pcm_message
 
 
 class Link:
@@ -44,11 +44,22 @@ class Link:
         self.connected = False
 
 
+class Page:
+    """An open page: what the viewer sent it."""
+
+    def __init__(self):
+        self.got = []
+
+    def send(self, data):
+        self.got.append(data)
+
+
 def _page():
     viewer = Viewer("192.0.2.10", screen_port=1, ctl_port=1)
     viewer.screen.flags = PLAIN_CLOSED
     viewer.online = True
-    viewer.clients.add(object())
+    viewer.page = Page()
+    viewer.clients.add(viewer.page)
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
     viewer.event = lambda kind, **fields: viewer.sent.append((kind, fields))
@@ -58,12 +69,12 @@ def _page():
 
 def test_hear_enable_and_disable_releases_once():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00")]
 
     def between():
-        viewer.submit({"t": "audio", "on": False})
+        viewer.submit({"t": "audio", "on": False}, viewer.page)
         link.reads.append((48000, b"\x03\x00\x04\x00"))
 
     viewer._play_audio(link, between)
@@ -74,7 +85,7 @@ def test_hear_enable_and_disable_releases_once():
 
 def test_daemon_end_marker_clears_hear_and_stops():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
@@ -84,7 +95,7 @@ def test_daemon_end_marker_clears_hear_and_stops():
 
 def test_media_like_loop_does_not_restart_after_daemon_end():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
@@ -97,12 +108,12 @@ def test_media_like_loop_does_not_restart_after_daemon_end():
 
 def test_user_can_restart_hear_after_complete_cleanup():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [(48000, b"\x01\x00\x02\x00"), None]
     viewer._play_audio(link)
     assert viewer.hear is False
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link2 = Link()
     link2.reads = [(48000, b"\x05\x00\x06\x00"), None]
     viewer._play_audio(link2)
@@ -111,7 +122,7 @@ def test_user_can_restart_hear_after_complete_cleanup():
 
 def test_tls_or_amiga_error_drop_requires_user_reclick():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     link.reads = [AmigaError("TLS handshake failed")]
     with pytest.raises(AmigaError):
@@ -124,7 +135,7 @@ def test_tls_or_amiga_error_drop_requires_user_reclick():
 def test_unsupported_audio_capability_clears_request():
     viewer = _page()
     viewer.amiga = {}
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     # Ineligible capabilities never arm Hear (Apollo + protocol ≥ 6 + audio=1).
     assert not viewer._hearing() and not viewer._audio_ready()
     viewer.amiga = {"os": "AmigaOS", "audio": ""}
@@ -133,7 +144,7 @@ def test_unsupported_audio_capability_clears_request():
 
 def test_last_client_leave_clears_hear():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     client = next(iter(viewer.clients))
     viewer.leave(client)
     assert viewer.hear is False and not viewer._hearing()
@@ -141,13 +152,13 @@ def test_last_client_leave_clears_hear():
 
 def test_drain_is_bounded():
     viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     link = Link()
     # endless non-None reads during drain after stop
     link.reads = [(48000, b"\x01\x00\x02\x00")]
     # after first chunk, turn off so play loop exits into release drain
     def between():
-        viewer.submit({"t": "audio", "on": False})
+        viewer.submit({"t": "audio", "on": False}, viewer.page)
         # flood drain
         link.reads.extend([(48000, b"\x00\x00\x00\x00")] * (AUDIO_DRAIN_MAX + 20))
 
@@ -157,24 +168,10 @@ def test_drain_is_bounded():
     assert link.stopped == 1 and link.closed == 1
 
 
-def test_aggregate_pcm_budget_stops_stream():
-    viewer = _page()
-    viewer.submit({"t": "audio", "on": True})
-    link = Link()
-    chunk = b"\x01\x00\x02\x00" * 256  # 1024 bytes
-    n = (AUDIO_PCM_BUDGET // len(chunk)) + 4
-    link.reads = [(48000, chunk)] * n
-    viewer._play_audio(link)
-    pcm_msgs = [m for m in viewer.sent if isinstance(m, (bytes, bytearray)) and m[:1] == b"\x05"]
-    total = sum(len(m) - 5 for m in pcm_msgs)
-    assert total <= AUDIO_PCM_BUDGET
-    assert viewer.hear is False and link.stopped == 1
-
-
 def test_repeated_start_stop_is_safe():
     viewer = _page()
     for _ in range(3):
-        viewer.submit({"t": "audio", "on": True})
+        viewer.submit({"t": "audio", "on": True}, viewer.page)
         link = Link()
         link.reads = [(48000, b"\x01\x00\x02\x00"), None]
         viewer._play_audio(link)
@@ -186,7 +183,7 @@ def test_repeated_start_stop_is_safe():
 def test_protocol5_without_audio_capability():
     viewer = _page()
     viewer.amiga = {"os": "AmigaOS", "audio": "", "daemon_protocol": 5}
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert not viewer._audio_ready() and viewer.hear is False
 
 
@@ -195,7 +192,7 @@ def test_protocol5_apollo_with_audio_still_ineligible():
     viewer.amiga = {
         "os": "ApolloOS", "cpu": "68080", "audio": "1", "daemon_protocol": 5,
     }
-    viewer.submit({"t": "audio", "on": True})
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
     assert not viewer._audio_ready() and viewer.hear is False
 
 

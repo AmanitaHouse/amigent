@@ -62,6 +62,37 @@ FORBIDDEN = {  # tool: arguments that would change the Amiga if the call got thr
 
 # ---------------------------------------------------------------- the stage
 
+def _close_socket(sock: socket.socket) -> None:
+    with contextlib.suppress(OSError):
+        sock.shutdown(socket.SHUT_RDWR)
+    with contextlib.suppress(OSError):
+        sock.close()
+
+
+class _StoppableReader:
+    """File-like .read(n) over a socket that exits promptly when stop is set."""
+
+    def __init__(self, conn: socket.socket, stop: threading.Event | None):
+        self.conn = conn
+        self.stop = stop
+        if stop is not None:
+            conn.settimeout(0.1)
+
+    def read(self, n: int) -> bytes:
+        buf = bytearray()
+        while len(buf) < n:
+            if self.stop is not None and self.stop.is_set():
+                return b""
+            try:
+                chunk = self.conn.recv(n - len(buf))
+            except TimeoutError:
+                continue
+            if not chunk:
+                return bytes(buf)
+            buf += chunk
+        return bytes(buf)
+
+
 class Tripwire:
     """A plain port that only listens: says a key-wanting hello and keeps what it hears."""
 
@@ -71,29 +102,62 @@ class Tripwire:
             spare.close()
         self.listener = listener
         self.listener.listen(8)
+        self.listener.settimeout(0.1)
         self.port = self.listener.getsockname()[1]
         self.knocks = 0
         self.heard = b""
         self.log: list[tuple] = []  # (peer, what it said) per knock
-        threading.Thread(target=self._accept, daemon=True).start()
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._conns: set[socket.socket] = set()
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+        self._thread.start()
+
+    def close(self, timeout: float = 2.0) -> None:
+        self._stop.set()
+        _close_socket(self.listener)
+        with self._lock:
+            conns = list(self._conns)
+        for conn in conns:
+            _close_socket(conn)
+        self._thread.join(timeout)
 
     def _accept(self):
-        while True:
+        while not self._stop.is_set():
             try:
                 conn, peer = self.listener.accept()
+            except TimeoutError:
+                continue
             except OSError:
                 return
+            with self._lock:
+                if self._stop.is_set():
+                    with contextlib.suppress(OSError):
+                        conn.close()
+                    return
+                self._conns.add(conn)
+            conn.settimeout(None)
             self.knocks += 1
             said = b""
             try:
                 conn.sendall(b"AMGT" + struct.pack(">HH", 6, 1))
-                conn.settimeout(1)
-                said = conn.recv(4096)
+                conn.settimeout(0.1)
+                until = time.monotonic() + 1.0
+                while not self._stop.is_set() and time.monotonic() < until:
+                    try:
+                        said = conn.recv(4096)
+                        break
+                    except TimeoutError:
+                        continue
             except OSError:
                 pass
+            finally:
+                with self._lock:
+                    self._conns.discard(conn)
+                with contextlib.suppress(OSError):
+                    conn.close()
             self.heard += said
             self.log.append((peer, said[:40]))
-            conn.close()
 
 
 class TlsFront:
@@ -106,16 +170,37 @@ class TlsFront:
         self.accepted = self.handshakes = 0
         self.refusing = False
         self.delay = 0.0  # seconds before the handshake: a slow AmiSSL
+        self.port = listener.getsockname()[1]
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._raw_conns: set[socket.socket] = set()
+        self._workers: list[threading.Thread] = []
         listener.listen(8)
-        threading.Thread(target=self._accept, daemon=True).start()
+        listener.settimeout(0.1)
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+        self._thread.start()
+
+    def close(self, timeout: float = 2.0) -> None:
+        self.refusing = True
+        self._stop.set()
+        _close_socket(self.listener)
+        deadline = time.monotonic() + timeout
+        self._thread.join(max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            raw_conns = list(self._raw_conns)
+            workers = list(self._workers)
+        for conn in raw_conns:
+            _close_socket(conn)
+        for worker in workers:
+            worker.join(max(0.0, deadline - time.monotonic()))
 
     def refuse(self):
         """Shut the port so a dial is refused, on every system."""
         self.refusing = True
-        port = self.listener.getsockname()[1]
-        with contextlib.suppress(OSError):  # Linux: wakes the accept() that keeps it listening
-            self.listener.shutdown(socket.SHUT_RDWR)
-        self.listener.close()
+        self._stop.set()
+        port = self.port
+        _close_socket(self.listener)
+        self._thread.join(timeout=2.0)
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
@@ -128,27 +213,55 @@ class TlsFront:
         raise AssertionError(f"port {port} still takes connections")
 
     def _accept(self):
-        while True:
+        while not self._stop.is_set():
             try:
                 conn, _ = self.listener.accept()
+            except TimeoutError:
+                continue
             except OSError:
                 return
-            if self.refusing:
-                conn.close()
+            if self.refusing or self._stop.is_set():
+                with contextlib.suppress(OSError):
+                    conn.close()
                 return
+            conn.settimeout(None)
             self.accepted += 1
-            threading.Thread(target=self._one, args=(conn,), daemon=True).start()
+            worker = threading.Thread(target=self._one, args=(conn,), daemon=True)
+            with self._lock:
+                if self._stop.is_set():
+                    with contextlib.suppress(OSError):
+                        conn.close()
+                    return
+                self._raw_conns.add(conn)
+                self._workers.append(worker)
+            worker.start()
 
     def _one(self, conn):
+        raw = conn
+        wrapped = None
         try:
-            if self.delay:
-                threading.Event().wait(self.delay)  # not time.sleep, which tests may shorten
+            if self.delay and self._stop.wait(self.delay):  # not time.sleep, which tests may shorten
+                return
             if not self.plain:
-                conn = self.context.wrap_socket(conn, server_side=True)
+                wrapped = self.context.wrap_socket(conn, server_side=True)
+                with self._lock:
+                    self._raw_conns.discard(raw)
                 self.handshakes += 1
-            self.fake._serve(conn)
+                conn = wrapped
+            if isinstance(self.fake, KeyedFake):
+                self.fake._serve(conn, stop=self._stop)
+            else:
+                self.fake._serve(conn)
         except (OSError, ssl.SSLError):
-            conn.close()
+            pass
+        finally:
+            with self._lock:
+                self._raw_conns.discard(raw)
+            with contextlib.suppress(OSError):
+                conn.close()
+            if wrapped is not None:
+                with contextlib.suppress(OSError):
+                    raw.close()
 
 
 class KeyedFake(FakeAmiga):
@@ -160,11 +273,14 @@ class KeyedFake(FakeAmiga):
         self.add("SYS:C/Dir", b"dir")
         self.add("SYS:S/Startup-Sequence", b"; boot\n")
 
-    def _serve(self, conn):
+    def _serve(self, conn, stop: threading.Event | None = None):
         conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, 1))
-        rd = conn.makefile("rb")
+        rd = _StoppableReader(conn, stop)
         try:
-            cmd, _, x, _, _, _ = struct.unpack(">BBHHHH", rd.read(10))
+            head = rd.read(10)
+            if len(head) != 10:
+                return
+            cmd, _, x, _, _, _ = struct.unpack(">BBHHHH", head)
             if cmd != 17:
                 return
             heard = rd.read(x).decode("iso-8859-1")
@@ -196,8 +312,14 @@ class KeyedFake(FakeAmiga):
 
 def _bound(port: int) -> socket.socket:
     s = socket.socket()
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, port))
+    if os.name != "nt":
+        # Windows SO_REUSEADDR permits overlapping active listeners on the same port.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind((HOST, port))
+    except OSError:
+        s.close()
+        raise
     return s
 
 
@@ -229,24 +351,60 @@ def _certificate(folder: Path, name: str) -> tuple[Path, bytes]:
     return both, made[1]
 
 
+@contextlib.contextmanager
+def _managed_stage(tmp_path: Path):
+    """Build test worlds and close every listener and accept thread on exit."""
+    worlds: list[tuple[dict, TlsFront]] = []
+
+    def build(fake=None, pin="same", plain_tls=False):
+        plain, tls_port = _neighbours()
+        wire = ctl = front = made_fake = None
+        try:
+            served, certificate = _certificate(tmp_path, "served")
+            if pin == "other":
+                _, certificate = _certificate(tmp_path, "other")
+            if pin:
+                tls.remember(HOST, certificate)
+            if fake is None:
+                fake = made_fake = KeyedFake()
+            wire = Tripwire(plain)
+            front = TlsFront(tls_port, fake, served, plain=plain_tls)
+            ctl = Tripwire()
+        except BaseException:
+            for obj in (ctl, front, wire, made_fake):
+                if obj is not None:
+                    with contextlib.suppress(OSError):
+                        obj.close()
+            if wire is None:
+                with contextlib.suppress(OSError):
+                    plain.close()
+            if front is None:
+                with contextlib.suppress(OSError):
+                    tls_port.close()
+            raise
+        world = {"wire": wire, "ctl": ctl, "fake": fake, "front": front,
+                 "certificate": certificate, "served": served, "port": wire.port}
+        worlds.append((world, front))
+        return world
+
+    try:
+        yield build
+    finally:
+        for world, original_front in reversed(worlds):
+            for front in ({original_front, world.get("front")} - {None}):
+                front.close()
+            world["wire"].close()
+            world["ctl"].close()
+            with contextlib.suppress(OSError):
+                world["fake"].close()
+
+
 @pytest.fixture
 def stage(tmp_path, monkeypatch):
     """Tripwires on the plain and amigactld ports, a pinned TLS FakeAmiga on the port after."""
-    def build(fake=None, pin="same", plain_tls=False):
-        plain, tls_port = _neighbours()
-        served, certificate = _certificate(tmp_path, "served")
-        if pin == "other":
-            _, certificate = _certificate(tmp_path, "other")
-        if pin:
-            tls.remember(HOST, certificate)
-        fake = fake or KeyedFake()
-        world = {"wire": Tripwire(plain), "ctl": Tripwire(), "fake": fake,
-                 "front": TlsFront(tls_port, fake, served, plain=plain_tls),
-                 "certificate": certificate, "served": served}
-        world["port"] = world["wire"].port
-        return world
     monkeypatch.setenv("AMIGENT_KEY", KEY)
-    return build
+    with _managed_stage(tmp_path) as build:
+        yield build
 
 
 def _no_plain(world) -> None:
@@ -459,6 +617,7 @@ def test_require_tls_a_stalled_handshake_is_neither_gone_nor_back(tmp_path, quic
         assert not power.wait_for_port(HOST, wire.port, 1)
     finally:
         stalled.close()
+        wire.close()
     assert wire.knocks == 0
 
 
@@ -492,6 +651,7 @@ def test_require_tls_wait_for_port_sees_the_amiga_come_back(stage, quick):
         assert power.wait_for_port(HOST, port, 20)
     finally:
         back.cancel()
+        back.join(timeout=2.0)
     assert world["front"].handshakes == 1
     _no_plain(world)
 
@@ -509,6 +669,7 @@ def test_require_tls_restart_is_not_inferred_from_a_stalled_handshake(tmp_path, 
             server.amiga_restart()
     finally:
         stalled.close()
+        wire.close()
     assert wire.knocks == 0
 
 
@@ -578,13 +739,16 @@ def test_read_only_server_sends_no_note(monkeypatch, machine_session):
 
 def test_read_only_takes_no_amigactld_and_no_screen_link(monkeypatch):
     wire = Tripwire()
-    with pytest.raises(AmigaError):
-        Commands(HOST, wire.port, 9, timeout=2, read_only=True).connect()
-    assert wire.knocks == 0
-    monkeypatch.setenv("AMIGENT_READ_ONLY", "1")
-    with pytest.raises(AmigentdError):
-        Amigentd(HOST, wire.port).connect()
-    assert wire.knocks == 0
+    try:
+        with pytest.raises(AmigaError):
+            Commands(HOST, wire.port, 9, timeout=2, read_only=True).connect()
+        assert wire.knocks == 0
+        monkeypatch.setenv("AMIGENT_READ_ONLY", "1")
+        with pytest.raises(AmigentdError):
+            Amigentd(HOST, wire.port).connect()
+        assert wire.knocks == 0
+    finally:
+        wire.close()
 
 
 def test_read_only_reaches_every_machine_session(monkeypatch):
@@ -854,6 +1018,8 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
         listed = mcp.call("amiga_list", {"path": "SYS:"})
     finally:
         mcp.stop()
+        ctl.close()
+        fake.close()
     assert set(tools) == {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
     assert len(tools) > len(server.READ_ONLY_TOOLS) and "amiga_exec" in tools
     assert hello.get("instructions") == server.INSTRUCTIONS
@@ -862,3 +1028,124 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
         assert not _hints(tool), name  # the default server makes no claim, as before
     assert not listed.get("isError") and "C" in listed["content"][0]["text"]
     assert ctl.knocks == 0
+
+
+# ---------------------------------------------------------------- fixture port and teardown safety
+
+def _assert_world_closed(world: dict) -> None:
+    assert world["wire"].listener.fileno() == -1
+    assert world["ctl"].listener.fileno() == -1
+    assert world["front"].listener.fileno() == -1
+    assert world["fake"].listener.fileno() == -1
+    assert not world["wire"]._thread.is_alive()
+    assert not world["ctl"]._thread.is_alive()
+    assert not world["front"]._thread.is_alive()
+    assert all(not w.is_alive() for w in world["front"]._workers)
+
+
+def test_bound_rejects_an_occupied_listener_port():
+    """A second _bound() cannot silently double-bind an active listener, including on Windows."""
+    first, spare = _neighbours()
+    spare.close()
+    port = first.getsockname()[1]
+    first.listen(8)
+    try:
+        with pytest.raises(OSError):
+            _bound(port)
+        if os.name == "nt":
+            hijack = socket.socket()
+            hijack.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                with pytest.raises(OSError):
+                    hijack.bind((HOST, port))
+            finally:
+                hijack.close()
+    finally:
+        first.close()
+
+    if os.name == "nt":
+        other = socket.socket()
+        other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        other.bind((HOST, port))
+        other.listen(8)
+        try:
+            with pytest.raises(OSError):
+                _bound(port)
+        finally:
+            other.close()
+
+
+def test_neighbours_skips_occupied_ports_and_picks_a_free_pair(monkeypatch):
+    busy_a, busy_b = _neighbours()
+    busy_a.listen(8)
+    busy_b.listen(8)
+    busy_port = busy_a.getsockname()[1]
+    real_randrange = random.randrange
+    # First attempt collides on port; second collides on port + 1; then fall back to real draws.
+    attempts = iter([busy_port, busy_port - 1])
+
+    def scripted(start, stop):
+        return next(attempts, real_randrange(start, stop))
+
+    monkeypatch.setattr(random, "randrange", scripted)
+    try:
+        plain, tls_port = _neighbours()
+        try:
+            got = (plain.getsockname()[1], tls_port.getsockname()[1])
+            assert got[1] == got[0] + 1
+            assert set(got).isdisjoint({busy_port, busy_port + 1})
+        finally:
+            plain.close()
+            tls_port.close()
+    finally:
+        busy_a.close()
+        busy_b.close()
+
+
+def test_stage_closes_all_listeners_and_joins_accept_threads(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMIGENT_KEY", KEY)
+    monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")
+    with _managed_stage(tmp_path) as build:
+        world = build()
+        ctl = Commands(HOST, world["ctl"].port, world["port"], timeout=5)
+        try:
+            assert [e["name"] for e in ctl.list_dir("SYS:")] == ["C", "S"]
+            assert world["front"].handshakes == 1
+        finally:
+            ctl.close()
+    _assert_world_closed(world)
+    for port in (world["wire"].port, world["ctl"].port, world["front"].port):
+        sock = _bound(port)
+        sock.close()
+
+
+def test_stage_cleans_up_multiple_worlds_from_one_fixture(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMIGENT_KEY", KEY)
+    with _managed_stage(tmp_path) as build:
+        first = build()
+        second = build()
+        first_ports = {first["wire"].port, first["ctl"].port, first["front"].port}
+        second_ports = {second["wire"].port, second["ctl"].port, second["front"].port}
+        assert len(first_ports) == 3 and len(second_ports) == 3
+        assert first_ports.isdisjoint(second_ports)
+    _assert_world_closed(first)
+    _assert_world_closed(second)
+
+
+def test_stage_cleans_up_after_an_exception_with_an_open_connection(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMIGENT_KEY", KEY)
+    monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")
+    world = None
+    ctl = None
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            with _managed_stage(tmp_path) as build:
+                world = build()
+                ctl = Commands(HOST, world["ctl"].port, world["port"], timeout=5)
+                ctl.connect()
+                raise RuntimeError("boom")
+        assert world is not None
+        _assert_world_closed(world)
+    finally:
+        if ctl is not None:
+            ctl.close()

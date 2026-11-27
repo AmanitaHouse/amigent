@@ -361,7 +361,6 @@ class Viewer:
                 self.hear = False
         print(f"{time.strftime('%H:%M:%S')} viewer page left ({n} open)",
               file=sys.stderr, flush=True)
-        self.feed.ring()  # let the feed release a stale Amiga socket after WATCH_RELEASE
 
     def _watching(self) -> bool:
         with self.clients_lock:

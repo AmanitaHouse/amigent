@@ -3627,10 +3627,8 @@ static BOOL l_skip(struct link *l, ULONG len, LONG secs)
     return TRUE;
 }
 
-/* POKE payload phase: one wall-clock deadline from now_ms(), not reset by
- * each fragment the way l_recv(..., IO_SECONDS) would be. */
-#define POKE_DEADLINE_MS (IO_SECONDS * 1000UL)
-
+/* Waits as l_wait does, IO_SECONDS at most for the next bytes, and never past
+ * deadline_ms: a sender that stops is dropped, one that trickles ends too. */
 static BOOL l_wait_until(struct link *l, BOOL writing, ULONG deadline_ms)
 {
     struct Library *SocketBase = l->base;
@@ -3642,6 +3640,8 @@ static BOOL l_wait_until(struct link *l, BOOL writing, ULONG deadline_ms)
     left = (LONG)(deadline_ms - now_ms());
     if (left <= 0)
         return FALSE;
+    if (left > IO_SECONDS * 1000L)
+        left = IO_SECONDS * 1000L;
     tv.tv_sec = left / 1000;
     tv.tv_usec = (left % 1000) * 1000;
     FD_ZERO(&s);
@@ -7299,10 +7299,22 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
+/* The whole POKE payload gets IO_SECONDS plus a second for every POKE_RATE
+ * bytes: 64 KB at 256 bytes a second still arrives, within 286 s. */
+#define POKE_RATE 256UL
+
+static ULONG poke_budget_ms(ULONG n)
+{
+    if (n > PEEK_MAX)
+        n = PEEK_MAX;  /* n * 1000 stays far below 2^32 */
+    return IO_SECONDS * 1000UL + n * 1000UL / POKE_RATE;
+}
+
 /* Length uses the same PEEK_MAX bound as PEEK. Order: address -> size ->
- * ALLOWPOKE -> region -> receive with a wall-clock deadline -> write.
- * A huge n must not allocate or hang the receive before ALLOWPOKE is checked.
- * POKE_DEADLINE_MS wall-clock from now_ms(); fragments do not extend it. */
+ * ALLOWPOKE -> region -> receive -> write. A huge n must not allocate or
+ * hang the receive before ALLOWPOKE is checked. The payload must keep
+ * coming (IO_SECONDS between fragments) and be complete within
+ * poke_budget_ms(n). */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
@@ -7315,7 +7327,7 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
         return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
     if (n > PEEK_MAX)
         return FALSE;  /* close: do not drain an unbounded declared payload */
-    deadline = now_ms() + POKE_DEADLINE_MS;  /* payload phase only; not reset by drip */
+    deadline = now_ms() + poke_budget_ms(n);
     if (!allow_poke)
         return l_skip_until(l, n, deadline) &&
                c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");

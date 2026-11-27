@@ -631,6 +631,15 @@ POKE writes the bytes into RAM exec manages (never ROM, chips or boards), with
 interrupts off, and clears the caches. amigentd refuses it unless it was
 started with `ALLOWPOKE` (or that tool type).
 
+The bytes of a POKE, at most 64 KB, must keep coming and must all be there in
+time, on every amigentd build: 30 seconds may pass between two pieces, and the
+whole payload gets 30 seconds plus one for every 256 bytes (286 seconds for
+64 KB). A slow line that keeps sending gets through; a sender that goes quiet
+is dropped after 30 seconds, and one that trickles is dropped when its time is
+up. A larger size closes the connection at once. A refused POKE (no
+`ALLOWPOKE`, not RAM) still reads its bytes on the same terms before it
+answers, and a payload that does not arrive closes the connection.
+
 ### trace
 
 A tracepoint puts `TRAP #15` over the instruction at the address, which must

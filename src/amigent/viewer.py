@@ -353,7 +353,6 @@ class Viewer:
             if not self.clients:
                 self.alone_since = time.monotonic()
                 self.hear = False
-        self.feed.ring()  # let the feed release a stale Amiga socket after WATCH_RELEASE
 
     def _watching(self) -> bool:
         with self.clients_lock:

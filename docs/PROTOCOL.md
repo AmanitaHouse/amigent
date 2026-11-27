@@ -596,8 +596,7 @@ separated by tabs.
   `AmigaOS`), `board` and `board_name` (from the SAGA board register when
   ApolloOS or `AFF_68080` is present), `trace=0` (tracepoints stay refused until
   hardware-validated on 68080), and `audio=49` (`CMD_AUDIO` opcode number). On
-  Apollo builds, PEEK and POKE also refuse Apollo SAGA/PIP/VREG/ARNE MMIO windows
-  and POKE uses a single wall-clock deadline (`IO_SECONDS`) across fragments.
+  Apollo builds, PEEK and POKE also refuse Apollo SAGA/PIP/VREG/ARNE MMIO windows.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.
@@ -636,6 +635,15 @@ byte), arg 2 signals it with `y` as Ctrl-C (1), D (2), E (4), F (8), added up.
 POKE writes the bytes into RAM exec manages (never ROM, chips or boards), with
 interrupts off, and clears the caches. amigentd refuses it unless it was
 started with `ALLOWPOKE` (or that tool type).
+
+The bytes of a POKE, at most 64 KB, must keep coming and must all be there in
+time, on every amigentd build: 30 seconds may pass between two pieces, and the
+whole payload gets 30 seconds plus one for every 256 bytes (286 seconds for
+64 KB). A slow line that keeps sending gets through; a sender that goes quiet
+is dropped after 30 seconds, and one that trickles is dropped when its time is
+up. A larger size closes the connection at once. A refused POKE (no
+`ALLOWPOKE`, not RAM) still reads its bytes on the same terms before it
+answers, and a payload that does not arrive closes the connection.
 
 ### trace
 

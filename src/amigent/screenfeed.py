@@ -31,10 +31,6 @@ DUTY = 0.5, 0.25  # share of the Amiga's time a sweep may take while awake, whil
 FOCUS_KEEP = 10.0  # a tile that answered a key stays interesting this long
 FOCUS_HALF_LIFE = 2.0  # seconds: old answers count half, the cursor moves on
 SHARED_GRACE = 20.0  # s the screen may stay taken by another client before we say offline
-# After the last viewer page leaves, keep the Amiga screen socket briefly so a
-# refresh does not flap. Past this, drop it: otherwise hello can still say
-# online=true with a dead socket, and the next page flashes online then offline.
-WATCH_RELEASE = 2.0
 FOCUS_BOXES = 2
 ANIMATED_KEEP = 30.0  # a tile that moved by itself is suspect this long after its last move
 ANIMATED_EVERY = 1.0  # while someone drives, the screen's own demo gets the leftovers
@@ -351,25 +347,11 @@ class Feed:
 
     def run(self) -> None:
         retried, shared_since = False, 0.0
-        idle_since = None
         while True:
             if not self.watching():
-                now = time.monotonic()
-                if self.screen._sock is not None or self.online:
-                    if idle_since is None:
-                        idle_since = now
-                    elif now - idle_since >= WATCH_RELEASE:
-                        # Page gone long enough: do not keep a stale "online" over a
-                        # half-open Amiga socket for the next WebSocket hello.
-                        self._broken()
-                        self._set_online(False, "viewer page closed")
-                        idle_since = None
-                else:
-                    idle_since = None
                 self.wake.wait(1)
                 self.wake.clear()
                 continue
-            idle_since = None
             now = time.monotonic()
             if not self._due(now):
                 wait = self.next_sweep - now

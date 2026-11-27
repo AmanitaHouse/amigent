@@ -17,7 +17,7 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import pack, tls
+from . import pack, safety, tls
 from .amigactl import AmigaCtl
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
@@ -50,6 +50,30 @@ def pc_outdated(protocol: int) -> str:
     from . import __version__
     return (f"amigentd on the Amiga is newer than Amigent {__version__} on this PC. Update the PC "
             "side too: run \"pipx upgrade amigent\", then restart the AI app and the remote desktop.")
+
+
+# AMIGENT_READ_ONLY: the commands a read-only channel may send. Logging in, the
+# channel itself, its packing level, and the requests that only look. LOADED and
+# TASKS exist from protocol 6 on; below it their numbers mean nothing.
+READ_ONLY_COMMANDS = frozenset({CMD_AUTH, CMD_CHANNEL, COMPRESS, SYSINFO, DIR, TEXT})
+READ_ONLY_COMMANDS_6 = frozenset({LOADED, TASKS})
+READ_ONLY_CODE = -1  # not the Amiga's answer: the request never left this PC
+
+
+class ReadOnlyRefused(AmigaError):
+    """AMIGENT_READ_ONLY kept a command off the wire."""
+
+    def __init__(self, cmd: int):
+        super().__init__(f"AMIGENT_READ_ONLY: amigentd command {cmd} is not on the read-only "
+                         "list and was not sent", READ_ONLY_CODE)
+
+
+def read_only_allows(protocol: int, cmd: int) -> bool:
+    if cmd in READ_ONLY_COMMANDS:
+        return True
+    return protocol >= LOADED_PROTOCOL and cmd in READ_ONLY_COMMANDS_6
+
+
 PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
 PLAIN_CLOSED, PLAIN_CLOSED_TEXT = tls.PLAIN_CLOSED, tls.PLAIN_CLOSED_TEXT
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
@@ -235,12 +259,13 @@ class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None,
-                 address: str | None = None):
+                 address: str | None = None, read_only: bool | None = None):
         self.host = identity(host)
         self.port = port
         self.address = address  # dial here, not where the registry says, and never look elsewhere
         self.timeout = timeout
         self.key = key
+        self.read_only = safety.read_only() if read_only is None else read_only
         self._sock: socket.socket | None = None
         self.banner = ""
         self.protocol = 0
@@ -267,6 +292,8 @@ class AmigaChannel(VolumeFlush):
                                  f"{CHANNEL_PROTOCOL}")
             if refused := tls.plain_closed(flags, hasattr(self._sock, "version")):
                 raise AmigaError(refused)
+            if safety.require_tls() and not hasattr(self._sock, "version"):
+                raise AmigaError("AMIGENT_REQUIRE_TLS is set and this line is not TLS; no key was sent")
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -309,8 +336,13 @@ class AmigaChannel(VolumeFlush):
             data += chunk
         return bytes(data)
 
+    def _allow(self, cmd: int) -> None:
+        if self.read_only and not read_only_allows(self.protocol, cmd):
+            raise ReadOnlyRefused(cmd)
+
     def _header(self, cmd: int, arg: int = 0, x: int = 0, y: int = 0, w: int = 0, h: int = 0) -> None:
         assert self._sock
+        self._allow(cmd)
         self._sock.sendall(struct.pack(">BBHHHH", cmd, arg, x, y, w, h))
 
     def _send(self, data: bytes) -> None:
@@ -324,6 +356,7 @@ class AmigaChannel(VolumeFlush):
 
     def _put(self, req: Request) -> None:
         """Fire one request at the Amiga without waiting for its answer."""
+        self._allow(req.cmd)
         raw = req.path.encode(ENCODING)
         arg, w, h, payload = req.arg, req.w, req.h, req.payload
         if (req.cmd == WRITE and len(payload) >= PACK_WRITE_MIN and self.policy
@@ -400,6 +433,8 @@ class AmigaChannel(VolumeFlush):
         """
         if not self._sock:
             self.connect()
+        for req in requests:  # all or nothing: a refusal halfway would leave answers in flight
+            self._allow(req.cmd)
         results: list = [None] * len(requests)
         asked = [0.0] * len(requests)
         sent = got = 0
@@ -584,8 +619,9 @@ class AmigaChannel(VolumeFlush):
         """A line for amigent-monitor's window on the Amiga: what the agent is doing.
 
         NOTE has no answer, so it costs no round trip and the stream stays in
-        step. Silently nothing on an amigentd that doesn't know it."""
-        if not self._sock or self.protocol < PACK_PROTOCOL:
+        step. Silently nothing on an amigentd that doesn't know it, and on a
+        read-only channel."""
+        if not self._sock or self.protocol < PACK_PROTOCOL or self.read_only:
             return
         if getattr(self, "_notes", None) is None:
             self._notes = self.sysinfo().get("note") == "1"
@@ -708,13 +744,19 @@ class Commands:
     """amigentd's command channel when the Amiga offers it, else amigactld."""
 
     def __init__(self, host: str, ctl_port: int = 6800, screen_port: int = 6801,
-                 timeout: float = 30.0):
+                 timeout: float = 30.0, read_only: bool | None = None):
         self.host, self.ctl_port, self.screen_port, self.timeout = identity(host), ctl_port, screen_port, timeout
+        self.read_only = safety.read_only() if read_only is None else read_only
         self.backend: AmigaChannel | AmigaCtl | None = None
+
+    def _channel(self) -> AmigaChannel:
+        channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+        channel.read_only = self.read_only
+        return channel
 
     def connect(self) -> None:
         if self.backend is None:
-            channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+            channel = self._channel()
             try:
                 channel.connect()
                 self.backend = channel
@@ -722,7 +764,9 @@ class Commands:
             except RegistryError:
                 raise
             except AmigaError as e:
-                if "refused the key" in str(e) or "wants a key" in str(e):
+                # amigactld is plain TCP and has no read-only gate: neither switch falls back to it.
+                if ("refused the key" in str(e) or "wants a key" in str(e)
+                        or safety.require_tls() or self.read_only):
                     raise
                 first = e
             legacy = AmigaCtl(self.host, self.ctl_port, self.timeout)

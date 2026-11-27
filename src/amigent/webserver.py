@@ -15,6 +15,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -27,6 +28,8 @@ STATIC = {"ui.js": "text/javascript", "machines.js": "text/javascript", "machine
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_UPLOAD = 512 * 2**20
 MAX_MESSAGE = 1 << 20
+DRAIN_TIMEOUT = 2.0  # bounded wait to consume a small rejected body before closing
+DRAIN_CHUNK = 16384  # discard in fixed small chunks so rejected bodies never buffer
 SEND_TIMEOUT = 5  # a page that stops reading must not hold the screen lock
 
 
@@ -133,11 +136,94 @@ class TokenHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        try:
+            self.end_headers()
+            self.wfile.write(body)
+        except OSError:
+            self.close_connection = True
 
     def _json(self, code: int, value) -> None:
         self._reply(code, json.dumps(value).encode())
+
+    def _content_length(self) -> int | None:
+        if self.headers.get_all("Transfer-Encoding"):
+            return None
+        values = self.headers.get_all("Content-Length")
+        if not values:
+            return 0
+        if len(values) != 1:
+            return None
+        raw = values[0].strip()
+        if not raw or len(raw) > 20 or not raw.isascii() or not raw.isdigit():
+            return None
+        return int(raw)
+
+    def _consume_body(self, size: int, timeout: float | None, *, keep: bool) -> bytes | bool | None:
+        if size == 0:
+            return b"" if keep else True
+        reader = getattr(self.rfile, "read1", self.rfile.read)
+        if timeout is None:
+            chunks = [] if keep else None
+            remaining = size
+            try:
+                while remaining > 0:
+                    chunk = reader(min(remaining, DRAIN_CHUNK))
+                    if not chunk:
+                        self.close_connection = True
+                        return None if keep else False
+                    if keep:
+                        chunks.append(chunk)
+                    remaining -= len(chunk)
+            except (OSError, ValueError):
+                self.close_connection = True
+                return None if keep else False
+            return b"".join(chunks) if keep else True
+        deadline = time.monotonic() + timeout
+        try:
+            previous_timeout = self.connection.gettimeout()
+        except OSError:
+            self.close_connection = True
+            return None if keep else False
+        chunks = [] if keep else None
+        remaining = size
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    self.close_connection = True
+                    return None if keep else False
+                self.connection.settimeout(max(0.01, left))
+                chunk = reader(min(remaining, DRAIN_CHUNK))
+                if not chunk:
+                    self.close_connection = True
+                    return None if keep else False
+                if keep:
+                    chunks.append(chunk)
+                remaining -= len(chunk)
+            return b"".join(chunks) if keep else True
+        except (OSError, TimeoutError, ValueError):
+            self.close_connection = True
+            return None if keep else False
+        finally:
+            try:
+                self.connection.settimeout(previous_timeout)
+            except OSError:
+                pass
+
+    def _read_body(self, size: int, timeout: float | None = None) -> bytes | None:
+        result = self._consume_body(size, timeout, keep=True)
+        return result if isinstance(result, bytes) else None
+
+    def _drain_body(self, limit: int, timeout: float | None = None) -> bool:
+        """Consume and discard a small rejected body up to ``limit`` bytes."""
+        size = self._content_length()
+        if size is None or size > limit:
+            self.close_connection = True
+            return False
+        limit_timeout = DRAIN_TIMEOUT if timeout is None else timeout
+        return bool(self._consume_body(size, limit_timeout, keep=False))
 
     def _static(self, name: str) -> bool:
         """Serve the page's own files and languages to anyone; True if that was the job."""
@@ -207,16 +293,19 @@ class _Handler(TokenHandler):
         query = parse_qs(url.query)
         if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address",
                                                        "/api/machines", "/api/connect", "/api/update"):
+            self._drain_body(MAX_MESSAGE)
             return self._reply(403, b"forbidden", "text/plain")
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            size = -1
-        if size < 0:
+        size = self._content_length()
+        if size is None:
+            self.close_connection = True
             return self._json(400, {"error": "length missing"})
         if size > (MAX_UPLOAD if url.path == "/api/upload" else MAX_MESSAGE):
+            self.close_connection = True
             return self._json(413, {"error": "file too large"})
-        data = self.rfile.read(size)
+        timeout = None if url.path == "/api/upload" else DRAIN_TIMEOUT
+        data = self._read_body(size, timeout=timeout)
+        if data is None:
+            return self._json(400, {"error": "incomplete body"})
         if url.path in ("/api/machines", "/api/connect", "/api/address"):
             try:
                 manager = self.viewer.machine_manager()

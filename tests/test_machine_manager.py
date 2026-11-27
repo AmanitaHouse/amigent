@@ -153,8 +153,7 @@ def test_management_http_requires_token_and_survives_invalid_requests(private_co
         assert post({"id": a["id"], "action": "rename", "name": "Renamed"})[0] == 200
         assert roster.find("Renamed")["id"] == a["id"]
     finally:
-        manager.httpd.shutdown()
-        manager.httpd.server_close()
+        manager.close()
 
 
 def test_typing_even_a_known_ip_cannot_trigger_registry_relocation(private_config, monkeypatch):

@@ -30,12 +30,13 @@ from .channel import Commands
 from .power import flush_volumes, reboot
 from .secret import FOLDER
 from .viewer import WEB, Viewer, open_window, status_free_bytes
-from .webserver import QuietServer, TokenHandler
+from .webserver import DRAIN_TIMEOUT, QuietServer, TokenHandler
 
 PREVIEW_EVERY = 20  # seconds between previews of one Amiga; the link has no cycles to waste
 PREVIEW_WIDTH = 480
 RUN_TIMEOUT = 120  # one command for the whole fleet: generous, plipboxes are no T1 lines
 OUTPUT_LIMIT = 8000  # chars per Amiga, tail end only; the page is no log viewer
+MAX_FLEET_BODY = 65536
 FLEET_STATIC = {"fleet.js": "text/javascript", "fleet.css": "text/css"}
 
 
@@ -49,6 +50,9 @@ class Fleet:
         self.guard = threading.RLock()
         self.direct = {}
         self.httpd = None
+        self._server_thread: threading.Thread | None = None
+        self._watch_threads: list[threading.Thread] = []
+        self._closed = False
         self.url = ""
         self.last_page = time.monotonic()
         self.overview_until = 0.0
@@ -74,6 +78,8 @@ class Fleet:
         if not self.saved:
             return
         with self.guard:
+            if self._closed:
+                return
             current = machines.load()
             by_id = {e["id"]: e for e in self.entries}
             updated = []
@@ -82,7 +88,7 @@ class Fleet:
                 if e is None:
                     e = self._entry(a)
                     if self.httpd:
-                        threading.Thread(target=self._watch, args=(e,), daemon=True).start()
+                        self._start_watch(e)
                 elif e["host"] != a["host"] and a.get("found_at") == a["host"]:
                     with e["busy"]:  # same Amiga at a new address: the next call connects there
                         e["commands"].close()
@@ -90,13 +96,19 @@ class Fleet:
                     self._retire(e)
                     e = self._entry(a)
                     if self.httpd:
-                        threading.Thread(target=self._watch, args=(e,), daemon=True).start()
+                        self._start_watch(e)
                 e.update({k: a[k] for k in ("id", "name", "host")})
                 e["default"] = a.get("default", False)
                 updated.append(e)
             for e in by_id.values():
                 self._retire(e)
             self.entries = updated
+
+    def _start_watch(self, entry) -> None:
+        thread = threading.Thread(target=self._watch, args=(entry,), daemon=True)
+        self._watch_threads = [t for t in self._watch_threads if t.is_alive()]
+        self._watch_threads.append(thread)
+        thread.start()
 
     def _retire(self, entry):
         entry["stop"].set()
@@ -106,19 +118,53 @@ class Fleet:
             entry["commands"].close()
 
     def start(self, port: int = 6820) -> str:
-        if self.httpd:
+        with self.guard:
+            if self.httpd:
+                return self.url
+            self._closed = False
+            handler = type("FleetHandler", (_FleetHandler,), {"fleet": self})
+            try:
+                self.httpd = QuietServer(("127.0.0.1", port), handler)
+            except OSError:
+                self.httpd = QuietServer(("127.0.0.1", 0), handler)
+            self.port = self.httpd.server_address[1]
+            self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
+            self._server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+            self._server_thread.start()
+            for entry in self.entries:
+                self._start_watch(entry)
             return self.url
-        handler = type("FleetHandler", (_FleetHandler,), {"fleet": self})
-        try:
-            self.httpd = QuietServer(("127.0.0.1", port), handler)
-        except OSError:
-            self.httpd = QuietServer(("127.0.0.1", 0), handler)
-        self.port = self.httpd.server_address[1]
-        self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        for entry in self.entries:
-            threading.Thread(target=self._watch, args=(entry,), daemon=True).start()
-        return self.url
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Stop the local HTTP server, retire entries, and wait boundedly for workers."""
+        with self.guard:
+            self._closed = True
+            httpd = self.httpd
+            self.httpd = None
+            server_thread = self._server_thread
+            self._server_thread = None
+            entries = list(self.entries)
+            direct = list(self.direct.values())
+            watch_threads = list(self._watch_threads)
+            self._watch_threads.clear()
+            for entry in entries:
+                entry["stop"].set()
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
+        for entry in entries:
+            self._retire(entry)
+        for viewer in direct:
+            viewer.retire()
+        deadline = time.monotonic() + timeout
+        current = threading.current_thread()
+        for thread in [server_thread, *watch_threads]:
+            if thread is None or thread is current:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
 
     def _watch(self, entry):
         # A greeting checks reachability without taking over the screen stream
@@ -319,10 +365,17 @@ class _FleetHandler(TokenHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         if not self._allowed(parse_qs(url.query)):
+            self._drain_body(MAX_FLEET_BODY)
             return self._reply(403, b"forbidden", "text/plain")
+        size = self._content_length()
+        if size is None or size > MAX_FLEET_BODY:
+            self.close_connection = True
+            return self._reply(400, b"bad request", "text/plain")
+        raw = self._read_body(size, timeout=DRAIN_TIMEOUT)
+        if raw is None:
+            return self._reply(400, b"bad request", "text/plain")
         try:
-            size = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(size) or b"{}") if 0 <= size <= 65536 else None
+            body = json.loads(raw or b"{}")
         except ValueError:
             body = None
         if not isinstance(body, dict):

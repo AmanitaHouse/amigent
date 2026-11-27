@@ -14,6 +14,9 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+from hygiene import inventory, unexpected
+
 from amigent import setup
 from amigent.client import ExecResult
 from amigent.errors import AmigaError
@@ -214,69 +217,175 @@ def test_update_falls_back_when_the_probe_is_unsuccessful(monkeypatch):
     assert failed.files["C:amigentd"] == _packaged("amigentd")
 
 
+_TOP_IGNORED = frozenset({".git", "build", "dist", "private", "bootstrap", "inventory", ".pytest_cache"})
+_NATIVE_SDIST_FILES = (
+    "src/native/amiga/daemon/amigentd.c",
+    "src/native/amiga/apollo/apollo_audio.c",
+    "src/native/amiga/apollo/apollo_mmio.c",
+    "src/native/amiga/Makefile.apollo",
+)
+
+
 def _names_ending(names, filename):
     return [name for name in names if name.replace("\\", "/").endswith("/" + filename)]
 
 
-def test_wheel_and_sdist_carry_the_apollo_executables(tmp_path):
-    out = tmp_path / "dist"
-    work = tmp_path / "work"
-    out.mkdir()
-    script = tmp_path / "build_dist.py"
+def _stage_source(source_root: Path, dest: Path) -> Path:
+    source_root = source_root.resolve()
+
+    def _ignore(dirpath: str, names: list[str]) -> set[str]:
+        here = Path(dirpath).resolve()
+        ignored = {name for name in names if name in {"__pycache__", ".pytest_cache"} or name.endswith(".egg-info")}
+        if here == source_root:
+            ignored.update(name for name in names if name in _TOP_IGNORED)
+        return ignored
+
+    shutil.copytree(source_root, dest, ignore=_ignore)
+    return dest
+
+
+def _build_distributions(
+    source_root: Path, out_dir: Path, work_dir: Path, *, extra_env: dict[str, str] | None = None
+) -> tuple[Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    script = work_dir / "build_dist.py"
     script.write_text(
         "import os\n"
         "import setuptools\n"
         "from setuptools.command.build import build as build_command\n"
+        "from setuptools.command.sdist import sdist as sdist_command\n"
         "original = build_command.initialize_options\n"
         "def initialize(self):\n"
         "    original(self)\n"
         "    self.build_base = os.environ['AMIGENT_BUILD_BASE']\n"
         "build_command.initialize_options = initialize\n"
+        "if os.environ.get('AMIGENT_FAIL_AFTER_EGG_INFO') == '1':\n"
+        "    def fail_sdist(self):\n"
+        "        raise RuntimeError('simulated sdist failure after egg_info')\n"
+        "    sdist_command.make_distribution = fail_sdist\n"
         "from setuptools.build_meta import build_sdist, build_wheel\n"
-        "import os as _os\n"
-        "out = _os.environ['AMIGENT_DIST_DIR']\n"
+        "out = os.environ['AMIGENT_DIST_DIR']\n"
         "print('WHEEL ' + build_wheel(out))\n"
         "print('SDIST ' + build_sdist(out))\n",
         encoding="utf-8",
     )
+    env = {**os.environ, "AMIGENT_DIST_DIR": str(out_dir), "AMIGENT_BUILD_BASE": str(work_dir)}
+    if extra_env:
+        env.update(extra_env)
     completed = subprocess.run(
         [sys.executable, str(script)],
-        cwd=ROOT, check=False, capture_output=True, text=True,
-        env={**os.environ, "AMIGENT_DIST_DIR": str(out), "AMIGENT_BUILD_BASE": str(work)},
+        cwd=source_root, check=False, capture_output=True, text=True, env=env,
     )
     if completed.returncode:
         raise AssertionError(
             f"in-process wheel/sdist build failed ({completed.returncode})\n"
             f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
-    produced = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if line.startswith(("WHEEL ", "SDIST ")))
-    wheel = out / produced["WHEEL"]
-    sdist = out / produced["SDIST"]
+    produced = dict(
+        line.split(" ", 1)
+        for line in completed.stdout.splitlines()
+        if line.startswith(("WHEEL ", "SDIST "))
+    )
+    return out_dir / produced["WHEEL"], out_dir / produced["SDIST"]
+
+
+def _verify_distributions(wheel: Path, sdist: Path, bin_dir: Path = BIN) -> tuple[list[str], list[str]]:
     with zipfile.ZipFile(wheel) as archive:
-        names = archive.namelist()
+        wheel_names = archive.namelist()
         for name, (size, digest) in APOLLO.items():
-            [member] = _names_ending(names, name)
-            data = archive.read(member)
-            assert len(data) == size and _sha(data) == digest and data.startswith(HUNK)
+            matches = _names_ending(wheel_names, name)
+            assert len(matches) == 1, f"expected 1 {name} in wheel, got {matches}"
+            data = archive.read(matches[0])
+            assert len(data) == size and _sha(data) == digest and data.startswith(HUNK), f"bad {name} in wheel"
         for name in ("amigentd", "amigentd.000", "amigent-monitor"):
-            [member] = _names_ending(names, name)
-            assert archive.read(member) == _packaged(name)
-        meta = archive.read(_names_ending(names, "METADATA")[0]).decode("utf-8")
+            matches = _names_ending(wheel_names, name)
+            assert len(matches) == 1, f"expected 1 {name} in wheel, got {matches}"
+            assert archive.read(matches[0]) == (bin_dir / name).read_bytes()
+        meta = archive.read(_names_ending(wheel_names, "METADATA")[0]).decode("utf-8")
         requires = [line for line in meta.splitlines() if line.startswith("Requires-Dist:")]
         assert requires and all("apollo" not in line.lower() for line in requires)
-        folded = "\n".join(names)
+        folded = "\n".join(name.replace("\\", "/") for name in wheel_names)
         for banned in EXCLUDED:
             assert banned not in folded
+        assert "src/native/" not in folded
     with tarfile.open(sdist, "r:gz") as archive:
-        names = archive.getnames()
+        sdist_names = archive.getnames()
         for name, (size, digest) in APOLLO.items():
-            [member] = _names_ending(names, name)
-            data = archive.extractfile(member).read()
-            assert len(data) == size and _sha(data) == digest
+            matches = _names_ending(sdist_names, name)
+            assert len(matches) == 1, f"expected 1 {name} in sdist, got {matches}"
+            data = archive.extractfile(matches[0]).read()
+            assert len(data) == size and _sha(data) == digest and data.startswith(HUNK), f"bad {name} in sdist"
         for name in ("amigentd", "amigentd.000", "amigent-monitor"):
-            [member] = _names_ending(names, name)
-            assert archive.extractfile(member).read() == _packaged(name)
-        folded = "\n".join(names)
+            matches = _names_ending(sdist_names, name)
+            assert len(matches) == 1, f"expected 1 {name} in sdist, got {matches}"
+            assert archive.extractfile(matches[0]).read() == (bin_dir / name).read_bytes()
+        folded = "\n".join(name.replace("\\", "/") for name in sdist_names)
         for banned in EXCLUDED:
             assert banned not in folded
-        assert any(name.endswith("pyproject.toml") for name in names)
+        assert any(name.endswith("pyproject.toml") for name in sdist_names)
+        for native_rel in _NATIVE_SDIST_FILES:
+            assert _names_ending(sdist_names, native_rel), f"missing native source {native_rel} in sdist"
+        assert _names_ending(sdist_names, "src/amigent.egg-info/PKG-INFO")
+        assert _names_ending(sdist_names, "src/amigent.egg-info/SOURCES.txt")
+    return wheel_names, sdist_names
+
+
+def test_wheel_and_sdist_carry_the_apollo_executables(tmp_path):
+    before = inventory(ROOT)
+    staged = _stage_source(ROOT, tmp_path / "source")
+    assert not list(staged.rglob("*.egg-info"))
+    wheel, sdist = _build_distributions(staged, tmp_path / "dist", tmp_path / "work")
+    assert unexpected(before, inventory(ROOT)) == []
+    assert list(staged.rglob("*.egg-info")) == [staged / "src" / "amigent.egg-info"]
+    _verify_distributions(wheel, sdist)
+
+
+def test_packaging_build_is_repeatable_and_ignores_residual_artifacts(tmp_path):
+    before = inventory(ROOT)
+    dirty = _stage_source(ROOT, tmp_path / "dirty_source")
+    (dirty / "src" / "amigent.egg-info").mkdir(parents=True)
+    (dirty / "src" / "amigent.egg-info" / "STALE.txt").write_text("stale\n", encoding="utf-8")
+    (dirty / "build").mkdir()
+    (dirty / "build" / "stale.bin").write_bytes(b"stale")
+    (dirty / "dist").mkdir()
+    (dirty / "dist" / "stale.whl").write_bytes(b"stale")
+    (dirty / "src" / "amigent" / "__pycache__").mkdir()
+    (dirty / "src" / "amigent" / "__pycache__" / "stale.pyc").write_bytes(b"stale")
+
+    for run in ("run1", "run2"):
+        staged = _stage_source(dirty, tmp_path / run / "source")
+        assert not list(staged.rglob("*.egg-info"))
+        wheel, sdist = _build_distributions(staged, tmp_path / run / "dist", tmp_path / run / "work")
+        wheel_names, sdist_names = _verify_distributions(wheel, sdist)
+        archived = "\n".join(wheel_names + sdist_names)
+        for stale in ("STALE.txt", "stale.bin", "stale.whl", "stale.pyc"):
+            assert stale not in archived
+    assert unexpected(before, inventory(ROOT)) == []
+
+
+def test_packaging_failure_detects_bad_apollo_binary_and_leaves_source_clean(tmp_path):
+    before = inventory(ROOT)
+
+    missing_src = _stage_source(ROOT, tmp_path / "missing_src")
+    (missing_src / "src" / "amigent" / "amiga" / "bin" / "amigentd.apollo").unlink()
+    wheel, sdist = _build_distributions(missing_src, tmp_path / "missing_dist", tmp_path / "missing_work")
+    with pytest.raises(AssertionError, match="amigentd.apollo"):
+        _verify_distributions(wheel, sdist)
+
+    bad_src = _stage_source(ROOT, tmp_path / "bad_src")
+    (bad_src / "src" / "amigent" / "amiga" / "bin" / "amigentd.apollo").write_bytes(b"wrong-apollo-bytes")
+    wheel, sdist = _build_distributions(bad_src, tmp_path / "bad_dist", tmp_path / "bad_work")
+    with pytest.raises(AssertionError, match="amigentd.apollo"):
+        _verify_distributions(wheel, sdist)
+
+    broken_src = _stage_source(ROOT, tmp_path / "broken_src")
+    with pytest.raises(AssertionError, match="in-process wheel/sdist build failed"):
+        _build_distributions(
+            broken_src,
+            tmp_path / "broken_dist",
+            tmp_path / "broken_work",
+            extra_env={"AMIGENT_FAIL_AFTER_EGG_INFO": "1"},
+        )
+    assert (broken_src / "src" / "amigent.egg-info").is_dir()
+    assert unexpected(before, inventory(ROOT)) == []

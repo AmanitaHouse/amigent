@@ -105,6 +105,7 @@ class TlsFront:
         self.context.load_cert_chain(str(certfile))
         self.accepted = self.handshakes = 0
         self.refusing = False
+        self.delay = 0.0  # seconds before the handshake: a slow AmiSSL
         listener.listen(8)
         threading.Thread(target=self._accept, daemon=True).start()
 
@@ -140,6 +141,8 @@ class TlsFront:
 
     def _one(self, conn):
         try:
+            if self.delay:
+                threading.Event().wait(self.delay)  # not time.sleep, which tests may shorten
             if not self.plain:
                 conn = self.context.wrap_socket(conn, server_side=True)
                 self.handshakes += 1
@@ -239,7 +242,7 @@ def stage(tmp_path, monkeypatch):
         fake = fake or KeyedFake()
         world = {"wire": Tripwire(plain), "ctl": Tripwire(), "fake": fake,
                  "front": TlsFront(tls_port, fake, served, plain=plain_tls),
-                 "certificate": certificate}
+                 "certificate": certificate, "served": served}
         world["port"] = world["wire"].port
         return world
     monkeypatch.setenv("AMIGENT_KEY", KEY)
@@ -417,6 +420,106 @@ def test_default_mode_keeps_the_plain_paths(stage, monkeypatch):
     assert world["ctl"].knocks == 1
 
 
+# ---------------------------------------------------------------- TLS only: gone, and back
+
+@pytest.fixture
+def quick(monkeypatch):
+    """AMIGENT_REQUIRE_TLS with short pauses between looks and a short handshake allowance."""
+    monkeypatch.setenv("AMIGENT_REQUIRE_TLS", "1")
+    nap = time.sleep
+    monkeypatch.setattr(power.time, "sleep", lambda s: nap(0.2))
+    monkeypatch.setattr(tls, "HANDSHAKE_WAIT", 2.0)
+
+
+def _stalled(tmp_path):
+    """A plain tripwire and, on the port after, a pinned TLS port that takes the
+    connection and never answers the handshake."""
+    plain, stalled = _neighbours()
+    stalled.listen(8)  # the system completes the connection; nobody ever accepts it
+    tls.remember(HOST, _certificate(tmp_path, "stalled")[1])
+    return Tripwire(plain), stalled
+
+
+def test_require_tls_restart_checks_on_a_live_and_a_shut_port(stage, quick):
+    world = stage()
+    port = world["port"]
+    assert power.wait_for_port(HOST, port, 5)
+    assert not power.wait_gone(HOST, port, wait=1)
+    world["front"].refuse()
+    assert power.wait_gone(HOST, port, wait=5)
+    assert not power.wait_for_port(HOST, port, 1)
+    assert world["fake"].keys_heard == []  # looking sends no key
+    _no_plain(world)
+
+
+def test_require_tls_a_stalled_handshake_is_neither_gone_nor_back(tmp_path, quick):
+    wire, stalled = _stalled(tmp_path)
+    try:
+        assert not power.wait_gone(HOST, wire.port, wait=1), "a stalled handshake is not a restart"
+        assert not power.wait_for_port(HOST, wire.port, 1)
+    finally:
+        stalled.close()
+    assert wire.knocks == 0
+
+
+@pytest.mark.parametrize("case", ["wrong certificate", "no TLS behind the port"])
+def test_require_tls_a_failed_handshake_is_neither_gone_nor_back(stage, quick, case):
+    world = stage(pin="other" if case == "wrong certificate" else "same",
+                  plain_tls=case == "no TLS behind the port")
+    assert not power.wait_gone(HOST, world["port"], wait=1)
+    assert not power.wait_for_port(HOST, world["port"], 1)
+    assert world["front"].accepted >= 2 and world["fake"].keys_heard == []
+    _no_plain(world)
+
+
+def test_require_tls_wait_for_port_waits_out_a_slow_handshake(stage, quick, monkeypatch):
+    monkeypatch.setattr(tls, "HANDSHAKE_WAIT", 30.0)
+    world = stage()
+    world["front"].delay = 6.0  # longer than the 5 s connect timeout
+    assert power.wait_for_port(HOST, world["port"], 20)
+    assert world["front"].handshakes == 1
+    _no_plain(world)
+
+
+def test_require_tls_wait_for_port_sees_the_amiga_come_back(stage, quick):
+    world = stage()
+    port = world["port"]
+    world["front"].refuse()
+    back = threading.Timer(1.0, lambda: world.update(
+        front=TlsFront(_bound(port + 1), world["fake"], world["served"])))
+    back.start()
+    try:
+        assert power.wait_for_port(HOST, port, 20)
+    finally:
+        back.cancel()
+    assert world["front"].handshakes == 1
+    _no_plain(world)
+
+
+def test_require_tls_restart_is_not_inferred_from_a_stalled_handshake(tmp_path, quick, monkeypatch,
+                                                                      machine_session):
+    wire, stalled = _stalled(tmp_path)
+    monkeypatch.setattr(machine_session, "host", HOST)
+    monkeypatch.setattr(server, "SCREEN_PORT", wire.port)
+    monkeypatch.setattr(server, "reboot", lambda *a: None)  # C:Reboot ran, or so it says
+    monkeypatch.setattr(server, "wait_gone", lambda host, port: power.wait_gone(host, port, wait=1))
+    monkeypatch.setattr(server, "wait_for_port", lambda *a: pytest.fail("took the restart as done"))
+    try:
+        with pytest.raises(AmigaError, match="still up"):
+            server.amiga_restart()
+    finally:
+        stalled.close()
+    assert wire.knocks == 0
+
+
+def test_default_mode_restart_checks_stay_plain(stage, monkeypatch):
+    """Without the switch, gone and back are the plain hello, as before."""
+    world = stage()
+    assert power.wait_for_port(HOST, world["port"], 5)
+    assert not power.wait_gone(HOST, world["port"], wait=1)
+    assert world["wire"].knocks >= 2 and world["front"].accepted == 0
+
+
 # ---------------------------------------------------------------- read only, on the wire
 
 def test_read_only_opcodes_follow_the_protocol():
@@ -529,12 +632,77 @@ def test_read_only_server_skips_the_update_check(monkeypatch):
     assert asked == [1]
 
 
-def test_annotation_sets_name_real_tools():
+def test_read_only_tools_are_real_tools():
     registered = {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
-    assert server.READ_ONLY_TOOLS | server.CHANGING_TOOLS <= registered
-    assert not server.READ_ONLY_TOOLS & server.CHANGING_TOOLS
-    assert server.DESTRUCTIVE_TOOLS <= server.CHANGING_TOOLS
-    assert server.READ_ONLY_HINTED == server.READ_ONLY_TOOLS - {"amiga_tasks"}  # unrestricted here
+    assert server.READ_ONLY_TOOLS <= registered
+    assert all(server.annotations_for(name) is None for name in registered)  # unrestricted here
+
+
+def test_read_only_refuses_a_recursive_listing(monkeypatch):
+    monkeypatch.setattr(server, "READ_ONLY", True)
+    fn = getattr(server.amiga_list, "fn", server.amiga_list)
+    with pytest.raises(server.AmigaError, match="recursive listing is not offered"):
+        fn("SYS:", recursive=True)
+
+
+def _listing_world(monkeypatch, machine_session, read_only):
+    """A FakeAmiga with a folder below a folder, behind the bound session and a second
+    saved machine that machine= picks; both lines held to read_only."""
+    fake = FakeAmiga()
+    fake.add("RAM:top/sub/deep", b"1")
+    fake.add("RAM:top/file", b"2")
+    monkeypatch.setattr(server, "READ_ONLY", read_only)
+    other = MachineSession("other")
+    monkeypatch.setattr(other, "refresh_address", lambda: None)
+    for session in (machine_session, other):
+        monkeypatch.setattr(session, "ctl", Commands(HOST, 1, fake.port, timeout=5, read_only=read_only))
+    monkeypatch.setattr(server.sessions, "resolve", lambda name: (other, name) if name else (machine_session, ""))
+    return fake, other
+
+
+def _call(name, arguments):
+    return asyncio.run(server.mcp.call_tool(name, arguments))
+
+
+@pytest.mark.parametrize("machine", ["", "other"])
+def test_read_only_recursive_listing_sends_no_dir_on_any_machine(monkeypatch, machine_session, machine):
+    fake, other = _listing_world(monkeypatch, machine_session, read_only=True)
+    try:
+        with pytest.raises(Exception, match="recursive listing is not offered"):
+            _call("amiga_list", {"path": "RAM:top", "recursive": True, "machine": machine})
+        assert DIR not in fake.counts  # refused before the first DIR of a walk
+        listed = str(_call("amiga_list", {"path": "RAM:top", "machine": machine}))
+        assert "file" in listed and "sub" in listed and "deep" not in listed
+        assert fake.counts[DIR] == 1
+    finally:
+        other.ctl.close()
+        other.lookout._pool.shutdown(wait=True)
+
+
+def test_unrestricted_recursive_listing_still_walks(monkeypatch, machine_session):
+    fake, other = _listing_world(monkeypatch, machine_session, read_only=False)
+    try:
+        listed = str(_call("amiga_list", {"path": "RAM:top", "recursive": True}))
+        assert "sub/deep" in listed and "file" in listed
+        assert fake.counts[DIR] >= 2  # one DIR a level
+    finally:
+        other.ctl.close()
+        other.lookout._pool.shutdown(wait=True)
+
+
+def test_hints_follow_the_server_not_the_tool_name(monkeypatch):
+    if server.ToolAnnotations is None:
+        pytest.skip("this mcp has no ToolAnnotations")
+    registered = {t.name for t in asyncio.run(server.FastMCP.list_tools(server.mcp))}
+    monkeypatch.setattr(server, "READ_ONLY", True)
+    hinted = {name for name in registered if server.annotations_for(name) is not None}
+    assert hinted == server.READ_ONLY_TOOLS
+    for name in hinted:
+        hints = server.annotations_for(name).model_dump(exclude_none=True)
+        assert hints == {"readOnlyHint": True}, name  # nothing about destruction or idempotence
+    # a hint is no permission: a hinted-looking name that is not offered still is not run
+    with pytest.raises(Exception, match="not offered"):
+        _call("amiga_exec", {"command": "Version"})
 
 
 def test_read_only_instructions_name_only_the_offered_tools():
@@ -691,13 +859,6 @@ def test_stdio_unrestricted_keeps_every_tool(tmp_path):
     assert hello.get("instructions") == server.INSTRUCTIONS
     assert {"amiga_machines", "amiga_update", "amiga_pi_network", "amiga_emu68_update"} <= set(tools)
     for name, tool in tools.items():
-        hints = _hints(tool)
-        assert (hints.get("readOnlyHint") is True) == (name in server.READ_ONLY_HINTED), name
-        if name in server.CHANGING_TOOLS:
-            assert hints.get("readOnlyHint") is False, name
-        elif name not in server.READ_ONLY_HINTED:
-            assert not hints, name  # unaudited, amiga_tasks and the 1.5.0 tools: no claim
-        assert ("destructiveHint" in hints) == (name in server.DESTRUCTIVE_TOOLS), name
-        assert "idempotentHint" not in hints, name
+        assert not _hints(tool), name  # the default server makes no claim, as before
     assert not listed.get("isError") and "C" in listed["content"][0]["text"]
     assert ctl.knocks == 0

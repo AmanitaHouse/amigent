@@ -876,10 +876,14 @@ or the close gadget ends it, C clears the log.
   too.
 - `AMIGENT_REQUIRE_TLS=1` makes the PC side refuse anything but TLS with the
   pinned certificate: no pin, `AMIGENT_TLS=off`, a failed handshake or another
-  certificate end the attempt before a byte reaches a plain port. There is no
-  fallback to `amigactld`, no search of the network for a moved Amiga
-  (`amiga_find` with an address still works), and a refused TLS port is not
-  explained from the plain port's hello. `amiga_restart` waits on the TLS port;
+  certificate end the attempt before a byte reaches a plain port. The pin must
+  already be there (`amigent-setup` saves it as `tls-<name>.pem` in
+  `~/.config/amigent/`). There is no fallback to `amigactld`, no search of the
+  network for a moved Amiga (`amiga_find` with an address still works), and a
+  refused TLS port is not explained from the plain port's hello.
+  `amiga_restart` waits on the TLS port: gone once it takes no connection,
+  back once the pinned `amigentd` says hello, with up to 30 seconds for a slow
+  handshake. A handshake that stalls or fails counts as neither.
   `amiga_machines` and the overview count an Amiga as reachable only there.
 - `AMIGENT_READ_ONLY=1` makes `amigent-server` offer only `amiga_list`,
   `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
@@ -892,9 +896,17 @@ or the close gadget ends it, C clears the log.
   `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
   PowerPC section (it runs WarpOS's `stat`), and the server does not look for
   a new Amigent release. Its instructions to the AI name only those six tools.
-  The tools carry the MCP hint `readOnlyHint`; hints
-  are for the AI app, the server does the enforcing. These tools do show the
-  Amiga's file names, screen text and tasks to the AI.
+  `amiga_list` lists one directory at a time there, never recursively. These
+  tools carry the MCP hint `readOnlyHint`; hints are for the AI app, the server
+  does the enforcing. The default server gives no hints: an AI app may act on
+  them, and its tools have not all been audited for what a hint would claim.
+  These tools do show the Amiga's file names, screen text and tasks to the AI.
+- What `AMIGENT_REQUIRE_TLS` does not cover: the link to WinUAE's GDB server
+  (`amiga_emulator`, `amiga_trace` on an emulator) is plain TCP on the PC;
+  `amiga_pistorm` uses ssh and `amiga_serial_log` a local serial port. The
+  remote desktop, the overview and `amigent-setup` follow the variable only
+  when they see it, so set it for them too when they are started on their
+  own.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

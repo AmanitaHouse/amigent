@@ -48,6 +48,8 @@ class Link:
         self.started += 1
 
     def audio_read(self):
+        if self.stopped:
+            return None  # like amigentd: the end marker follows the stop request
         time.sleep(0.005)
         return 48000, b"\x01\x00\x02\x00"
 

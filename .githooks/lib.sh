@@ -68,15 +68,37 @@ load_verified_upstream() {
         || guard_fail "upstream tag does not match the verified tag object. Fail closed."
     [ "$actual_commit" = "$baseline_commit" ] \
         || guard_fail "upstream tag does not point at the verified commit. Fail closed."
-    baseline_main=$(sed -n '4s/\r$//;4p' "$file")
-    [ "$baseline_main" = "f6aab1d4953c1d83be2f71e73faef6fa5dc236ff" ] \
-        || guard_fail "upstream baseline main is not the verified commit. Fail closed."
-    git cat-file -e "$baseline_main^{commit}" 2>/dev/null \
-        || guard_fail "verified upstream main commit is missing. Fail closed."
-    git merge-base --is-ancestor "$baseline_commit" "$baseline_main" \
-        || guard_fail "verified upstream main is not a descendant of the verified tag. Fail closed."
+    # The reviewed upstream main boundaries, as exact commit ids, oldest first. Each one
+    # is a point on one line of upstream history that was reviewed and is already in the
+    # fork. Everything reachable from a boundary is exempt; nothing else is. Never a
+    # ref name, never a pattern. A later boundary (for example one that covers upstream
+    # PR #50) is added only by a deliberate reconciliation: one more id here and in the file.
+    #   f6aab1d4  tracked boundary before PR #22
+    #   8e576ad9  boundary the installed hook trusted before PR #22
+    #   dfd08619  upstream PRs #46 and #52, merged into the fork by PR #22
+    trusted_boundaries="f6aab1d4953c1d83be2f71e73faef6fa5dc236ff 8e576ad94d8c936a662dfd7375c31456341f49fd dfd086194c918cd91f91626072d20ec6e605d1bf"
+    line=3
+    previous=$baseline_commit
+    for boundary in $trusted_boundaries; do
+        line=$((line + 1))
+        listed=$(sed -n "${line}p" "$file" | tr -d '\r')
+        [ "$listed" = "$boundary" ] \
+            || guard_fail "upstream baseline line $line is not the verified boundary $boundary. Fail closed."
+        resolved=$(git rev-parse --verify --quiet "${boundary}^{commit}") \
+            || guard_fail "verified upstream boundary $boundary is missing. Fail closed."
+        [ "$resolved" = "$boundary" ] \
+            || guard_fail "verified upstream boundary $boundary does not resolve to itself. Fail closed."
+        git merge-base --is-ancestor "$previous" "$boundary" \
+            || guard_fail "verified upstream boundary $boundary does not descend from $previous. Fail closed."
+        previous=$boundary
+    done
+    # Nothing beyond the verified boundaries may be listed.
+    extra=$(sed -n "$((line + 1)),\$p" "$file" | tr -d '\r\n \t')
+    [ -z "$extra" ] \
+        || guard_fail "upstream baseline lists a commit that is not a verified boundary. Fail closed."
     verified_upstream=$baseline_commit
-    verified_upstream_main=$baseline_main
+    verified_upstream_main=$previous
+    verified_upstream_boundaries=$trusted_boundaries
 }
 
 parse_name() {

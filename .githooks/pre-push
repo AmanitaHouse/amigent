@@ -2,8 +2,9 @@
 # Reject a push that introduces a fork commit whose raw author or committer is not
 # this repository's identity. Published origin history is left alone. Upstream
 # history is left alone only when refs/tags/upstream-v1.4.0 is the verified
-# annotated tag object and the pinned upstream main commit descends from it.
-# A tag name that starts with upstream- is not an exemption.
+# annotated tag object and each pinned upstream main boundary commit (see
+# lib.sh) exists and descends from it. A ref or tag name that starts with
+# upstream- is not an exemption, and neither is an author name.
 # This hook does not rewrite commits and does not use the network.
 
 . "$(dirname "$0")/lib.sh"
@@ -27,7 +28,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         || guard_fail "cannot read commit $local_sha. Fail closed."
 
     # One --not applies to every revision that follows. Repeating --not toggles it.
-    set -- "$local_sha" --not "$verified_upstream" "$verified_upstream_main"
+    # shellcheck disable=SC2086  # the boundaries are 40-hex ids, split on purpose
+    set -- "$local_sha" --not "$verified_upstream" $verified_upstream_boundaries
     for remote_tip in $(git for-each-ref --format='%(objectname)' refs/remotes/origin); do
         set -- "$@" "$remote_tip"
     done

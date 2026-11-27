@@ -17,8 +17,9 @@ Versions follow [semver](https://semver.org). The number lives in
   those tools need; `amiga_tasks` leaves out the PowerPC section, which runs
   commands. There is no update check either, and the server's instructions to
   the AI name only those six tools.
-  `amiga_list` lists one directory at a time there. These six tools carry the
-  MCP hint `readOnlyHint`; the default server gives no hints, as before.
+  `amiga_list` lists one directory at a time there. With mcp 1.7 or later
+  these six tools carry the MCP hint `readOnlyHint`; the default server gives
+  no hints, as before.
 
 ## 1.5.0 (2026-11-23)
 

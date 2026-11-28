@@ -45,6 +45,9 @@ def test_apollo_makefile_roots_at_repository():
     text = (ROOT / "src/native/amiga/Makefile.apollo").read_text(encoding="utf-8")
     assert "ROOT := $(abspath $(HERE)/../../..)" in text
     assert "APOLLO := $(HERE)/apollo" in text
+    assert "CPU_FLAG ?= -m68080" in text
+    assert "CC ?= $(PREFIX)/bin/m68k-amigaos-gcc" in text
+    assert "PROBE_CFLAGS := -noixemul -O2 -m68000" in text
 
 
 def test_guide_and_protocol_name_new_paths():
@@ -66,3 +69,8 @@ def test_amiga_workflow_uses_native_paths():
     assert "src/native/amiga/tools/amigent-status.c" in text
     assert "src/native/amiga/tools/amigent-monitor.c" in text
     assert "amiga/amigentd.c" not in text
+    assert "make -f src/native/amiga/Makefile.apollo" in text
+    assert "CPU_FLAG=-m68020 clean all" in text
+    assert "Makefile.apollo" in text and "install" not in text.split("make -f src/native/amiga/Makefile.apollo", 1)[1].splitlines()[0]
+    assert "out-apollo-ci" in text
+    assert "name: apollo-gcc16-compile-check-ci-only" in text

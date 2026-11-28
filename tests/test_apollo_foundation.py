@@ -297,8 +297,9 @@ def test_protocol_6_ends_at_quiet_audio_is_apollo_only_and_the_probe_is_68000_on
     assert re.search(r"#ifdef AMIGENT_APOLLO\s*CMD_AUDIO = 48.*?#else\s*CMD_EMU68", daemon, re.S)
     assert "case CMD_AUDIO:" in daemon and "CMD_PIP" not in daemon
     protocol = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
-    assert "| 48 | AUDIO |" in protocol and "Apollo build only" in protocol
+    assert "| 49 | AUDIO |" in protocol and "audio=49" in protocol
     assert "| 48 | EMU68 |" in protocol
+    assert "audio=1" in protocol and "legacy opcode `48`" in protocol
 
     detect = (ROOT / "src/native/amiga/apollo" / "apollo_detect.c").read_text(encoding="utf-8")
     probe = (ROOT / "src/native/amiga/apollo" / "apollo_probe.c").read_text(encoding="utf-8")

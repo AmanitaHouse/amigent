@@ -186,7 +186,10 @@ def test_page_source_enforces_visibility_gates():
     assert "capabilityEpoch" in js
     assert "invalidateHearCapabilities" in js
     assert "proto < 6" in js
-    assert 'info.audio === "1"' in js
+    assert 'audio === "49"' in js
+    assert 'audio === "1"' in js
+    assert 'emu68 === "1"' in js
+    assert 'pip !== "1"' in js
     assert "apolloMachine(info)" in js
     assert "hearEligible(amiga)" in js
     # Must not offer Hear from audio=1 alone.

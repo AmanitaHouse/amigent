@@ -31,9 +31,12 @@ TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
 LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
-EMU68 = 48  # protocol 6, "emu68" in SYSINFO (amigentd 1.5.0, Pi/Emu68 builds)
-AUDIO = 48  # Apollo build only (replaces EMU68 there), and only when SYSINFO says audio=1
-# Opcode 49 is reserved for PIP. Nothing in this tree sends it.
+EMU68 = 48  # protocol 6, "emu68" in SYSINFO (amigentd 1.5.0, authoritative upstream opcode)
+AUDIO = 49  # protocol 6, "audio=49" in SYSINFO (authoritative upstream CMD_AUDIO)
+# Historical fork-only AUDIO opcodes retained strictly for negotiated transitional
+# compatibility with already-deployed Apollo daemons (not authoritative for new work).
+LEGACY_AUDIO_6 = 48  # historical fork protocol 6 Apollo build advertising audio=1
+LEGACY_AUDIO_5 = 38  # historical fork protocol 5 Apollo build advertising audio=1
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -81,21 +84,128 @@ def read_only_allows(protocol: int, cmd: int) -> bool:
     return protocol == PACK_PROTOCOL and cmd in READ_ONLY_COMMANDS_5
 
 
+def _valid_protocol(protocol: object) -> bool:
+    return isinstance(protocol, int) and not isinstance(protocol, bool)
+
+
+def apollo_machine(info: dict | None) -> bool:
+    """Whether SYSINFO identifies an Apollo/68080 machine (ApolloOS or 68080 CPU)."""
+    if not isinstance(info, dict) or not info:
+        return False
+    if info.get("os") == "ApolloOS":
+        return True
+    return "68080" in str(info.get("cpu") or "")
+
+
+def _legacy_audio_opcode(protocol: int, info: dict) -> int | None:
+    """Historical fork AUDIO opcode for already-deployed Apollo daemons, or None.
+
+    - Protocol 6 with ``audio=1`` and no contradictory ``emu68=1`` -> legacy opcode 48.
+    - Protocol 5 with ``audio=1`` -> legacy opcode 38.
+    Never returns an opcode for unknown/malformed capabilities or newer protocols.
+    """
+    if not _valid_protocol(protocol):
+        return None
+    audio = str(info.get("audio") or "").strip()
+    emu68 = str(info.get("emu68") or "").strip()
+    if protocol == LOADED_PROTOCOL and audio == "1":
+        if emu68 == "1":
+            return None
+        return LEGACY_AUDIO_6
+    if protocol == PACK_PROTOCOL and audio == "1":
+        return LEGACY_AUDIO_5
+    return None
+
+
+def audio_capability_error(protocol: int, info: dict | None = None) -> str:
+    """Why AUDIO must not be dispatched for ``(protocol, info)``, or ``""`` if valid."""
+    if not _valid_protocol(protocol) or protocol < PACK_PROTOCOL:
+        return (f"needs amigentd 1.3.0 or newer (protocol {PACK_PROTOCOL}); "
+                "run amigent-setup --update")
+    info = info if isinstance(info, dict) else {}
+    audio = str(info.get("audio") or "").strip()
+    emu68 = str(info.get("emu68") or "").strip()
+    pip = str(info.get("pip") or "").strip()
+    if protocol >= LOADED_PROTOCOL:
+        if audio == str(AUDIO):
+            if pip == "1":
+                return "contradictory SYSINFO capabilities: audio=49 and pip=1 cannot share opcode 49"
+            if emu68 == "1":
+                return "contradictory SYSINFO capabilities: audio=49 and emu68=1 are incompatible"
+            return ""
+        if audio == "1":
+            if protocol != LOADED_PROTOCOL:
+                return (f"legacy audio=1 (opcode {LEGACY_AUDIO_6}) is only supported on protocol "
+                        f"{LOADED_PROTOCOL}; update the Apollo daemon for audio={AUDIO}")
+            if emu68 == "1":
+                return (f"ambiguous opcode {LEGACY_AUDIO_6}: SYSINFO advertises both "
+                        "legacy audio=1 and emu68=1")
+            return ""
+        if audio in ("", "0"):
+            return (f"needs an Apollo build of amigentd advertising audio={AUDIO} "
+                    "(or legacy audio=1)")
+        return f"unsupported or malformed SYSINFO audio={audio!r}; refusing AUDIO dispatch"
+    if protocol == PACK_PROTOCOL:
+        if audio == "1":
+            return ""
+        if audio in ("", "0"):
+            return "needs an Apollo build of amigentd advertising audio=1 on protocol 5"
+        return f"unsupported SYSINFO audio={audio!r} on protocol 5; refusing AUDIO dispatch"
+    return f"AUDIO is not available on protocol {protocol}"
+
+
+def emu68_capability_error(protocol: int, info: dict | None = None) -> str:
+    """Why EMU68 (opcode 48) must not be dispatched for ``(protocol, info)``, or ``""``."""
+    if not _valid_protocol(protocol) or protocol < LOADED_PROTOCOL:
+        return "needs amigentd 1.5.0 or newer; run amigent-setup --update"
+    info = info if isinstance(info, dict) else {}
+    audio = str(info.get("audio") or "").strip()
+    emu68 = str(info.get("emu68") or "").strip()
+    if audio == "1":
+        if emu68 == "1":
+            return (f"ambiguous opcode {EMU68}: SYSINFO advertises both "
+                    "legacy audio=1 and emu68=1")
+        return f"opcode {EMU68} is legacy AUDIO (audio=1) on this Apollo daemon, not EMU68"
+    if audio == str(AUDIO) and emu68 == "1":
+        return "contradictory SYSINFO capabilities: audio=49 and emu68=1 are incompatible"
+    if audio not in ("", "0", str(AUDIO)):
+        return f"unsupported or malformed SYSINFO audio={audio!r}; refusing opcode {EMU68} EMU68 dispatch"
+    if "emu68" not in info:
+        return "needs amigentd 1.5.0 or newer; run amigent-setup --update"
+    return ""
+
+
 def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int | None:
     """The opcode for one feature on this daemon, or None when it is not offered.
 
-    Protocol 6 uses the upstream map. Opcode 38 is LOADED there, and AUDIO is 48
-    only when SYSINFO says ``audio=1``. Opcode 49 is reserved for PIP and is
-    returned only when that daemon advertises ``pip=1``. Protocol 5 uses the
-    published AmanitaHouse map, and only when SYSINFO advertises it: AUDIO 38,
-    PIP 39, LOADED 40 when ``modules=1``, TASKS 41 when ``tasklist=1``.
+    Authoritative upstream protocol 6 map:
+    - ``EMU68`` is opcode 48 (refused when legacy ``audio=1`` or contradictory
+      ``audio=49`` + ``emu68=1`` is advertised).
+    - ``AUDIO`` is opcode 49 when SYSINFO says ``audio=49`` without conflicting
+      ``pip=1`` or ``emu68=1``.
+    - ``PIP`` is retired and has no active opcode on any protocol.
+
+    Transitional fork legacy compatibility (strictly capability-negotiated):
+    - Protocol 6 ``audio=1`` (without ``emu68=1``) -> legacy AUDIO opcode 48.
+    - Protocol 5 ``audio=1`` -> legacy AUDIO opcode 38; ``modules=1`` -> LOADED 40;
+      ``tasklist=1`` -> TASKS 41.
     """
-    info = info or {}
+    if not _valid_protocol(protocol):
+        return None
+    info = info if isinstance(info, dict) else {}
+    if feature == "PIP":
+        return None
     if protocol >= LOADED_PROTOCOL:
         if feature == "AUDIO":
-            return AUDIO if info.get("audio") == "1" else None
-        if feature == "PIP":
-            return 49 if info.get("pip") == "1" else None
+            if audio_capability_error(protocol, info):
+                return None
+            if str(info.get("audio") or "").strip() == str(AUDIO):
+                return AUDIO
+            return _legacy_audio_opcode(protocol, info)
+        if feature == "EMU68":
+            if emu68_capability_error(protocol, info):
+                return None
+            return EMU68
         if feature == "LOADED" and info.get("loaded") == "1":
             return LOADED
         if feature == "TASKS" and info.get("loaded") == "1":
@@ -108,26 +218,41 @@ def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int
             return None if info.get("trace") == "0" else TRACE
         if feature == "POKE":
             return POKE
+        if feature in ("LOCKS", "CPU", "DRAG", "QUIET") and info.get("probe") == "1":
+            return {"LOCKS": LOCKS, "CPU": CPU, "DRAG": DRAG, "QUIET": QUIET}[feature]
         return None
     if protocol != PACK_PROTOCOL:
         return None
-    legacy = {"AUDIO": (38, "audio"), "PIP": (39, "pip"),
-              "LOADED": (40, "modules"), "TASKS": (41, "tasklist")}
+    if feature == "AUDIO":
+        return _legacy_audio_opcode(protocol, info)
+    legacy = {"LOADED": (40, "modules"), "TASKS": (41, "tasklist")}
     if feature not in legacy:
         return None
     opcode, flag = legacy[feature]
     return opcode if info.get(flag) == "1" else None
 
 
-def audio_request(arg: int = 0, y: int = 0, protocol: int = LOADED_PROTOCOL) -> bytes:
+def audio_request(arg: int = 0, y: int = 0, protocol: int = LOADED_PROTOCOL,
+                  info: dict | None = None) -> bytes:
     """The 10-byte AUDIO header. arg 1 starts a stream, arg 2 stops, y is a one-shot in ms.
 
-    Protocol 6 is opcode 48. Protocol 5 is opcode 38, and only a daemon that
-    advertised ``audio=1`` may be sent it.
+    Defaults to canonical upstream opcode 49 on protocol >= 6 (``audio=49``), or
+    legacy opcode 38 on protocol 5 (``audio=1``). Pass ``info`` to negotiate
+    explicitly (including legacy protocol-6 ``audio=1`` on opcode 48).
     """
-    opcode = feature_opcode(protocol, "AUDIO", {"audio": "1"})
+    if info is None:
+        if not _valid_protocol(protocol):
+            raise AmigaError("AUDIO is not available on this protocol")
+        if protocol >= LOADED_PROTOCOL:
+            info = {"audio": str(AUDIO)}
+        elif protocol == PACK_PROTOCOL:
+            info = {"audio": "1"}
+        else:
+            raise AmigaError("AUDIO is not available on this protocol")
+    opcode = feature_opcode(protocol, "AUDIO", info)
     if opcode is None:
-        raise AmigaError("AUDIO is not available on this protocol")
+        err = audio_capability_error(protocol, info)
+        raise AmigaError(f"AUDIO: {err}" if err else "AUDIO is not available on this protocol")
     return struct.pack(">BBHHHH", opcode, arg & 0xFF, 0, y & 0xFFFF, 0, 0)
 
 
@@ -155,17 +280,16 @@ def audio_uses_tls(flags: int, host: str) -> bool:
     return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
 
 
-def apollo_commands(info: dict | None) -> frozenset[str]:
-    """AUDIO (and PIP only when SYSINFO says ``pip=1``) offered by this daemon.
+def apollo_commands(info: dict | None, protocol: int = LOADED_PROTOCOL) -> frozenset[str]:
+    """Optional Apollo commands offered by this daemon.
 
-    This contribution streams AUDIO only. ``pip=0`` is not a picture.
+    Reports ``AUDIO`` only when capability negotiation succeeds (canonical
+    ``audio=49`` on protocol >= 6, or legacy ``audio=1`` without conflicts).
+    PIP is retired and never reported.
     """
-    info = info or {}
     commands = set()
-    if info.get("audio") == "1":
+    if feature_opcode(protocol, "AUDIO", info) is not None:
         commands.add("AUDIO")
-    if info.get("pip") == "1":
-        commands.add("PIP")
     return frozenset(commands)
 
 
@@ -806,13 +930,15 @@ class AmigaChannel(VolumeFlush):
         self._need6(what)
         if getattr(self, "_emu68", None) is None:
             info = self.sysinfo()
-            # The Apollo build answers emu68=0 too, but opcode 48 is AUDIO there: never EMU68.
-            self._apollo_48 = feature_opcode(self.protocol, "AUDIO", info) is not None
-            self._emu68 = "emu68" in info and not self._apollo_48
-        if getattr(self, "_apollo_48", False):
-            raise AmigaError(f"{what}: opcode 48 is AUDIO on the Apollo build of amigentd, not EMU68")
+            err = emu68_capability_error(self.protocol, info)
+            self._emu68_error = err
+            self._emu68 = not err
         if not self._emu68:
-            raise AmigaError(f"{what} needs amigentd 1.5.0 or newer; run amigent-setup --update")
+            err = getattr(self, "_emu68_error", "")
+            if err and err.startswith("needs amigentd"):
+                raise AmigaError(f"{what} {err}")
+            raise AmigaError(f"{what}: {err}" if err else
+                             f"{what} needs amigentd 1.5.0 or newer; run amigent-setup --update")
 
     def emu68_info(self, counters: bool = False) -> list[str]:
         """key=value lines: emu68=0 alone without Emu68; else device tree, Pi, counters."""
@@ -838,19 +964,27 @@ class AmigaChannel(VolumeFlush):
         self._one(Request(QUIET, "", 0, seconds))
 
     def _apollo_opcode(self, what: str, feature: str) -> int:
-        """48 on protocol 6 when audio=1. Protocol 5 uses 38 only when advertised.
+        """Negotiate the AUDIO opcode from SYSINFO and protocol version.
 
-        A protocol 6 channel is never sent opcode 38 for AUDIO. A classic daemon
-        that did not advertise the extension is not sent one. PIP has no method.
+        - Protocol >= 6 with ``audio=49`` (no ``pip=1`` / ``emu68=1`` conflict) -> 49.
+        - Legacy protocol 6 with ``audio=1`` (no ``emu68=1`` conflict) -> 48.
+        - Legacy protocol 5 with ``audio=1`` -> 38.
+        PIP has no method or active opcode; contradictory/malformed SYSINFO fails closed.
         """
         if not self._sock:
             self.connect()
-        if self.protocol < PACK_PROTOCOL:
+        if feature != "AUDIO":
+            raise AmigaError(f"{what}: {feature} is not supported")
+        if not _valid_protocol(self.protocol) or self.protocol < PACK_PROTOCOL:
             raise AmigaError(f"{what} needs amigentd 1.3.0 or newer (protocol {PACK_PROTOCOL}); "
                              "run amigent-setup --update")
-        opcode = feature_opcode(self.protocol, feature, self.sysinfo())
+        info = self.sysinfo()
+        err = audio_capability_error(self.protocol, info)
+        if err:
+            raise AmigaError(f"{what}: {err}")
+        opcode = feature_opcode(self.protocol, feature, info)
         if opcode is None:
-            raise AmigaError(f"{what} needs the Apollo build of amigentd")
+            raise AmigaError(f"{what} needs an Apollo build of amigentd")
         return opcode
 
     def audio(self, ms: int = 0) -> tuple[int, bytes]:

@@ -1,6 +1,8 @@
 # 68000 ApolloOS probe (ApolloOS + AFF_FPGA), the 68080 daemon with ARNE audio,
 # and the 68080 amigent-monitor. PIP is not built here.
-# Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
+# Set APOLLOCROSSDEV to the ApolloCrossDev checkout (uses -m68080 by default),
+# or pass PREFIX= and CPU_FLAG=-m68020 for GCC 16 CI compile verification only
+# (GCC 16 rejects -m68080; release binaries stay ApolloCrossDev -m68080 builds).
 # `all` writes under build/apollo/. `install` copies those into the package bin/
 # only after an explicit request — never as a side effect of the default target.
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -12,23 +14,27 @@ TOOLS := $(HERE)/tools
 
 GCC_FLAVOR ?= GCC-6.50-Stable
 PREFIX ?= $(APOLLOCROSSDEV)/Compilers/$(GCC_FLAVOR)
+# Explicit := overrides GNU Make's built-in CC=cc default and ambient host CC
+# env vars so ApolloCrossDev builds never fall back to the host compiler; CI
+# overrides CC on the make command line (e.g. CC=m68k-amigaos-gcc).
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
+CPU_FLAG ?= -m68080
 
-ifeq ($(wildcard $(CC)),)
+ifeq ($(shell command -v "$(CC)" 2>/dev/null),)
 $(error m68k-amigaos-gcc was not found at $(CC). Set APOLLOCROSSDEV to your ApolloCrossDev checkout after its GCC install script (Compilers/$(GCC_FLAVOR)), or pass PREFIX= to that compiler tree)
 endif
 
-CFLAGS := -noixemul -O2 -m68080 -fomit-frame-pointer -std=gnu99 -DAMIGENT_APOLLO
+CFLAGS := -noixemul -O2 $(CPU_FLAG) -fomit-frame-pointer -std=gnu99 -DAMIGENT_APOLLO
 INCLUDES := -I$(APOLLO) \
 	-I$(PREFIX)/m68k-amigaos/libnix/include \
 	-I$(PREFIX)/m68k-amigaos/sys-include \
 	-I$(PREFIX)/m68k-amigaos/ndk-include
 PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
-MONITOR_CFLAGS := -noixemul -O2 -m68080 -fomit-frame-pointer
+MONITOR_CFLAGS := -noixemul -O2 $(CPU_FLAG) -fomit-frame-pointer
 
 # No libnix: its startup opens "*" and the boot console stays up. The string
 # routines, qsort and the entry are in apollo_runtime.c and apollo_start.s.
-# libgcc.a in this tree is empty, so the 64-bit helpers are div64.c.
+# libgcc.a in ApolloCrossDev is empty, so the 64-bit helpers are div64.c.
 OBJ_NAMES := amigentd.o apollo_detect.o apollo_mmio.o apollo_audio.o gcc_support.o div64.o apollo_runtime.o
 OBJS := $(addprefix $(BUILD)/,$(OBJ_NAMES))
 

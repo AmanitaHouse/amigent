@@ -1,10 +1,13 @@
 #!/bin/bash
-# Build amigentd.apollo with ApolloCrossDev.
-# Export APOLLOCROSSDEV to the ApolloCrossDev checkout. From any directory:
+# Build amigentd.apollo, amigent-apollo-probe and amigent-monitor.apollo from source.
+# Export APOLLOCROSSDEV to the ApolloCrossDev checkout (uses -m68080 by default),
+# or pass PREFIX=/path/to/crosstools CC=m68k-amigaos-gcc CPU_FLAG=-m68020 for
+# GCC 16 CI compile-only verification (not for release binaries).
+# From any directory:
 #   src/native/amiga/build-amigentd-apollo
 #   make -f src/native/amiga/Makefile.apollo
 # The default target writes only under build/apollo.
-# Copying into src/amigent/amiga/bin is explicit:
+# Copying into src/amigent/amiga/bin is explicit (only after separate acceptance):
 #   src/native/amiga/build-amigentd-apollo install
 # vasm is never left to its default output name, a.out.
 #

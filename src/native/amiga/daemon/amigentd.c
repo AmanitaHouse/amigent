@@ -88,9 +88,8 @@ void UnLockBitMap(APTR handle);
 #endif
 
 #ifdef AMIGENT_APOLLO
-/* The 68000 probe and this daemon share the identification. This fork build
- * still carries legacy AUDIO on opcode 48; upstream assigns opcode 49 to
- * CMD_AUDIO and PIP is not implemented. */
+/* The 68000 probe and this daemon share the identification. AUDIO is opcode
+ * 49 on this build; EMU68 stays on opcode 48. */
 #include "apollo_audio.h"
 BOOL apollo_os_here(void);
 UWORD apollo_board(void);
@@ -158,11 +157,8 @@ enum {
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
-#ifdef AMIGENT_APOLLO
-    CMD_AUDIO = 48  /* ARNE mix (legacy fork opcode 48; upstream assigns opcode 49 to AUDIO; no PIP). */
-#else
-    CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
-#endif
+    CMD_EMU68,  /* protocol 6, "emu68" in SYSINFO */
+    CMD_AUDIO   /* protocol 6, opcode 49: ARNE mix, "audio=49" in SYSINFO (Apollo builds only) */
 };
 
 const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
@@ -4559,27 +4555,29 @@ static BOOL c_sysinfo(struct link *l)
     {
         UWORD f = SysBase->AttnFlags;
 #ifdef AMIGENT_APOLLO
-        t_pair(&t, "cpu", 68080);  /* this binary contains 68080 instructions */
-#else
-        t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
+        BOOL is_apollo = apollo_os_here();
+        t_pair(&t, "cpu", (f & (1L << 10)) ? 68080 :
+                          f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
                           f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
-#endif
         t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
-#ifdef AMIGENT_APOLLO
-        {
+        t_str(&t, (const UBYTE *)"os=", FALSE);
+        t_str(&t, (const UBYTE *)(is_apollo ? "ApolloOS" : "AmigaOS"), FALSE);
+        t_chr(&t, '\n');
+        if (is_apollo || (f & (1L << 10))) {
             UWORD board = apollo_board();
 
-            t_str(&t, (const UBYTE *)"os=", FALSE);
-            t_str(&t, (const UBYTE *)(apollo_os_here() ? "ApolloOS" : "AmigaOS"), FALSE);
-            t_chr(&t, '\n');
             t_str(&t, (const UBYTE *)"board=", FALSE);
             t_hex(&t, board);
             t_chr(&t, '\n');
             t_str(&t, (const UBYTE *)"board_name=", FALSE);
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
-            t_pair(&t, "audio", 1);  /* opcode 48 is implemented in this build */
         }
+        t_pair(&t, "audio", CMD_AUDIO);  /* opcode 49 is implemented in this build */
+#else
+        t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
+                          f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
+        t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
 #endif
     }
     /* From protocol 5: how fast this Amiga packs, in KB/s, so the PC can tell
@@ -7998,7 +7996,6 @@ static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD 
     return c_text(l, &t);
 }
 
-#ifndef AMIGENT_APOLLO
 /* ---- Emu68: what runs on the Raspberry Pi, and its JIT settings ---------
  *
  * Emu68 (the 68k JIT on a PiStorm and other Pi boards) offers the Amiga side
@@ -8423,20 +8420,6 @@ static int emu68_cli(const char *spec)
     return RETURN_OK;
 }
 
-#else  /* AMIGENT_APOLLO: opcode 48 is AUDIO here, so EMU68 is not built */
-static BOOL emu68_present(void)
-{
-    return FALSE;
-}
-
-static int emu68_cli(const char *spec)
-{
-    (void)spec;
-    PutStr("amigentd: not Emu68, nothing changed\n");
-    return RETURN_WARN;
-}
-#endif  /* !AMIGENT_APOLLO */
-
 #ifdef AMIGENT_APOLLO
 /* What send() accepted. A full window is not an error: the caller pumps again. */
 static BOOL audio_send_some(struct link *l, UBYTE *buf, ULONG *sent, ULONG len)
@@ -8491,33 +8474,6 @@ static BOOL audio_idle(ULONG *rate)
  * queued and the next look tries again. Quiet for a moment means it stopped. */
 static BOOL audio_push(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate,
                        ULONG budget);
-
-static BOOL audio_feed(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate)
-{
-    LONG n;
-
-    if (*out_sent < *out_len) {
-        if (!audio_send_some(l, out, out_sent, *out_len))
-            return FALSE;
-        if (*out_sent >= *out_len)
-            *out_len = *out_sent = 0;
-        return TRUE;
-    }
-    if (apollo_audio_pending() < 4)
-        return TRUE;
-    n = apollo_audio_take(out + 8, 4096);
-    if (n < 4)
-        return TRUE;
-    be32(out, rate);
-    be32(out + 4, (ULONG)n);
-    *out_len = 8 + (ULONG)n;
-    *out_sent = 0;
-    if (!audio_send_some(l, out, out_sent, *out_len))
-        return FALSE;
-    if (*out_sent >= *out_len)
-        *out_len = *out_sent = 0;
-    return TRUE;
-}
 
 /* A few milliseconds, this task asleep. The port is this task's, so the
  * timer signals here. The device is the one the main task already opened.
@@ -8582,9 +8538,9 @@ static BOOL peer_local(struct link *l)
 {
     struct Library *SocketBase = l->base;
     struct sockaddr_in addr;
-    socklen_t len = sizeof(addr);
+    LONG len = sizeof(addr);
 
-    if (getpeername(l->fd, (struct sockaddr *)&addr, &len) != 0)
+    if (getpeername(l->fd, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len)) != 0)
         return TRUE;
     return addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK);
 }
@@ -8839,12 +8795,12 @@ static BOOL c_audio_stream(struct link *l)
         }
         seq = apollo_audio_seq();
         if (!since) {
+            ULONG burst = 0;
+
             if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
                 ok = FALSE;
                 break;
             }
-            ULONG burst = 0;
-
             while (burst < 4000 && apollo_audio_seq() == seq) {
                 apollo_audio_pump(&rate);
                 burst++;
@@ -8902,8 +8858,8 @@ static BOOL c_audio(struct link *l, UWORD ms)
     FreeVec(buf);
     return ok;
 }
-
 #endif
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -8979,10 +8935,8 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_cpu(l, y, w);
     case CMD_DRAG:  /* window as hex in the name; arg pattern, y steps, w pixels */
         return c_drag(l, c[1], x, y, w);
-#ifndef AMIGENT_APOLLO
     case CMD_EMU68:  /* c[1]: 0 info, 2 counters, 1 set (reg, value, mask longs in x bytes) */
         return c_emu68(l, c[1], x);
-#endif
     case CMD_QUIET:  /* the monitor draws nothing for y seconds; 0 ends it */
         quiet_monitor(y);
         return c_ok(l);

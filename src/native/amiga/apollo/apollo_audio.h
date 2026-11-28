@@ -1,4 +1,4 @@
-/* ARNE mix, shared by the Apollo daemon. Opcode 49, PIP, is not declared here. */
+/* ARNE mix, shared by the Apollo daemon. CMD_AUDIO is opcode 49; PIP is not declared here. */
 #ifndef AMIGENT_APOLLO_AUDIO_H
 #define AMIGENT_APOLLO_AUDIO_H
 

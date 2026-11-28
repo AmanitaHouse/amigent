@@ -21,7 +21,7 @@ class Page:
         self.got.append(data)
 
 
-def _page(host: str) -> Viewer:
+def _page(host: str, audio: str = "49") -> Viewer:
     viewer = Viewer(host, screen_port=1, ctl_port=1)
     viewer.screen.flags = PLAIN_CLOSED
     viewer.online = True
@@ -30,7 +30,7 @@ def _page(host: str) -> Viewer:
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
     viewer.event = lambda kind, **fields: viewer.sent.append((kind, fields))
-    viewer.amiga = {"os": "ApolloOS", "cpu": "68080", "audio": "1", "daemon_protocol": 6}
+    viewer.amiga = {"os": "ApolloOS", "cpu": "68080", "audio": audio, "daemon_protocol": 6}
     return viewer
 
 
@@ -64,7 +64,7 @@ class Link:
 # --- two machines, two Hear states ------------------------------------------------------------
 
 def test_two_viewers_have_independent_hear_state():
-    a, b = _page("192.0.2.10"), _page("192.0.2.11")
+    a, b = _page("192.0.2.10", audio="49"), _page("192.0.2.11", audio="1")
     assert a.hear is False and b.hear is False
     a.submit({"t": "audio", "on": True}, a.page)
     assert a.hear is True and b.hear is False
@@ -89,7 +89,7 @@ def test_one_machine_going_offline_does_not_clear_the_other():
     b.submit({"t": "audio", "on": True}, b.page)
     a._set_online(False, "")
     assert a.hear is False and a.amiga == {}
-    assert b.hear is True and b.online is True and b.amiga["audio"] == "1"
+    assert b.hear is True and b.online is True and b.amiga["audio"] == "49"
 
 
 def test_last_page_leaving_one_machine_leaves_the_other_hearing():
@@ -118,7 +118,7 @@ def test_stop_hear_clears_hear_tells_the_page_and_keeps_the_machine():
     assert ("audio", {"on": False}) in viewer.sent
     # not retire(): the connection, address state and reason are untouched
     assert viewer.enabled is True and viewer.online is True and viewer.reason == ""
-    assert viewer.amiga["audio"] == "1"
+    assert viewer.amiga["audio"] == "49"
 
 
 def test_stop_hear_when_hear_is_off_is_quiet():

@@ -20,7 +20,8 @@ from amigent.paths import AMIGA
 ROOT = Path(__file__).resolve().parent.parent
 PROTOCOL_6 = (
     "CMD_NOTE", "CMD_LOADED", "CMD_PEEK", "CMD_TASKS", "CMD_TASKCTL", "CMD_POKE",
-    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET",
+    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET", "CMD_EMU68",
+    "CMD_AUDIO",
 )
 
 
@@ -291,11 +292,11 @@ def test_protocol_6_ends_at_quiet_audio_is_apollo_only_and_the_probe_is_68000_on
     daemon = (ROOT / "src/native/amiga/daemon" / "amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
     names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
-    # Opcode 48 is AUDIO on Apollo builds and EMU68 on the others: one #ifdef/#else.
-    assert names == list(PROTOCOL_6) + ["CMD_AUDIO", "CMD_EMU68"]
+    assert names == list(PROTOCOL_6)
+    assert names.index("CMD_EMU68") + 37 == 48  # CMD_NOTE is 37 -> CMD_EMU68 is 48
+    assert names.index("CMD_AUDIO") + 37 == 49  # CMD_AUDIO is unique at 49
     assert "PROTOCOL_VERSION 6" in daemon
-    assert re.search(r"#ifdef AMIGENT_APOLLO\s*CMD_AUDIO = 48.*?#else\s*CMD_EMU68", daemon, re.S)
-    assert "case CMD_AUDIO:" in daemon and "CMD_PIP" not in daemon
+    assert "case CMD_AUDIO:" in daemon and "case CMD_EMU68:" in daemon and "CMD_PIP" not in daemon
     protocol = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "| 49 | AUDIO |" in protocol and "audio=49" in protocol
     assert "| 48 | EMU68 |" in protocol

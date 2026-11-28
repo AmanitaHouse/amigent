@@ -5,19 +5,71 @@ These tests check numbering, capability flags and the bytes on the wire.
 They do not play audio and they do not run on Apollo hardware.
 """
 
+import re
 import struct
 from pathlib import Path
 
 import pytest
 
 from amigent.channel import (
-    AUDIO, CPU, DRAG, EMU68, LEGACY_AUDIO_5, LEGACY_AUDIO_6, LOADED, LOCKS, NOTE, PEEK, POKE,
-    QUIET, TASKCTL, TASKS, TRACE, AmigaChannel, AmigaError, apollo_commands, audio_request,
-    feature_opcode,
+    AUDIO, CHECKSUM, CMD_AUTH, CMD_CHANNEL, COMPRESS, CPU, DEBUGLOG, DELETE, DIR,
+    DRAG, EMU68, EXEC, LEGACY_AUDIO_5, LEGACY_AUDIO_6, LOADED, LOCKS, MAKEDIR, NOTE,
+    PEEK, POKE, QUIET, READ, RENAME, STAT, SYSINFO, TASKCTL, TASKS, TEXT, TRACE,
+    TREE, VOLUMES, WAIT, WRITE, AmigaChannel, AmigaError, apollo_commands,
+    audio_request, feature_opcode,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = (NOTE, LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE, LOCKS, CPU, DRAG, QUIET)
+
+
+def _c_command_opcodes() -> list[tuple[str, int]]:
+    daemon = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
+    enum_block = daemon.split("enum {", 1)[1].split("};", 1)[0]
+    cleaned = re.sub(r"/\*.*?\*/", "", enum_block, flags=re.S)
+    entries = []
+    nxt = 0
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        for part in line.split(","):
+            token = part.strip()
+            if not token:
+                continue
+            if "=" in token:
+                name, val = [x.strip() for x in token.split("=", 1)]
+                nxt = int(val, 0)
+            else:
+                name = token
+            entries.append((name, nxt))
+            nxt += 1
+    return entries
+
+
+def test_every_command_has_a_unique_opcode_in_python_and_c():
+    python_ops = {
+        "CMD_AUTH": CMD_AUTH, "CMD_CHANNEL": CMD_CHANNEL,
+        "EXEC": EXEC, "READ": READ, "WRITE": WRITE, "DIR": DIR, "STAT": STAT,
+        "DELETE": DELETE, "RENAME": RENAME, "MAKEDIR": MAKEDIR, "CHECKSUM": CHECKSUM,
+        "SYSINFO": SYSINFO, "VOLUMES": VOLUMES, "TEXT": TEXT, "WAIT": WAIT,
+        "COMPRESS": COMPRESS, "TREE": TREE, "DEBUGLOG": DEBUGLOG, "NOTE": NOTE,
+        "LOADED": LOADED, "PEEK": PEEK, "TASKS": TASKS, "TASKCTL": TASKCTL,
+        "POKE": POKE, "TRACE": TRACE, "LOCKS": LOCKS, "CPU": CPU, "DRAG": DRAG,
+        "QUIET": QUIET, "EMU68": EMU68, "AUDIO": AUDIO,
+    }
+    assert len(set(python_ops.values())) == len(python_ops)
+    assert UPSTREAM == tuple(range(37, 48))
+    assert EMU68 == 48
+    assert AUDIO == 49
+    assert EMU68 != AUDIO
+
+    c_ops = _c_command_opcodes()
+    c_map = dict(c_ops)
+    assert len(set(c_map.values())) == len(c_ops)
+    assert c_map["CMD_EMU68"] == 48
+    assert c_map["CMD_AUDIO"] == 49
+    assert c_map["CMD_EMU68"] != c_map["CMD_AUDIO"]
 
 
 def test_upstream_opcodes_37_through_49_stay_authoritative():
@@ -27,6 +79,19 @@ def test_upstream_opcodes_37_through_49_stay_authoritative():
     assert EMU68 != AUDIO
     assert LEGACY_AUDIO_6 == 48
     assert LEGACY_AUDIO_5 == 38
+
+
+def test_emu68_stays_48_and_refuses_legacy_audio_1_overload():
+    assert feature_opcode(6, "EMU68", {"emu68": "1"}) == 48
+    assert feature_opcode(6, "EMU68", {"emu68": "0", "audio": "49"}) == 48
+    assert feature_opcode(6, "EMU68", {"emu68": "0", "audio": "1"}) is None
+
+    channel = AmigaChannel.__new__(AmigaChannel)
+    channel.protocol = 6
+    channel._sock = object()
+    channel.sysinfo = lambda: {"emu68": "0", "audio": "1"}
+    with pytest.raises(AmigaError, match="legacy AUDIO .*audio=1"):
+        channel._need_emu68("asking Emu68")
 
 
 def test_protocol_6_audio_negotiates_canonical_49_and_legacy_48():
@@ -108,21 +173,22 @@ def test_a_classic_daemon_is_not_offered_audio():
     channel = AmigaChannel.__new__(AmigaChannel)
     channel.protocol = 6
     channel._sock = object()
-    channel.sysinfo = lambda: {"cpu": "68020", "loaded": "1"}
+    channel.sysinfo = lambda: {"cpu": "68020", "loaded": "1", "emu68": "0"}
     with pytest.raises(AmigaError, match="Apollo"):
         channel.audio()
 
 
-def test_the_daemon_implements_legacy_audio_48_and_not_pip():
+def test_the_daemon_implements_audio_49_and_keeps_emu68_48():
     daemon = (ROOT / "src/native/amiga/daemon" / "amigentd.c").read_text(encoding="utf-8")
     audio = (ROOT / "src/native/amiga/apollo" / "apollo_audio.c").read_text(encoding="utf-8")
     assert "case CMD_AUDIO:" in daemon
+    assert "case CMD_EMU68:" in daemon
     assert "apollo_audio(" in audio and "arne.audio" in audio
     assert "apollo_pip" not in daemon and "apollo_pip" not in audio
     assert "c_pip" not in daemon
     assert "CMD_PIP" not in daemon and "CMD_PIP" not in audio
     assert "reserved for PIP" not in daemon
-    assert 't_pair(&t, "audio", 1)' in daemon
+    assert 't_pair(&t, "audio", CMD_AUDIO)' in daemon
     assert 't_pair(&t, "pip"' not in daemon
     makefile = (ROOT / "src/native/amiga" / "Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_audio.o" in makefile

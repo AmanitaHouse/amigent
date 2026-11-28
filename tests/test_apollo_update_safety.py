@@ -436,3 +436,14 @@ def test_a_missing_install_is_reported_and_nothing_is_replaced(tmp_path, monkeyp
     assert scripts_renewed(amiga)
     forced = FakeAmiga(None, info=APOLLO_INFO)
     assert run_update(monkeypatch, forced, force=True) == 0 and forced.files["C:amigentd"] == APOLLO
+
+
+def test_an_installed_apollo_of_any_build_is_updated_by_a_newer_packaged_apollo(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "amigentd.apollo").write_bytes(APOLLO)
+    for tag in (b"fork-a", b"fork-b", b"own-build"):
+        installed = build(version="1.5.0", date="18.11.2026", tag=tag, apollo=True)
+        assert consider_replacement(installed, APOLLO, "amigentd.apollo", bin_dir) == (True, "")
+        keep, reason = consider_replacement(installed, CLASSIC, "amigentd", bin_dir)
+        assert not keep and "less specialised" in reason

@@ -162,3 +162,14 @@ def test_packaged_apollo_embeds_harden_strings():
     # Refusal / bound messages from the new c_poke path
     assert b"writing memory is off" in data
     assert b"arne.audio" in data
+
+
+def test_unknown_same_version_apollo_stays_without_force(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    candidate = b"\x00\x00\x03\xf3$VER: amigentd 1.6.0 (24.11.2026)\x00 arne.audio"
+    (bin_dir / "amigentd.apollo").write_bytes(candidate)
+    unknown = b"$VER: amigentd 1.6.0 (24.11.2026)\x00 " + b"arne.audio" + b" unknown-apollo-bytes"
+    keep, reason = consider_replacement(unknown, candidate, "amigentd.apollo", bin_dir)
+    assert not keep
+    assert "not one of the builds" in reason or "not the one in this package" in reason

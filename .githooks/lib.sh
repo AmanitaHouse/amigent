@@ -71,12 +71,14 @@ load_verified_upstream() {
     # The reviewed upstream main boundaries, as exact commit ids, oldest first. Each one
     # is a point on one line of upstream history that was reviewed and is already in the
     # fork. Everything reachable from a boundary is exempt; nothing else is. Never a
-    # ref name, never a pattern. A later boundary (for example one that covers upstream
-    # PR #50) is added only by a deliberate reconciliation: one more id here and in the file.
+    # ref name, never a pattern. Any later boundary (for example future feature/1.6.0
+    # commits after upstream PR #50) is added only by a deliberate reconciliation:
+    # one more exact id here and in the file.
     #   f6aab1d4  tracked boundary before PR #22
     #   8e576ad9  boundary the installed hook trusted before PR #22
     #   dfd08619  upstream PRs #46 and #52, merged into the fork by PR #22
-    trusted_boundaries="f6aab1d4953c1d83be2f71e73faef6fa5dc236ff 8e576ad94d8c936a662dfd7375c31456341f49fd dfd086194c918cd91f91626072d20ec6e605d1bf"
+    #   5a85d63c  upstream PR #50 (Apollo AUDIO/Hear), integrated atomically with this pin
+    trusted_boundaries="f6aab1d4953c1d83be2f71e73faef6fa5dc236ff 8e576ad94d8c936a662dfd7375c31456341f49fd dfd086194c918cd91f91626072d20ec6e605d1bf 5a85d63c5aa8cb3ccacd716d806e81c8a7366543"
     line=3
     previous=$baseline_commit
     for boundary in $trusted_boundaries; do

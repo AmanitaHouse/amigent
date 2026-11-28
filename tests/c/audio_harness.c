@@ -52,7 +52,6 @@ struct sim_sockaddr_in { UBYTE sin_len, sin_family; UWORD sin_port; struct sim_i
 struct sim_sockaddr { UBYTE sa_len, sa_family; };
 #define sockaddr_in sim_sockaddr_in
 #define sockaddr sim_sockaddr
-typedef LONG socklen_t;
 #undef htonl
 #define htonl(x) (x)
 #undef INADDR_LOOPBACK
@@ -468,7 +467,6 @@ int main(int argc, char **argv)
     if (play && sscanf(play, "%ld:%ld", &play_from, &play_to) != 2)
         return 2;
     timer_main.tr_node.io_Device = &timer_dev;
-    (void)audio_feed;  /* fork amigentd.c keeps this helper next to audio_push */
     timer_io = notimer ? NULL : &timer_main;
     t_us = 5000000;  /* not zero: now_ms() is never 0 once the mix moves */
     for (c = 0; c < cycles; c++) {

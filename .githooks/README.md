@@ -17,8 +17,9 @@ That address is the GitHub noreply address for the AmanitaHouse account. The sam
 | `f6aab1d4953c1d83be2f71e73faef6fa5dc236ff` | tracked boundary after upstream 1.4.0 |
 | `8e576ad94d8c936a662dfd7375c31456341f49fd` | the boundary the installed hook trusted before PR #22 (a descendant of the one above) |
 | `dfd086194c918cd91f91626072d20ec6e605d1bf` | upstream PRs #46 and #52, merged into the fork by PR #22 |
+| `5a85d63c5aa8cb3ccacd716d806e81c8a7366543` | upstream PR #50 (Apollo AUDIO/Hear), integrated atomically into the fork |
 
-Everything reachable from a boundary is exempt from the author and committer check; nothing else is. A commit made later, including one that claims Andreas Wendorf or `GitHub` as author or committer, is a new fork commit and must carry the identity above. Upstream `5a85d63` and its PR #50 history are not a boundary. A boundary is added only by a deliberate reconciliation decision, as one exact id in both places, with the regression tests updated in the same change.
+Everything reachable from a boundary is exempt from the author and committer check; nothing else is. A commit made later, including one that claims Andreas Wendorf or `GitHub` as author or committer, is a new fork commit and must carry the identity above. Later upstream branches and PRs (such as `feature/1.6.0` at `49fd7539`, PR #53 or PR #54) are not a boundary. A boundary is added only by a deliberate reconciliation decision, as one exact id in both places, with the regression tests updated in the same change.
 
 GitHub's merge commits have `GitHub <noreply@github.com>` as committer. They are accepted only because they are already reachable from `origin`, so run `git fetch origin` after a pull request is merged on GitHub before pushing work that contains the merge commit. There is no exemption for the name `GitHub`.
 

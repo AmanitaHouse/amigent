@@ -1,4 +1,4 @@
-/* ARNE mix for the Apollo daemon. PIP is not implemented here.
+/* ARNE mix for the Apollo daemon. CMD_AUDIO is opcode 49; PIP is not implemented here.
  * The offsets are the ones measured from arne.audio 4.22. A later driver
  * that moves them is ignored rather than followed. */
 #include <exec/types.h>

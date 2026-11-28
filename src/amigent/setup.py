@@ -223,7 +223,7 @@ def window_source(name: str, build: str):
         path = AMIGA / "bin" / packaged
         return path if path.is_file() else None
     path = AMIGA / "bin" / packaged
-    return path if path.exists() else None
+    return path if path.is_file() else None
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:

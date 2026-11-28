@@ -1,4 +1,4 @@
-"""Stock Viewer Hear visibility — Apollo + audio=1 only (offline, not hardware)."""
+"""Stock Viewer Hear visibility — Apollo + audio=49 or legacy audio=1 (offline, not hardware)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +10,12 @@ from amigent.viewer import Viewer, apollo_machine, hear_eligible
 from amigent.webserver import WEB
 
 APOLLO_AUDIO = {
+    "os": "ApolloOS",
+    "cpu": "68080",
+    "audio": "49",
+    "daemon_protocol": 6,
+}
+APOLLO_AUDIO_LEGACY = {
     "os": "ApolloOS",
     "cpu": "68080",
     "audio": "1",
@@ -61,9 +67,10 @@ def test_eligibility_connecting_requires_live_connection_flag():
 
 
 def test_eligibility_non_apollo_hidden_even_with_audio():
-    info = {"os": "AmigaOS", "cpu": "68040", "audio": "1", "daemon_protocol": 6}
-    assert not apollo_machine(info)
-    assert not hear_eligible(info, connected=True)
+    for audio in ("49", "1"):
+        info = {"os": "AmigaOS", "cpu": "68040", "audio": audio, "daemon_protocol": 6}
+        assert not apollo_machine(info)
+        assert not hear_eligible(info, connected=True)
 
 
 def test_eligibility_protocol5_hidden():
@@ -75,12 +82,20 @@ def test_eligibility_protocol5_hidden():
 def test_eligibility_apollo_audio_zero_hidden():
     info = {**APOLLO_AUDIO, "audio": "0"}
     assert not hear_eligible(info, connected=True)
+    assert not hear_eligible({**APOLLO_AUDIO, "pip": "1"}, connected=True)
+    assert not hear_eligible({**APOLLO_AUDIO, "emu68": "1"}, connected=True)
+    assert not hear_eligible({**APOLLO_AUDIO_LEGACY, "emu68": "1"}, connected=True)
 
 
 def test_eligibility_supported_apollo_audio_visible():
     assert apollo_machine(APOLLO_AUDIO)
     assert hear_eligible(APOLLO_AUDIO, connected=True)
+    assert hear_eligible(APOLLO_AUDIO_LEGACY, connected=True)
     # 68080 without ApolloOS IdString still counts as Apollo machine identity.
+    assert hear_eligible(
+        {"os": "AmigaOS", "cpu": "68080", "audio": "49", "daemon_protocol": 6},
+        connected=True,
+    )
     assert hear_eligible(
         {"os": "AmigaOS", "cpu": "68080", "audio": "1", "daemon_protocol": 6},
         connected=True,

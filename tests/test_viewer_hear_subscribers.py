@@ -13,7 +13,7 @@ from amigent import viewer as viewer_module
 from amigent.channel import PLAIN_CLOSED
 from amigent.viewer import AUDIO_PCM_BURST, AUDIO_PCM_RATE, PcmPace, Viewer, pcm_message
 
-APOLLO_AUDIO = {"os": "ApolloOS", "cpu": "68080", "audio": "1", "daemon_protocol": 6}
+APOLLO_AUDIO = {"os": "ApolloOS", "cpu": "68080", "audio": "49", "daemon_protocol": 6}
 BLOCK = b"\x01\x00\x02\x00" * 2400  # 50 ms of 48 kHz stereo
 ON, OFF = {"t": "audio", "on": True}, {"t": "audio", "on": False}
 

@@ -54,7 +54,7 @@ class Page:
         self.got.append(data)
 
 
-def _page():
+def _page(audio: str = "49"):
     viewer = Viewer("192.0.2.10", screen_port=1, ctl_port=1)
     viewer.screen.flags = PLAIN_CLOSED
     viewer.online = True
@@ -63,8 +63,18 @@ def _page():
     viewer.sent = []
     viewer.broadcast = lambda data: viewer.sent.append(data)
     viewer.event = lambda kind, **fields: viewer.sent.append((kind, fields))
-    viewer.amiga = {"os": "ApolloOS", "cpu": "68080", "audio": "1", "daemon_protocol": 6}
+    viewer.amiga = {"os": "ApolloOS", "cpu": "68080", "audio": audio, "daemon_protocol": 6}
     return viewer
+
+
+def test_legacy_audio_1_hear_lifecycle_still_works():
+    viewer = _page(audio="1")
+    viewer.submit({"t": "audio", "on": True}, viewer.page)
+    link = Link()
+    link.reads = [(48000, b"\x01\x00\x02\x00"), None]
+    viewer._play_audio(link)
+    assert link.started == 1 and link.stopped == 1 and link.closed == 1
+    assert viewer.hear is False
 
 
 def test_hear_enable_and_disable_releases_once():
@@ -136,9 +146,11 @@ def test_unsupported_audio_capability_clears_request():
     viewer = _page()
     viewer.amiga = {}
     viewer.submit({"t": "audio", "on": True}, viewer.page)
-    # Ineligible capabilities never arm Hear (Apollo + protocol ≥ 6 + audio=1).
+    # Ineligible capabilities never arm Hear (Apollo + protocol >= 6 + audio=49 or legacy audio=1).
     assert not viewer._hearing() and not viewer._audio_ready()
     viewer.amiga = {"os": "AmigaOS", "audio": ""}
+    assert not viewer._audio_ready() and viewer.hear is False
+    viewer.amiga = {"os": "ApolloOS", "cpu": "68080", "audio": "49", "pip": "1", "daemon_protocol": 6}
     assert not viewer._audio_ready() and viewer.hear is False
 
 

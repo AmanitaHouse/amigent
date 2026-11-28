@@ -928,14 +928,22 @@ Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's a
 The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
 whenever something in `src/native/amiga/` changes and keeps them as an artifact of the run.
 
-For the Apollo build (`src/native/amiga/Makefile.apollo`), the AUDIO task
-lifecycle, per-page Hear subscription and PCM pacing changes have been verified
-by:
+For the Apollo build (`src/native/amiga/Makefile.apollo`), the native source
+under `src/native/amiga/` is aligned with upstream PR #50 (`CMD_EMU68 = 48`,
+`CMD_AUDIO = 49`, `audio=49`). Release builds default to ApolloCrossDev GCC 6.5
+with `-m68080` (with `amigent-apollo-probe` staying `-m68000`). The GitHub
+Actions GCC 16 `amiga` workflow additionally compile-verifies all three Apollo
+targets with `CC=m68k-amigaos-gcc CPU_FLAG=-m68020` into a separate
+compile-only CI artifact (`apollo-gcc16-compile-check-ci-only`, distinct from
+the classic `amiga-gcc` artifact); GCC 16 CI outputs are never copied into
+`src/amigent/amiga/bin/`, packaged into wheels, or treated as hardware-tested
+releases.
+
+Verification of the aligned AUDIO-49 native source so far covers only:
 
 - Compilation: `amigentd.apollo`, `amigent-apollo-probe` and
   `amigent-monitor.apollo` build without warnings with ApolloCrossDev GCC 6.5
-  (Stable and Dev); the GitHub Actions GCC 16 `amiga` workflow builds only the
-  classic binaries.
+  (`-m68080`) and with GCC 16 in CI (`-m68020` compile-only).
 - Simulation: the offline test suite runs the daemon's AUDIO task code against
   a simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
   PCM and pages.
@@ -943,7 +951,7 @@ by:
 Neither compilation nor simulation is physical V4-SA acceptance; hardware
 acceptance on a V4-SA remains separate.
 
-### Apollo AUDIO opcode alignment and hardware status
+### Apollo AUDIO opcode alignment, hybrid distribution and hardware status
 
 Upstream is authoritative for protocol opcode assignments:
 
@@ -956,10 +964,19 @@ Upstream is authoritative for protocol opcode assignments:
   opcode `38` on protocol 5) through an explicit legacy compatibility path.
   Ambiguous or contradictory capabilities (`audio=49` with `pip=1`, or `audio=1`
   / `audio=49` with `emu68=1`) fail closed.
-- **Hardware status:** the packaged fork `amigentd.apollo` (`audio=1`, legacy
-  opcode `48`) retains its prior V4-SA acceptance baseline and is not replaced
-  by this host-side alignment. The upstream native `AUDIO` opcode-49
-  implementation has not yet passed physical V4-SA acceptance.
+- **Intentional source-versus-packaged-binary distinction:** this fork retains
+  its hybrid distribution of the three hardware-tested ApolloCrossDev binaries
+  in `src/amigent/amiga/bin/` (`amigentd.apollo` with legacy `audio=1` on
+  opcode `48`, `amigent-apollo-probe`, and `amigent-monitor.apollo`) alongside
+  the upstream-aligned AUDIO-49 C source under `src/native/amiga/`. No
+  source/binary equivalence or physical V4-SA acceptance of the AUDIO-49 native
+  source is claimed; replacing the packaged `amigentd.apollo` requires a
+  separate ApolloCrossDev build and physical V4-SA acceptance.
+- **Known native hardware-advertisement caveat:** upstream's `AMIGENT_APOLLO`
+  `c_sysinfo()` currently emits `audio=49` outside the `is_apollo || AFF_68080`
+  check. Host-side `apollo_machine()` checks (in Viewer Hear and `amiga_listen`)
+  and runtime `arne.audio` driver lookup guard non-Apollo systems; tightening
+  the native advertisement guard is tracked separately for upstream submission.
 
 ## Translations
 

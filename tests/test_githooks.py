@@ -7,7 +7,7 @@ to GitHub or to this checkout's own hooks, configuration or remotes.
 Two worlds run the same cases:
 
 * ``SyntheticGuard`` builds a small history shaped like the real one (a verified
-  upstream tag, three reviewed upstream boundaries, upstream commits after them) and
+  upstream tag, four reviewed upstream boundaries, upstream commits after them) and
   substitutes only the pinned object ids. It runs everywhere, including a shallow CI
   checkout. Every substitution is asserted, so a refactor cannot make it silently stop
   testing the pins.
@@ -48,12 +48,14 @@ REAL = {
     "boundary_a": "f6aab1d4953c1d83be2f71e73faef6fa5dc236ff",
     "boundary_b": "8e576ad94d8c936a662dfd7375c31456341f49fd",
     "boundary_dfd": "dfd086194c918cd91f91626072d20ec6e605d1bf",
+    "boundary_pr50": "5a85d63c5aa8cb3ccacd716d806e81c8a7366543",
     "pre_main": "fbbecc78e4ae7135fa6b0e29eaff56dd77646642",
     "integration": "9d2d31750ca75ebe2b359886f277fc14e51d94bc",
     "merged_main": "ed701f327ff7df0063ec6010e651a0394278d44f",
-    "pr50": "5a85d63c5aa8cb3ccacd716d806e81c8a7366543",
 }
-PINNED = ("tag_object", "tag_commit", "boundary_a", "boundary_b", "boundary_dfd")
+PINNED = ("tag_object", "tag_commit", "boundary_a", "boundary_b", "boundary_dfd", "boundary_pr50")
+# Unreviewed upstream branch head after PR #50 (not pinned and not required in fresh fork clones).
+FEATURE_160 = "49fd75393087055453705a07b50c3361ef0dc9c4"
 
 
 def _find_sh():
@@ -234,12 +236,13 @@ def synthetic_chain(sb, work):
     ids["boundary_b"] = sb.commit(work, [ids["boundary_a"]], "upstream: screenshots", ANDREAS)
     mid = sb.commit(work, [ids["boundary_b"]], "upstream: PR 46 refactor", ANDREAS_NOREPLY)
     ids["boundary_dfd"] = sb.commit(work, [mid], "Merge #52: TLS-only and read-only", ANDREAS_NOREPLY, GITHUB)
-    p1 = sb.commit(work, [ids["boundary_dfd"]], "upstream: AUDIO opcode 49", ANDREAS)
-    ids["pr50"] = sb.commit(work, [p1], "Merge #50: source-only Apollo", ANDREAS_NOREPLY, GITHUB)
+    p1 = sb.commit(work, [ids["boundary_dfd"]], "upstream: AUDIO opcode 49", APPROVED)
+    ids["boundary_pr50"] = sb.commit(work, [ids["boundary_dfd"], p1], "Merge #50: source-only Apollo", ANDREAS)
+    ids["future_upstream"] = sb.commit(work, [ids["boundary_pr50"]], "upstream: feature/1.6.0 capture work", ANDREAS)
     return ids
 
 
-def build_synthetic(sb, name, origin_state, trim_dfd=False):
+def build_synthetic(sb, name, origin_state, trim_dfd=False, trim_pr50=False):
     work, bare = sb.root / name / "work", sb.root / name / "remote.git"
     work.mkdir(parents=True)
     sb.git("init", "-q", "-b", "main", str(work))
@@ -258,8 +261,13 @@ def build_synthetic(sb, name, origin_state, trim_dfd=False):
 
     def transform(fname, text):
         mapping = {REAL[k]: ids[k] for k in PINNED}
+        sep = " " if fname == "lib.sh" else "\n"
+        if trim_dfd or trim_pr50:
+            assert sep + REAL["boundary_pr50"] in text
+            text = text.replace(sep + REAL["boundary_pr50"], "")
+            assert REAL["boundary_pr50"] not in text
+            del mapping[REAL["boundary_pr50"]]
         if trim_dfd:  # the boundaries as they stood before PR #22
-            sep = " " if fname == "lib.sh" else "\n"
             assert sep + REAL["boundary_dfd"] in text
             text = text.replace(sep + REAL["boundary_dfd"], "")
             assert REAL["boundary_dfd"] not in text
@@ -296,6 +304,13 @@ def build_real(sb, name, origin_state, old_hooks_from=None, lib_edit=None):
     work.parent.mkdir(parents=True)
     sb.git("clone", "--shared", "--no-checkout", "-q", str(_source_repo()), str(work))
     ids = dict(REAL)
+    # Unreviewed post-PR-#50 commit descending from 5a85d63c (uses real feature/1.6.0 if present).
+    has_160 = sb.git("cat-file", "-t", FEATURE_160, cwd=work, check=False)
+    if has_160.returncode == 0 and has_160.stdout.strip() == "commit":
+        ids["future_upstream"] = FEATURE_160
+    else:
+        ids["future_upstream"] = sb.commit(work, [REAL["boundary_pr50"]],
+                                           "upstream: unreviewed post-PR-#50 work", ANDREAS)
     if origin_state == "orphan":
         ids["origin_tip"] = sb.commit(work, [], "fork: unrelated root", APPROVED)
     else:
@@ -370,6 +385,18 @@ class _GuardCases:
     def test_p2_pr_46_52_ancestry_through_dfd08619_passes(self):
         w = self.world("orphan")
         self.assertPushes(w, w.ids["boundary_dfd"], "dfd")
+
+    def test_p2c_pr_50_ancestry_through_5a85d63c_passes(self):
+        w = self.world("orphan")
+        self.assertPushes(w, w.ids["boundary_pr50"], "pr50")
+        w.reset()
+        # A normal two-parent fork merge of PR #50 authored by APPROVED passes too.
+        w_post = self.world("post")
+        merge = w_post.sb.commit(
+            w_post.work, [w_post.ids["merged_main"], w_post.ids["boundary_pr50"]],
+            "Merge upstream PR #50 ancestry", APPROVED,
+        )
+        self.assertPushes(w_post, merge, "pr50-merge")
 
     def test_p2b_integration_commit_passes_against_the_pre_merge_origin(self):
         w = self.world("pre")  # origin main is the previous fork main
@@ -534,12 +561,12 @@ class _GuardCases:
         copy = w.sb.commit(w.work, [w.ids["merged_main"]], w.git("log", "-1", "--format=%B", w.ids["boundary_dfd"]).stdout, ANDREAS)
         self.assertRejected(w, copy, "n7c")
 
-    def test_n8_upstream_pr_50_history_outside_the_pinned_ancestry(self):
+    def test_n8_post_pr_50_upstream_history_outside_the_pinned_ancestry(self):
         w = self.world("post")
-        tip = w.ids["pr50"]
+        tip = w.ids["future_upstream"]
         self.assertRejected(w, tip, "n8", mention=tip)
-        # Merging it into fork main under the approved identity does not launder it.
-        merge = w.sb.commit(w.work, [w.ids["merged_main"], tip], "Merge upstream PR 50", APPROVED)
+        # Merging unreviewed post-PR-#50 history under the approved identity does not launder it.
+        merge = w.sb.commit(w.work, [w.ids["merged_main"], tip], "Merge upstream feature/1.6.0", APPROVED)
         proc = self.assertRejected(w, merge, "n8b")
         self.assertNotIn(f"push rejected for {merge}", proc.stderr)  # the merge itself is approved
         self.assertIn(tip, proc.stderr)
@@ -569,10 +596,10 @@ class _GuardCases:
         text = lib.read_text()
         # The hook pins an id this repository cannot supply. Nothing else changes.
         absent = "e" * 40
-        self.assertIn(w.ids["boundary_dfd"], text)
-        lib.write_text(text.replace(w.ids["boundary_dfd"], absent), newline="\n")
+        self.assertIn(w.ids["boundary_pr50"], text)
+        lib.write_text(text.replace(w.ids["boundary_pr50"], absent), newline="\n")
         base = (git_dir / "hooks" / "upstream-baseline")
-        base.write_text(base.read_text().replace(w.ids["boundary_dfd"], absent), newline="\n")
+        base.write_text(base.read_text().replace(w.ids["boundary_pr50"], absent), newline="\n")
         child = w.forged(w.ids["origin_tip"], APPROVED)
         before = w.sb.snapshot(w.bare)
         proc = w.push(child, "heads/x")
@@ -605,9 +632,9 @@ class _GuardCases:
         hooks = Path(w.work) / ".git" / "hooks"
         base = hooks / "upstream-baseline"
         original = base.read_text()
-        pr50 = w.ids["pr50"]
+        future = w.ids["future_upstream"]
         child = w.forged(w.ids["origin_tip"], APPROVED)
-        for text, label in ((original.rstrip("\n") + "\n" + pr50 + "\n", "added boundary"),
+        for text, label in ((original.rstrip("\n") + "\n" + future + "\n", "added boundary"),
                             (original.rstrip("\n") + "\n\n  \nsomething\n", "trailing junk")):
             base.write_text(text, newline="\n")
             proc = w.push(child, "heads/x")
@@ -615,11 +642,11 @@ class _GuardCases:
             self.assertIn("Fail closed", proc.stderr, label)
         # A boundary in the file that the hook does not pin is refused, even if the file omits others.
         lines = original.splitlines()
-        base.write_text("\n".join(lines[:3] + [pr50]) + "\n", newline="\n")
+        base.write_text("\n".join(lines[:3] + [future]) + "\n", newline="\n")
         self.assertNotEqual(w.push(child, "heads/y").returncode, 0)
-        # And the pr50 tip is rejected as new history under the unmodified file.
+        # And the unreviewed future upstream tip is rejected as new history under the unmodified file.
         base.write_text(original, newline="\n")
-        self.assertRejected(w, pr50, "n12", mention=pr50)
+        self.assertRejected(w, future, "n12", mention=future)
 
     def test_n13_without_the_new_boundary_the_integration_push_is_rejected(self):
         """The root cause, reproduced: boundaries that stop short of dfd08619 reject PR #22's integration commit."""
@@ -627,16 +654,30 @@ class _GuardCases:
         proc = self.assertRejected(w, w.ids["integration"], "n13")
         self.assertIn("Andreas Wendorf", proc.stderr)
 
-    def test_n14_tracked_pins_are_exact_and_pr_50_is_not_trusted(self):
+    def test_n13c_without_the_pr50_boundary_pr50_merge_is_rejected(self):
+        """Boundaries that stop at dfd08619 reject upstream PR #50 (5a85d63c) and its fork merge."""
+        w = self.build_pre_pr50(f"own-pre-pr50-{type(self).__name__}")
+        tip = w.ids["boundary_pr50"]
+        self.assertRejected(w, tip, "n13c", mention=tip)
+        merge = w.sb.commit(w.work, [w.ids["merged_main"], tip], "Merge upstream PR #50", APPROVED)
+        proc = self.assertRejected(w, merge, "n13c-merge", mention=tip)
+        self.assertNotIn(f"push rejected for {merge}", proc.stderr)
+
+    def test_n14_tracked_pins_are_exact_and_future_upstream_is_not_trusted(self):
         lib = (HOOKS / "lib.sh").read_text()
         base = (HOOKS / "upstream-baseline").read_text().splitlines()
         self.assertEqual(base, ["refs/tags/upstream-v1.4.0", REAL["tag_object"], REAL["tag_commit"],
-                                REAL["boundary_a"], REAL["boundary_b"], REAL["boundary_dfd"]])
-        self.assertIn(f'trusted_boundaries="{REAL["boundary_a"]} {REAL["boundary_b"]} {REAL["boundary_dfd"]}"', lib)
-        for name in ("lib.sh", "pre-push", "pre-commit", "upstream-baseline", "activate", "README.md"):
+                                REAL["boundary_a"], REAL["boundary_b"], REAL["boundary_dfd"],
+                                REAL["boundary_pr50"]])
+        self.assertIn(
+            f'trusted_boundaries="{REAL["boundary_a"]} {REAL["boundary_b"]} '
+            f'{REAL["boundary_dfd"]} {REAL["boundary_pr50"]}"',
+            lib,
+        )
+        for name in ("lib.sh", "pre-push", "pre-commit", "upstream-baseline", "activate"):
             text = (HOOKS / name).read_text()
-            self.assertNotIn(REAL["pr50"], text, name)
-            self.assertNotIn(REAL["pr50"][:8], text, name)
+            self.assertNotIn(FEATURE_160, text, name)
+            self.assertNotIn(FEATURE_160[:8], text, name)
         # No wildcard, name or author rule has crept in.
         for word in ("Andreas", "akustikrausch", "refs/remotes/upstream", "refs/heads/upstream", "--no-verify", "BYPASS"):
             self.assertNotIn(word, lib + (HOOKS / "pre-push").read_text())
@@ -666,6 +707,9 @@ class SyntheticGuard(_GuardCases, unittest.TestCase):
     def build_old(self, name):
         return build_synthetic(self.sandbox, name, "pre", trim_dfd=True)
 
+    def build_pre_pr50(self, name):
+        return build_synthetic(self.sandbox, name, "post", trim_pr50=True)
+
 
 class RealHistoryGuard(_GuardCases, unittest.TestCase):
     @classmethod
@@ -682,6 +726,14 @@ class RealHistoryGuard(_GuardCases, unittest.TestCase):
         """The hooks tracked at the PR #22 merge, whose boundary stops at f6aab1d4, and the stale installed variant."""
         return build_real(self.sandbox, name, "pre", old_hooks_from=REAL["merged_main"])
 
+    def build_pre_pr50(self, name):
+        """The hooks as they stood before PR #50 integration (stopping at dfd08619)."""
+        def drop_pr50(fname, text):
+            sep = " " if fname == "lib.sh" else "\n"
+            assert sep + REAL["boundary_pr50"] in text
+            return text.replace(sep + REAL["boundary_pr50"], "")
+        return build_real(self.sandbox, name, "post", lib_edit=drop_pr50)
+
     def test_n13b_the_stale_installed_8e576ad9_variant_also_rejects(self):
         def edit(fname, text):
             return text.replace(REAL["boundary_a"], REAL["boundary_b"])
@@ -691,11 +743,20 @@ class RealHistoryGuard(_GuardCases, unittest.TestCase):
         self.assertNotIn(REAL["boundary_dfd"], text)
         self.assertRejected(w, w.ids["integration"], "n13b")
 
-    def test_n15_the_real_pr_50_commits_are_new_history(self):
+    def test_n15_the_real_pr_50_history_is_trusted_and_feature_160_is_rejected(self):
         w = self.world("post")
-        gone = w.sb.out("rev-list", "--count", REAL["pr50"], "--not", REAL["boundary_dfd"], REAL["merged_main"], cwd=w.work)
-        self.assertEqual(gone, "10")  # the ten upstream commits the fork does not have
-        self.assertRejected(w, REAL["pr50"], "n15", mention=REAL["pr50"])
+        gone = w.sb.out("rev-list", "--count", REAL["boundary_pr50"], "--not", REAL["boundary_dfd"], REAL["merged_main"], cwd=w.work)
+        self.assertEqual(gone, "10")  # the ten upstream PR #50 commits now covered by the 4th boundary
+        self.assertPushes(w, REAL["boundary_pr50"], "n15-pr50")
+        w.reset()
+        # Unreviewed post-PR-#50 upstream history (real feature/1.6.0 when present, or descendant) stays rejected.
+        has_160 = w.sb.git("cat-file", "-t", FEATURE_160, cwd=w.work, check=False)
+        if has_160.returncode == 0 and has_160.stdout.strip() == "commit":
+            ahead = w.sb.out("rev-list", "--count", FEATURE_160, "--not", REAL["boundary_pr50"], REAL["merged_main"], cwd=w.work)
+            self.assertEqual(ahead, "8")
+            self.assertRejected(w, FEATURE_160, "n15-160", mention=FEATURE_160)
+        else:
+            self.assertRejected(w, w.ids["future_upstream"], "n15-post", mention=w.ids["future_upstream"])
 
 
 if __name__ == "__main__":

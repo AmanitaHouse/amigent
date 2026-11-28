@@ -608,10 +608,21 @@ separated by tabs.
   amigentd lives (`PROGDIR:` and its name), for the job helper below.
 - From amigentd 1.5.0 SYSINFO also has `emu68`: present when EMU68 is
   understood, `1` when Emu68 runs on this Amiga, `0` otherwise.
-- Authoritative upstream Apollo builds advertise `audio=49` (`CMD_AUDIO` opcode
-  49) alongside `os=ApolloOS`, `board` and `board_name`. Existing packaged fork
-  Apollo builds advertise legacy `audio=1` (opcode 48 on protocol 6; opcode 38
-  on protocol 5). PIP is not advertised or allocated; opcode 50 is unassigned.
+- On Apollo builds (`AMIGENT_APOLLO`), `src/native/amiga/daemon/amigentd.c` is
+  aligned with upstream PR #50 and reports `os` (`ApolloOS` or `AmigaOS`),
+  `board` and `board_name` (from the SAGA board register when ApolloOS or
+  `AFF_68080` is present), `trace=0` (tracepoints stay refused until
+  hardware-validated on 68080), and `audio=49` (`CMD_AUDIO` opcode 49). Note
+  that upstream's `AMIGENT_APOLLO` `c_sysinfo()` currently emits `audio=49`
+  unconditionally outside the `is_apollo || AFF_68080` check; host-side
+  `apollo_machine()` checks and runtime `arne.audio` driver lookup guard
+  non-Apollo systems until that check is tightened upstream. On Apollo builds,
+  PEEK and POKE also refuse Apollo SAGA/PIP/VREG/ARNE MMIO windows.
+- Existing packaged fork Apollo binaries (including the shipped
+  `amigentd.apollo` with prior V4-SA acceptance) remain on the legacy `audio=1`
+  contract (opcode 48 on protocol 6; opcode 38 on protocol 5) until a future
+  ApolloCrossDev AUDIO-49 build completes separate physical V4-SA acceptance.
+  PIP is not advertised or allocated; opcode 50 is unassigned.
 - PEEK reads memory as it is, at most 64 KB: only where exec has a memory
   header (Chip and Fast RAM) and the Kickstart ROM ($F80000-$FFFFFF), so a
   read never touches custom chips, CIAs, expansion boards or nothing at all.

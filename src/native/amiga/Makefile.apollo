@@ -14,7 +14,10 @@ TOOLS := $(HERE)/tools
 
 GCC_FLAVOR ?= GCC-6.50-Stable
 PREFIX ?= $(APOLLOCROSSDEV)/Compilers/$(GCC_FLAVOR)
-CC ?= $(PREFIX)/bin/m68k-amigaos-gcc
+# Explicit := overrides GNU Make's built-in CC=cc default and ambient host CC
+# env vars so ApolloCrossDev builds never fall back to the host compiler; CI
+# overrides CC on the make command line (e.g. CC=m68k-amigaos-gcc).
+CC := $(PREFIX)/bin/m68k-amigaos-gcc
 CPU_FLAG ?= -m68080
 
 ifeq ($(shell command -v "$(CC)" 2>/dev/null),)
